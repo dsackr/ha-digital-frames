@@ -1,0 +1,94 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Fraimic Frame",
+        "description": "Make sure your frame is awake (tap it first), then enter its IP address below.",
+        "data": {
+          "host": "IP Address",
+          "name": "Frame Name"
+        },
+        "data_description": {
+          "host": "Your frame's local IP address",
+          "name": "A friendly name for this frame"
+        }
+      },
+      "pick_device": {
+        "title": "Choose a Fraimic Frame",
+        "description": "Select a frame discovered on your network.",
+        "data": {
+          "device": "Frame"
+        },
+        "data_description": {
+          "device": "Select the frame you want to add"
+        }
+      },
+      "name_device": {
+        "title": "Name Your Frame",
+        "description": "Give a friendly name to the frame at {host}.",
+        "data": {
+          "name": "Frame Name",
+          "resolution": "Resolution"
+        },
+        "data_description": {
+          "name": "A friendly name for this frame",
+          "resolution": "The physical print size of your frame"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect — make sure the frame is awake and on the same network",
+      "unknown": "Unexpected error",
+      "no_devices_found": "No Fraimic frames found on your network — try entering the IP address manually"
+    },
+    "abort": {
+      "already_configured": "This frame is already configured"
+    }
+  },
+  "services": {
+    "restart": {
+      "name": "Restart",
+      "description": "Restart a Fraimic frame.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "The config entry ID of the target frame."
+        }
+      }
+    },
+    "sleep": {
+      "name": "Sleep",
+      "description": "Put a Fraimic frame into deep sleep.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "The config entry ID of the target frame."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh Display",
+      "description": "Trigger a full display refresh on a Fraimic frame.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "The config entry ID of the target frame."
+        }
+      }
+    },
+    "send_image": {
+      "name": "Send Image",
+      "description": "Convert and upload an image to a Fraimic frame.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "The config entry ID of the target frame."
+        },
+        "media_path": {
+          "name": "Media Path",
+          "description": "Path to the image file in HA media storage (e.g. /media/local/art/painting.png)."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,49 @@
+send_image:
+  name: Send Image
+  description: Convert and send an image to a Fraimic frame.
+  fields:
+    entry_id:
+      name: Frame
+      description: The config entry ID of the target frame.
+      required: true
+      selector:
+        text:
+    media_path:
+      name: Image Path
+      description: Path to the image file (PNG, JPG, etc.) on the HA server.
+      required: true
+      selector:
+        text:
+
+refresh:
+  name: Refresh Display
+  description: Trigger a display refresh on a Fraimic frame.
+  fields:
+    entry_id:
+      name: Frame
+      description: The config entry ID of the target frame.
+      required: true
+      selector:
+        text:
+
+sleep:
+  name: Sleep
+  description: Put a Fraimic frame to sleep.
+  fields:
+    entry_id:
+      name: Frame
+      description: The config entry ID of the target frame.
+      required: true
+      selector:
+        text:
+
+restart:
+  name: Restart
+  description: Restart a Fraimic frame.
+  fields:
+    entry_id:
+      name: Frame
+      description: The config entry ID of the target frame.
+      required: true
+      selector:
+        text:
