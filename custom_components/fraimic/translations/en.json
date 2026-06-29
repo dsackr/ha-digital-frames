@@ -3,14 +3,12 @@
     "step": {
       "user": {
         "title": "Set up Fraimic Frame",
-        "description": "Make sure your frame is awake (tap it first), then enter its IP address below.",
+        "description": "No Fraimic frames were found automatically. Make sure your frame is awake (tap it first), then enter its IP address below — or leave blank to scan again.",
         "data": {
-          "host": "IP Address",
-          "name": "Frame Name"
+          "host": "IP Address"
         },
         "data_description": {
-          "host": "Your frame's local IP address",
-          "name": "A friendly name for this frame"
+          "host": "Your frame's local IP address (leave blank to re-scan)"
         }
       },
       "pick_device": {

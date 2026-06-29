@@ -107,54 +107,44 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Primary entry point. Manual IP entry or trigger a subnet scan."""
+        """Primary entry point. Auto-scan on first visit; fall back to manual IP."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             host = user_input.get(CONF_HOST, "").strip()
 
-            if host:
-                # --- Manual path ---
-                resolution = user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
-                width, height = FRAME_RESOLUTIONS[resolution]
-
+            if not host:
+                # User submitted the manual form with no IP — re-scan.
+                local_ip = self._get_local_ip()
+                self._discovered = await _scan_subnet(local_ip)
+                if self._discovered:
+                    return await self.async_step_pick_device()
+                errors["base"] = "no_devices_found"
+            else:
+                # Manual IP path — probe then go to name_device.
                 async with aiohttp.ClientSession() as session:
                     info = await _probe_frame(session, host, _PROBE_TIMEOUT)
 
                 if info is None:
                     errors[CONF_HOST] = "cannot_connect"
                 else:
-                    # Use reported IP if available, otherwise use what the user typed.
-                    unique_ip = info.get("wifi", {}).get("ip") or host
-                    await self.async_set_unique_id(unique_ip)
-                    self._abort_if_unique_id_configured()
+                    self._selected_host = host
+                    self._selected_info = info
+                    return await self.async_step_name_device()
 
-                    return self.async_create_entry(
-                        title=user_input[CONF_NAME],
-                        data={
-                            CONF_HOST: host,
-                            CONF_NAME: user_input[CONF_NAME],
-                            CONF_WIDTH: width,
-                            CONF_HEIGHT: height,
-                        },
-                    )
-            else:
-                # --- Scan path: probe the local /24 ---
-                local_ip = self._get_local_ip()
-                self._discovered = await _scan_subnet(local_ip)
+        else:
+            # First visit — auto-scan before showing anything.
+            local_ip = self._get_local_ip()
+            self._discovered = await _scan_subnet(local_ip)
+            if self._discovered:
+                return await self.async_step_pick_device()
+            # Nothing found; fall through and show the manual form.
+            errors["base"] = "no_devices_found"
 
-                if not self._discovered:
-                    errors["base"] = "no_devices_found"
-                else:
-                    return await self.async_step_pick_device()
-
+        # Manual entry fallback (shown when scan finds nothing or user re-scans).
         schema = vol.Schema(
             {
                 vol.Optional(CONF_HOST, default=""): str,
-                vol.Optional(CONF_NAME, default=""): str,
-                vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION): vol.In(
-                    list(FRAME_RESOLUTIONS.keys())
-                ),
             }
         )
 
@@ -162,9 +152,6 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "scan_hint": "Leave Host blank to scan your network automatically."
-            },
         )
 
     # ------------------------------------------------------------------
