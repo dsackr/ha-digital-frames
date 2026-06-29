@@ -157,15 +157,31 @@ def _quantize_to_spectra6(image: "Image.Image") -> "Image.Image":
     ).convert("RGB")
 
 
+def _nibble_for_pixel(quantized_image: "Image.Image", x: int, y: int) -> int:
+    """Look up the Spectra 6 nibble value for the pixel at (x, y)."""
+    r, g, b = quantized_image.load()[x, y]
+    try:
+        index = SPECTRA6_REAL_WORLD_RGB.index((r, g, b))
+    except ValueError:
+        raise ValueError(
+            f"Unexpected pixel colour ({r}, {g}, {b}) at ({x}, {y}). "
+            "Quantization should have constrained all pixels to the "
+            "Spectra 6 palette."
+        )
+    return SPECTRA6_NIBBLE_VALUES[index]
+
+
 def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     """
     Pack a quantized RGB image into the raw Spectra 6 binary format.
 
-    Scan order: y from *bottom* to *top*, x from *right* to *left*.
-    Within each byte: the high nibble carries the pixel at even x (after
-    reversal), the low nibble carries the pixel at odd x.
-
-    This matches the byte layout expected by the Fraimic API.
+    Scan order: y from *bottom* to *top*; within each row, columns are
+    grouped into (even_x, odd_x) pairs and those pairs are emitted from
+    right to left. High nibble = pixel at even x, low nibble = pixel at
+    odd x — this pairing is fixed regardless of image width, so it stays
+    correct whether the width is even or odd (previous nibble-by-nibble
+    parity tracking broke for even widths, since the first column visited
+    in reverse order is then odd, not even).
 
     :param quantized_image: RGB image whose pixels are restricted to the six
         entries of :data:`SPECTRA6_REAL_WORLD_RGB`.
@@ -173,33 +189,21 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     :raises ValueError: If a pixel colour does not match any palette entry
         (indicates a bug in the quantization step).
     """
-    pixels = quantized_image.load()
     raw: bytearray = bytearray()
-    pending_nibble: int = 0  # high nibble, held until we have a pair
+    width = quantized_image.width
 
     for y in reversed(range(quantized_image.height)):
-        for x in reversed(range(quantized_image.width)):
-            r, g, b = pixels[x, y]
-            try:
-                index = SPECTRA6_REAL_WORLD_RGB.index((r, g, b))
-            except ValueError:
-                raise ValueError(
-                    f"Unexpected pixel colour ({r}, {g}, {b}) at ({x}, {y}). "
-                    "Quantization should have constrained all pixels to the "
-                    "Spectra 6 palette."
-                )
-            nibble = SPECTRA6_NIBBLE_VALUES[index]
-
-            # After reversal, the pixel that started at even x becomes the
-            # *first* pixel encountered in each reversed row pair — it goes
-            # into the high nibble.  The pixel from odd x goes into the low
-            # nibble, completing the byte.
-            if (x & 1) == 0:
-                # Even x in original image → high nibble; stash it.
-                pending_nibble = nibble
+        for even_x in reversed(range(0, width, 2)):
+            high_nibble = _nibble_for_pixel(quantized_image, even_x, y)
+            odd_x = even_x + 1
+            if odd_x < width:
+                low_nibble = _nibble_for_pixel(quantized_image, odd_x, y)
             else:
-                # Odd x in original image → low nibble; emit the byte.
-                raw.append((pending_nibble << 4) | nibble)
+                # Odd total width — pad the missing partner pixel with white.
+                low_nibble = SPECTRA6_NIBBLE_VALUES[
+                    SPECTRA6_REAL_WORLD_RGB.index((232, 232, 232))
+                ]
+            raw.append((high_nibble << 4) | low_nibble)
 
     return bytes(raw)
 
