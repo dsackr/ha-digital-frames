@@ -24,7 +24,6 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import FraimicCoordinator
-from .http_api import FraimicSendImageView
 
 # panel_custom is a built-in HA component; import lazily to avoid load-order issues.
 _PANEL_URL  = "/fraimic/fraimic-panel.js"
@@ -77,6 +76,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     )
 
     # Register the image-upload HTTP endpoint.
+    from .http_api import FraimicSendImageView  # noqa: PLC0415
     hass.http.register_view(FraimicSendImageView())
 
     # Inject the Lovelace card JS so it's available on any dashboard.
