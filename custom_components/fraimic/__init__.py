@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import voluptuous as vol
 
@@ -12,6 +12,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     API_REFRESH,
@@ -33,16 +34,16 @@ _LOGGER = logging.getLogger(__name__)
 # Service schema definitions
 # ---------------------------------------------------------------------------
 
-_ENTRY_ID_SCHEMA = vol.Schema(
+_DEVICE_ID_SCHEMA = vol.Schema(
     {
-        vol.Required("entry_id"): cv.string,
+        vol.Required("device_id"): cv.string,
     }
 )
 
 _SEND_IMAGE_SCHEMA = vol.Schema(
     {
-        vol.Required("entry_id"): cv.string,
-        vol.Required("media_path"): cv.string,
+        vol.Required("device_id"): cv.string,
+        vol.Required("media_content_id"): cv.string,
     }
 )
 
@@ -52,7 +53,7 @@ _SEND_IMAGE_SCHEMA = vol.Schema(
 # ---------------------------------------------------------------------------
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     """Set up a Fraimic frame from a config entry."""
 
     coordinator = FraimicCoordinator(hass, entry)
@@ -76,7 +77,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     """Unload a Fraimic config entry."""
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -95,7 +96,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: "ConfigEntry") -> None:
     """Handle config entry option updates (e.g. scan_interval changes)."""
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -105,39 +106,85 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 # ---------------------------------------------------------------------------
 
 
-def _get_coordinator(hass: HomeAssistant, entry_id: str) -> FraimicCoordinator:
-    """Return the coordinator for the given entry_id, or raise."""
-    try:
-        return hass.data[DOMAIN][entry_id]  # type: ignore[return-value]
-    except KeyError as err:
-        raise HomeAssistantError(
-            f"No Fraimic frame found with entry_id '{entry_id}'"
-        ) from err
+def _get_coordinator_by_device_id(
+    hass: HomeAssistant, device_id: str
+) -> tuple[FraimicCoordinator, str]:
+    """Return (coordinator, entry_id) for the given device_id, or raise."""
+    dev_reg = dr.async_get(hass)
+    device_entry = dev_reg.async_get(device_id)
+    if device_entry is None:
+        raise HomeAssistantError(f"Device '{device_id}' not found in device registry")
+
+    domain_data: dict[str, FraimicCoordinator] = hass.data.get(DOMAIN, {})
+    for entry_id in device_entry.config_entries:
+        if entry_id in domain_data:
+            return domain_data[entry_id], entry_id
+
+    raise HomeAssistantError(
+        f"No Fraimic coordinator found for device '{device_id}'"
+    )
+
+
+async def _resolve_media_path(hass: HomeAssistant, media_content_id: str) -> str:
+    """Resolve a media content_id or path string to an absolute filesystem path."""
+    if media_content_id.startswith("media-source://"):
+        # Resolve via the HA media_source component.
+        try:
+            from homeassistant.components.media_source import (  # noqa: PLC0415
+                async_resolve_media,
+            )
+
+            media_item = await async_resolve_media(hass, media_content_id, None)
+            url: str = media_item.url
+
+            # The resolved URL looks like /media/local/path/to/file.jpg
+            prefix = "/media/local/"
+            if url.startswith(prefix):
+                local_dir = hass.config.media_dirs.get(
+                    "local", hass.config.path("media")
+                )
+                return os.path.join(local_dir, url[len(prefix):])
+
+            raise HomeAssistantError(
+                f"Cannot access non-local media URL: {url}"
+            )
+        except ImportError as err:
+            raise HomeAssistantError(
+                "media_source component is not available"
+            ) from err
+
+    # Legacy /media/<path> format
+    if media_content_id.startswith("/media/"):
+        local_dir = hass.config.media_dirs.get("local", hass.config.path("media"))
+        return os.path.join(local_dir, media_content_id[len("/media/"):])
+
+    # Treat as an absolute filesystem path.
+    return media_content_id
 
 
 def _register_services(hass: HomeAssistant) -> None:
     """Register all Fraimic services."""
 
     async def _handle_restart(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass, call.data["entry_id"])
+        coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
         await coordinator.async_send_command(API_RESTART)
         _LOGGER.info("Restart command sent to frame %s", coordinator.host)
 
     async def _handle_sleep(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass, call.data["entry_id"])
+        coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
         await coordinator.async_send_command(API_SLEEP)
         _LOGGER.info("Sleep command sent to frame %s", coordinator.host)
 
     async def _handle_refresh(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass, call.data["entry_id"])
+        coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
         await coordinator.async_send_command(API_REFRESH)
         _LOGGER.info("Refresh command sent to frame %s", coordinator.host)
 
     async def _handle_send_image(call: ServiceCall) -> None:
-        entry_id: str = call.data["entry_id"]
-        media_path: str = call.data["media_path"]
+        device_id: str = call.data["device_id"]
+        media_content_id: str = call.data["media_content_id"]
 
-        coordinator = _get_coordinator(hass, entry_id)
+        coordinator, entry_id = _get_coordinator_by_device_id(hass, device_id)
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None:
             raise HomeAssistantError(f"Config entry '{entry_id}' not found")
@@ -145,22 +192,11 @@ def _register_services(hass: HomeAssistant) -> None:
         width: int = entry.data[CONF_WIDTH]
         height: int = entry.data[CONF_HEIGHT]
 
-        # Resolve a HA media-source path to an absolute filesystem path.
-        # Paths starting with /media/ are served from hass.config.media_dir.
-        if media_path.startswith("/media/"):
-            abs_path = os.path.join(
-                hass.config.media_dirs.get("local", hass.config.path("media")),
-                media_path[len("/media/"):],
-            )
-        else:
-            abs_path = media_path
+        abs_path = await _resolve_media_path(hass, media_content_id)
 
         if not os.path.isfile(abs_path):
-            raise HomeAssistantError(
-                f"Media file not found: {abs_path}"
-            )
+            raise HomeAssistantError(f"Media file not found: {abs_path}")
 
-        # Import here to avoid a hard dependency at module load time.
         from .image_converter import convert_image  # noqa: PLC0415
 
         try:
@@ -182,13 +218,13 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
     hass.services.async_register(
-        DOMAIN, "restart", _handle_restart, schema=_ENTRY_ID_SCHEMA
+        DOMAIN, "restart", _handle_restart, schema=_DEVICE_ID_SCHEMA
     )
     hass.services.async_register(
-        DOMAIN, "sleep", _handle_sleep, schema=_ENTRY_ID_SCHEMA
+        DOMAIN, "sleep", _handle_sleep, schema=_DEVICE_ID_SCHEMA
     )
     hass.services.async_register(
-        DOMAIN, "refresh", _handle_refresh, schema=_ENTRY_ID_SCHEMA
+        DOMAIN, "refresh", _handle_refresh, schema=_DEVICE_ID_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, "send_image", _handle_send_image, schema=_SEND_IMAGE_SCHEMA

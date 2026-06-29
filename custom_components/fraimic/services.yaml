@@ -1,49 +1,60 @@
 send_image:
   name: Send Image
-  description: Convert and send an image to a Fraimic frame.
+  description: Convert and send an image to a Fraimic e-ink frame.
   fields:
-    entry_id:
+    device_id:
       name: Frame
-      description: The config entry ID of the target frame.
+      description: The Fraimic frame to send the image to.
       required: true
       selector:
-        text:
-    media_path:
-      name: Image Path
-      description: Path to the image file (PNG, JPG, etc.) on the HA server.
+        device:
+          integration: fraimic
+    media_content_id:
+      name: Image
+      description: Image to send (select from your media library).
       required: true
       selector:
-        text:
+        media:
+          accept:
+            - image/jpeg
+            - image/png
+            - image/gif
+            - image/webp
+            - image/bmp
+            - image/tiff
+
+restart:
+  name: Restart Frame
+  description: Restart a Fraimic frame.
+  fields:
+    device_id:
+      name: Frame
+      description: The Fraimic frame to restart.
+      required: true
+      selector:
+        device:
+          integration: fraimic
+
+sleep:
+  name: Sleep Frame
+  description: Put a Fraimic frame into sleep mode.
+  fields:
+    device_id:
+      name: Frame
+      description: The Fraimic frame to put to sleep.
+      required: true
+      selector:
+        device:
+          integration: fraimic
 
 refresh:
   name: Refresh Display
   description: Trigger a display refresh on a Fraimic frame.
   fields:
-    entry_id:
+    device_id:
       name: Frame
-      description: The config entry ID of the target frame.
+      description: The Fraimic frame to refresh.
       required: true
       selector:
-        text:
-
-sleep:
-  name: Sleep
-  description: Put a Fraimic frame to sleep.
-  fields:
-    entry_id:
-      name: Frame
-      description: The config entry ID of the target frame.
-      required: true
-      selector:
-        text:
-
-restart:
-  name: Restart
-  description: Restart a Fraimic frame.
-  fields:
-    entry_id:
-      name: Frame
-      description: The config entry ID of the target frame.
-      required: true
-      selector:
-        text:
+        device:
+          integration: fraimic
