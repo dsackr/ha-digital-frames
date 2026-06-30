@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '0.1.5';
+  const PANEL_VERSION = '0.1.6';
 
   // -------------------------------------------------------------------------
   // Styles
@@ -207,7 +207,7 @@
     async _discoverFrames() {
       try {
         const [entries, devices, entities] = await Promise.all([
-          this._hass.callWS({ type: 'config_entries/list', domain: 'fraimic' }),
+          this._hass.callWS({ type: 'config_entries/get', domain: 'fraimic' }),
           this._hass.callWS({ type: 'config/device_registry/list' }),
           this._hass.callWS({ type: 'config/entity_registry/list' }),
         ]);
