@@ -6,9 +6,20 @@ expected by the Fraimic API for its E Ink Spectra 6 display.
 
 Binary format specification
 ----------------------------
+Confirmed against Fraimic's own reference converter
+(github.com/Fraimic/fraimic_bin_converter, EL133UF1 / Spectra 6 13.3"):
+
 - 4 bits per pixel (one nibble)
-- 2 pixels packed per byte: high nibble = pixel at even x, low nibble = pixel at odd x
-- Pixels are written in reverse scan order: y from bottom to top, x from right to left
+- 2 pixels packed per byte: high nibble = pixel at even x, low nibble = pixel
+  at odd x
+- Pixels are scanned in normal row-major order: y from top to bottom, x from
+  left to right
+- Each row is split into a LEFT half (columns 0 .. width//2 - 1) and a RIGHT
+  half (columns width//2 .. width - 1). ALL left-half bytes for the entire
+  image come first (every row, top to bottom), followed by ALL right-half
+  bytes (every row, top to bottom). This matches the panel's physical
+  construction as two side-by-side half-width e-ink halves, each driven from
+  its own contiguous block of the buffer.
 - Nibble values map to Spectra 6 colors (note: value 4 is unused by the hardware):
     0 = Black
     1 = White
@@ -23,26 +34,7 @@ Conversion pipeline
 2. Auto-rotate to match target orientation (landscape vs portrait) if needed
 3. Resize to fit target dimensions while preserving aspect ratio; letterbox with white fill
 4. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg dithering
-5. Remap pixels to compensate for the frame's dual-half-panel hardware addressing
-   (see _remap_for_dual_panel_hardware for details)
-6. Pack pixels into the nibble format described above
-
-Hardware quirk: dual half-panel addressing
--------------------------------------------
-The physical display is built from two side-by-side half-width e-ink panels
-(each width // 2 wide). The firmware does not address the incoming byte
-buffer as a single `width` x `height` raster -- it reinterprets the exact
-same bytes as a (width // 2) x (height * 2) raster (using the same
-bottom-to-top / right-to-left scan convention used to pack them), then
-splits that taller, narrower raster in half: the first `height` rows go to
-the RIGHT physical panel (flipped vertically), and the remaining `height`
-rows go to the LEFT physical panel (flipped vertically).
-
-Without compensating for this, a normally-packed image displays as two
-scrambled, vertically-flipped, left/right-swapped halves. We compensate by
-pre-scrambling pixels (_remap_for_dual_panel_hardware) before packing, so
-that after the firmware applies its own (fixed) reinterpretation, the
-visible result matches the original image.
+5. Pack pixels into the left-half-then-right-half nibble format described above
 """
 
 from __future__ import annotations
@@ -190,69 +182,37 @@ def _nibble_for_pixel(quantized_image: "Image.Image", x: int, y: int) -> int:
     return SPECTRA6_NIBBLE_VALUES[index]
 
 
-def _remap_for_dual_panel_hardware(image: "Image.Image") -> "Image.Image":
-    """
-    Pre-scramble pixels to compensate for the frame's dual half-panel
-    hardware addressing (see module docstring for the full explanation).
-
-    The firmware reinterprets the packed byte buffer as a
-    (width // 2) x (height * 2) raster using the same scan convention used
-    to pack it, then shows the first `height` rows of that raster (flipped
-    vertically) on the RIGHT physical panel and the remaining `height` rows
-    (flipped vertically) on the LEFT physical panel.
-
-    This function computes, for every source pixel, where it will actually
-    end up once the firmware applies that transform, and places the desired
-    final pixel there instead -- so the *displayed* result matches the
-    input image once it passes through the firmware's transform.
-
-    :param image: RGB image already quantized to the Spectra 6 palette.
-    :returns: A new RGB image of the same size, with pixels rearranged so
-        that packing and sending it produces a correct on-frame display.
-    """
-    width, height = image.size
-    half_width = width // 2
-    src_pixels = image.load()
-
-    remapped = Image.new("RGB", (width, height))
-    dst_pixels = remapped.load()
-
-    for y in range(height):
-        for x in range(width):
-            if x < half_width:
-                strip_x, strip_y = x, 2 * y
-            else:
-                strip_x, strip_y = x - half_width, 2 * y + 1
-
-            if strip_y < height:
-                # Lands in the firmware's first half-raster -> RIGHT panel.
-                panel_is_right = True
-                y_within_half = strip_y
-            else:
-                # Lands in the firmware's second half-raster -> LEFT panel.
-                panel_is_right = False
-                y_within_half = strip_y - height
-
-            # The firmware flips each half vertically before displaying it.
-            final_y = (height - 1) - y_within_half
-            final_x = strip_x + half_width if panel_is_right else strip_x
-
-            dst_pixels[x, y] = src_pixels[final_x, final_y]
-
-    return remapped
+def _pack_row_half(
+    quantized_image: "Image.Image", y: int, start_x: int, end_x: int
+) -> bytes:
+    """Pack columns [start_x, end_x) of row *y* into bytes (ascending pairs)."""
+    out = bytearray()
+    width = quantized_image.width
+    for x in range(start_x, end_x, 2):
+        high_nibble = _nibble_for_pixel(quantized_image, x, y)
+        odd_x = x + 1
+        if odd_x < end_x and odd_x < width:
+            low_nibble = _nibble_for_pixel(quantized_image, odd_x, y)
+        else:
+            # Odd-width half — pad the missing partner pixel with white.
+            low_nibble = SPECTRA6_NIBBLE_VALUES[
+                SPECTRA6_REAL_WORLD_RGB.index((232, 232, 232))
+            ]
+        out.append((high_nibble << 4) | low_nibble)
+    return bytes(out)
 
 
 def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     """
     Pack a quantized RGB image into the raw Spectra 6 binary format.
 
-    Scan order: y from *bottom* to *top*; within each row, columns are
-    grouped into (even_x, odd_x) pairs and those pairs are emitted from
-    right to left. High nibble = pixel at even x, low nibble = pixel at
-    odd x — this pairing is fixed regardless of image width, so it stays
-    correct whether the width is even or odd (previous nibble-by-nibble
-    parity tracking broke for even widths, since the first column visited
-    in reverse order is then odd, not even).
+    Scan order (confirmed against Fraimic's own reference converter): rows
+    are visited top to bottom, columns left to right within each half. Each
+    row is split at the midpoint into a left half and a right half. All
+    left-half bytes for the whole image are emitted first (row by row, top
+    to bottom), followed by all right-half bytes (row by row, top to
+    bottom) — matching the panel's two physical half-width e-ink halves,
+    each driven from its own contiguous block of the buffer.
 
     :param quantized_image: RGB image whose pixels are restricted to the six
         entries of :data:`SPECTRA6_REAL_WORLD_RGB`.
@@ -260,23 +220,18 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     :raises ValueError: If a pixel colour does not match any palette entry
         (indicates a bug in the quantization step).
     """
-    raw: bytearray = bytearray()
     width = quantized_image.width
+    height = quantized_image.height
+    half = width // 2
 
-    for y in reversed(range(quantized_image.height)):
-        for even_x in reversed(range(0, width, 2)):
-            high_nibble = _nibble_for_pixel(quantized_image, even_x, y)
-            odd_x = even_x + 1
-            if odd_x < width:
-                low_nibble = _nibble_for_pixel(quantized_image, odd_x, y)
-            else:
-                # Odd total width — pad the missing partner pixel with white.
-                low_nibble = SPECTRA6_NIBBLE_VALUES[
-                    SPECTRA6_REAL_WORLD_RGB.index((232, 232, 232))
-                ]
-            raw.append((high_nibble << 4) | low_nibble)
+    left_bytes = bytearray()
+    right_bytes = bytearray()
 
-    return bytes(raw)
+    for y in range(height):
+        left_bytes.extend(_pack_row_half(quantized_image, y, 0, half))
+        right_bytes.extend(_pack_row_half(quantized_image, y, half, width))
+
+    return bytes(left_bytes) + bytes(right_bytes)
 
 
 def _open_as_rgb(source: "str | bytes") -> "Image.Image":
@@ -324,7 +279,7 @@ def convert_image(image_path: str, width: int, height: int) -> bytes:
     3. Resize / letterbox to *width* × *height* with a white background.
     4. Quantize to the 6 Spectra 6 palette colours with Floyd-Steinberg
        dithering.
-    5. Pack pixels into 4-bit nibbles in reverse scan order.
+    5. Pack pixels into 4-bit nibbles, left-half-then-right-half (see module docstring).
 
     :param image_path: Path to the source image file.
     :param width: Target display width in pixels.
@@ -363,5 +318,4 @@ def _process(image: "Image.Image", width: int, height: int) -> bytes:
     image = _auto_rotate(image, width, height)
     image = _resize_with_letterbox(image, width, height)
     image = _quantize_to_spectra6(image)
-    image = _remap_for_dual_panel_hardware(image)
     return _pack_to_spectra6_bin(image)
