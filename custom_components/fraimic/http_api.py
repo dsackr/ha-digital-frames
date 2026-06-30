@@ -15,6 +15,47 @@ from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+def resolve_frame_by_entity(hass, entity_id: str):
+    """Resolve a Fraimic entity_id to (coordinator, config_entry).
+
+    Shared by FraimicSendImageView and the library HTTP views so both the
+    direct upload-and-send flow and the library send-from-library flow agree
+    on how a frame is located. Raises ValueError with a user-facing message
+    on any resolution failure.
+    """
+    ent_reg = er.async_get(hass)
+    entity_entry = ent_reg.async_get(entity_id)
+    if entity_entry is None:
+        raise ValueError(f"Entity '{entity_id}' not found")
+
+    dev_reg = dr.async_get(hass)
+    device_entry = (
+        dev_reg.async_get(entity_entry.device_id)
+        if entity_entry.device_id
+        else None
+    )
+    if device_entry is None:
+        raise ValueError("No device found for entity")
+
+    domain_data: dict = hass.data.get(DOMAIN, {})
+    coordinator = None
+    entry_id_found: str | None = None
+    for eid in device_entry.config_entries:
+        if eid in domain_data:
+            coordinator = domain_data[eid]
+            entry_id_found = eid
+            break
+
+    if coordinator is None or entry_id_found is None:
+        raise ValueError("No Fraimic coordinator found for this device")
+
+    entry = hass.config_entries.async_get_entry(entry_id_found)
+    if entry is None:
+        raise ValueError("Config entry not found")
+
+    return coordinator, entry
+
+
 class FraimicSendImageView(HomeAssistantView):
     """Handle POST /api/fraimic/send_image.
 
@@ -54,39 +95,10 @@ class FraimicSendImageView(HomeAssistantView):
             return self.json_message("Uploaded file is empty", status_code=400)
 
         # Resolve entity_id → device → config entry → coordinator.
-        ent_reg = er.async_get(hass)
-        entity_entry = ent_reg.async_get(entity_id)
-        if entity_entry is None:
-            return self.json_message(f"Entity '{entity_id}' not found", status_code=404)
-
-        dev_reg = dr.async_get(hass)
-        device_entry = (
-            dev_reg.async_get(entity_entry.device_id)
-            if entity_entry.device_id
-            else None
-        )
-        if device_entry is None:
-            return self.json_message(
-                "No device found for entity", status_code=404
-            )
-
-        domain_data: dict = hass.data.get(DOMAIN, {})
-        coordinator = None
-        entry_id_found: str | None = None
-        for eid in device_entry.config_entries:
-            if eid in domain_data:
-                coordinator = domain_data[eid]
-                entry_id_found = eid
-                break
-
-        if coordinator is None or entry_id_found is None:
-            return self.json_message(
-                "No Fraimic coordinator found for this device", status_code=404
-            )
-
-        entry = hass.config_entries.async_get_entry(entry_id_found)
-        if entry is None:
-            return self.json_message("Config entry not found", status_code=404)
+        try:
+            coordinator, entry = resolve_frame_by_entity(hass, entity_id)
+        except ValueError as err:
+            return self.json_message(str(err), status_code=404)
 
         width: int = entry.data[CONF_WIDTH]
         height: int = entry.data[CONF_HEIGHT]

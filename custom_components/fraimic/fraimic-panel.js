@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '0.1.6';
+  const PANEL_VERSION = '0.2.0';
 
   // -------------------------------------------------------------------------
   // Styles
@@ -151,6 +151,60 @@
     }
     .empty h2 { margin: 12px 0 8px; font-size: 18px; color: var(--primary-text-color); }
     .empty p  { margin: 0; font-size: 14px; line-height: 1.6; }
+
+    /* ---- library ---- */
+    h2.section-title {
+      margin: 36px 0 16px;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .lib-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .lib-backend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--secondary-text-color);
+    }
+    .lib-backend select, .lib-card select {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, rgba(0,0,0,.15));
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      font-size: 13px;
+    }
+    .lib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .lib-thumb {
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--secondary-background-color, #f1f5f9);
+      margin-bottom: 10px;
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .lib-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .lib-card .btns select { flex: 1; }
   `;
 
   // -------------------------------------------------------------------------
@@ -165,6 +219,10 @@
       this._loaded   = false;
       this._stateMap = {};   // entityId → { battery, available }
       this._cards    = {};   // entityId → { dom refs + state }
+
+      this._library      = [];        // [{ image_id, filename, content_type, resolutions }]
+      this._backend       = 'local';  // active library storage backend
+      this._libThumbUrls  = {};       // image_id → blob: URL (revoked on re-render)
     }
 
     // HA sets this whenever state changes.
@@ -183,8 +241,12 @@
 
     async _init() {
       this._buildShell();
+      this._wireLibraryToolbar();
       await this._discoverFrames();
       this._renderFrames();
+      await this._loadBackendSettings();
+      await this._loadLibrary();
+      this._renderLibrary();
     }
 
     _buildShell() {
@@ -195,6 +257,29 @@
           <div class="empty">
             <div style="font-size:36px">⏳</div>
             <h2>Discovering frames…</h2>
+          </div>
+        </div>
+
+        <h2 class="section-title">📚 Library</h2>
+        <div class="lib-toolbar">
+          <div class="lib-backend">
+            <label for="backend-select">Storage:</label>
+            <select id="backend-select">
+              <option value="local">Local (this Home Assistant)</option>
+              <option value="google_drive">Google Drive</option>
+              <option value="dropbox">Dropbox</option>
+            </select>
+          </div>
+          <button class="btn-primary" id="lib-upload-btn"
+            style="flex:0 0 auto;padding-left:14px;padding-right:14px">⬆ Upload to Library</button>
+          <input type="file" id="lib-upload-input"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/*">
+        </div>
+        <div class="feedback" id="lib-fb"></div>
+        <div class="lib-grid" id="lib-grid">
+          <div class="empty">
+            <div style="font-size:36px">⏳</div>
+            <h2>Loading library…</h2>
           </div>
         </div>
       `;
@@ -376,15 +461,9 @@
       form.append('entity_id', entityId);
       form.append('image', card.file);
 
-      let token;
-      try { token = this._hass.auth.data.access_token; } catch (_) {}
-
-      const headers = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       try {
         const resp = await fetch('/api/fraimic/send_image', {
-          method: 'POST', headers, body: form,
+          method: 'POST', headers: this._authHeaders(), body: form,
         });
         let result;
         try { result = await resp.json(); } catch (_) { result = {}; }
@@ -439,8 +518,241 @@
     }
 
     // -----------------------------------------------------------------------
+    // Library: toolbar wiring
+    // -----------------------------------------------------------------------
+
+    _wireLibraryToolbar() {
+      const uploadBtn     = this.shadowRoot.getElementById('lib-upload-btn');
+      const uploadInput   = this.shadowRoot.getElementById('lib-upload-input');
+      const backendSelect = this.shadowRoot.getElementById('backend-select');
+
+      uploadBtn.addEventListener('click', () => uploadInput.click());
+
+      uploadInput.addEventListener('change', e => {
+        const file = e.target.files && e.target.files[0];
+        if (file) this._onLibraryFile(file);
+      });
+
+      backendSelect.addEventListener('change', e => this._onBackendChange(e));
+    }
+
+    // -----------------------------------------------------------------------
+    // Library: backend settings
+    // -----------------------------------------------------------------------
+
+    async _loadBackendSettings() {
+      try {
+        const resp = await fetch('/api/fraimic/library/settings', { headers: this._authHeaders() });
+        const result = await resp.json();
+        this._backend = result.backend || 'local';
+      } catch (err) {
+        console.warn('[fraimic-panel] could not load library settings:', err);
+      }
+      const sel = this.shadowRoot.getElementById('backend-select');
+      if (sel) sel.value = this._backend;
+    }
+
+    async _onBackendChange(e) {
+      const fb          = this.shadowRoot.getElementById('lib-fb');
+      const newBackend  = e.target.value;
+      const prevBackend = this._backend;
+
+      try {
+        const resp = await fetch('/api/fraimic/library/settings', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend: newBackend }),
+        });
+        const result = await resp.json().catch(() => ({}));
+
+        if (resp.ok && result.success) {
+          this._backend = newBackend;
+          fb.className = 'feedback ok';
+          fb.textContent = `✓ Storage set to ${newBackend.replace('_', ' ')}`;
+        } else {
+          e.target.value = prevBackend;
+          fb.className = 'feedback err';
+          fb.textContent = result.message || resp.statusText || `HTTP ${resp.status}`;
+        }
+      } catch (err) {
+        e.target.value = prevBackend;
+        fb.className = 'feedback err';
+        fb.textContent = `Network error: ${err.message}`;
+      }
+      fb.style.display = 'block';
+      setTimeout(() => { fb.style.display = 'none'; }, 5000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Library: list + render
+    // -----------------------------------------------------------------------
+
+    async _loadLibrary() {
+      try {
+        const resp = await fetch('/api/fraimic/library/list', { headers: this._authHeaders() });
+        const result = await resp.json();
+        this._library = result.images || [];
+        if (result.backend) this._backend = result.backend;
+      } catch (err) {
+        console.error('[fraimic-panel] library load failed:', err);
+        this._library = [];
+      }
+    }
+
+    _renderLibrary() {
+      const grid = this.shadowRoot.getElementById('lib-grid');
+
+      // Release previously-fetched thumbnail blob URLs before re-rendering.
+      for (const url of Object.values(this._libThumbUrls)) URL.revokeObjectURL(url);
+      this._libThumbUrls = {};
+
+      if (!this._library.length) {
+        grid.innerHTML = `
+          <div class="empty">
+            <div style="font-size:48px">📚</div>
+            <h2>Library is empty</h2>
+            <p>Upload an image above to add it to the shared library. It's converted
+               once per frame resolution and reused by every frame that matches —
+               no need to re-upload per frame.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = '';
+      for (const image of this._library) {
+        grid.appendChild(this._buildLibraryCard(image));
+      }
+    }
+
+    _buildLibraryCard(image) {
+      const el  = document.createElement('div');
+      el.className = 'card lib-card';
+      const sid = this._sid(image.image_id);
+
+      const frameOptions = this._frames.map(f =>
+        `<option value="${this._esc(f.entityId)}">${this._esc(f.title)}</option>`
+      ).join('');
+
+      el.innerHTML = `
+        <div class="lib-thumb" id="thumb-${sid}">
+          <div style="font-size:32px;text-align:center;padding:30px 0">🖼</div>
+        </div>
+        <div class="preview-name">${this._esc(image.filename)}</div>
+        <div class="btns" style="margin-top:10px">
+          <select id="frame-select-${sid}" ${this._frames.length ? '' : 'disabled'}>
+            ${frameOptions || '<option>No frames available</option>'}
+          </select>
+          <button class="btn-primary" id="lib-send-${sid}" ${this._frames.length ? '' : 'disabled'}>⬆ Send</button>
+        </div>
+        <div class="feedback" id="lib-card-fb-${sid}"></div>
+      `;
+
+      this._loadThumbnail(image.image_id, el.querySelector(`#thumb-${sid}`));
+
+      el.querySelector(`#lib-send-${sid}`).addEventListener('click', () => {
+        const entityId = el.querySelector(`#frame-select-${sid}`).value;
+        if (entityId) this._sendFromLibrary(image.image_id, entityId, el, sid);
+      });
+
+      return el;
+    }
+
+    async _loadThumbnail(imageId, container) {
+      try {
+        const resp = await fetch(`/api/fraimic/library/image/${imageId}`, { headers: this._authHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        this._libThumbUrls[imageId] = url;
+        container.innerHTML = `<img src="${url}" alt="">`;
+      } catch (err) {
+        console.warn('[fraimic-panel] thumbnail load failed:', err);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Library: upload
+    // -----------------------------------------------------------------------
+
+    async _onLibraryFile(file) {
+      const fb = this.shadowRoot.getElementById('lib-fb');
+      fb.style.display = 'none';
+
+      const form = new FormData();
+      form.append('image', file);
+
+      try {
+        const resp = await fetch('/api/fraimic/library/upload', {
+          method: 'POST', headers: this._authHeaders(), body: form,
+        });
+        const result = await resp.json().catch(() => ({}));
+
+        if (resp.ok && result.success) {
+          fb.className = 'feedback ok';
+          fb.textContent = '✓ Added to library';
+          await this._loadLibrary();
+          this._renderLibrary();
+        } else {
+          fb.className = 'feedback err';
+          fb.textContent = `Upload failed: ${result.message || resp.statusText || resp.status}`;
+        }
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Network error: ${err.message}`;
+      }
+      fb.style.display = 'block';
+      this.shadowRoot.getElementById('lib-upload-input').value = '';
+    }
+
+    // -----------------------------------------------------------------------
+    // Library: send to frame
+    // -----------------------------------------------------------------------
+
+    async _sendFromLibrary(imageId, entityId, el, sid) {
+      const btn = el.querySelector(`#lib-send-${sid}`);
+      const fb  = el.querySelector(`#lib-card-fb-${sid}`);
+      const prevText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Sending…';
+
+      const form = new FormData();
+      form.append('entity_id', entityId);
+      form.append('image_id', imageId);
+
+      try {
+        const resp = await fetch('/api/fraimic/library/send', {
+          method: 'POST', headers: this._authHeaders(), body: form,
+        });
+        const result = await resp.json().catch(() => ({}));
+
+        if (resp.ok && result.success) {
+          fb.className = 'feedback ok';
+          fb.textContent = '✓ Sent!';
+        } else {
+          fb.className = 'feedback err';
+          fb.textContent = `Failed: ${result.message || resp.statusText || resp.status}`;
+        }
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Network error: ${err.message}`;
+      }
+      fb.style.display = 'block';
+
+      btn.disabled = false;
+      btn.textContent = prevText;
+      setTimeout(() => { fb.style.display = 'none'; }, 4000);
+    }
+
+    // -----------------------------------------------------------------------
     // Utility
     // -----------------------------------------------------------------------
+
+    _authHeaders() {
+      let token;
+      try { token = this._hass.auth.data.access_token; } catch (_) {}
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
 
     _sid(entityId) {
       // Safe CSS/DOM ID segment from an entity_id.

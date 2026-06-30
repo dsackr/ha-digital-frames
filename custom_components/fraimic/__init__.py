@@ -86,6 +86,29 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .http_api import FraimicSendImageView  # noqa: PLC0415
     hass.http.register_view(FraimicSendImageView())
 
+    # Set up the shared image library (storage-backend agnostic) and its
+    # HTTP endpoints. This is domain-level state, not per-frame, since the
+    # library is shared across every configured frame.
+    from .library import LibraryManager  # noqa: PLC0415
+
+    library_manager = LibraryManager(hass)
+    await library_manager.async_load()
+    hass.data.setdefault(DOMAIN, {})["_library"] = library_manager
+
+    from .library_http import (  # noqa: PLC0415
+        FraimicLibraryImageView,
+        FraimicLibraryListView,
+        FraimicLibrarySendView,
+        FraimicLibrarySettingsView,
+        FraimicLibraryUploadView,
+    )
+
+    hass.http.register_view(FraimicLibraryListView())
+    hass.http.register_view(FraimicLibraryUploadView())
+    hass.http.register_view(FraimicLibraryImageView())
+    hass.http.register_view(FraimicLibrarySendView())
+    hass.http.register_view(FraimicLibrarySettingsView())
+
     # Inject the Lovelace card JS so it's available on any dashboard.
     from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 
@@ -146,11 +169,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
 
-        # Remove the top-level domain dict when no entries remain.
-        if not hass.data[DOMAIN]:
-            hass.data.pop(DOMAIN)
-
-            # Remove services when the last entry is gone.
+        # Domain-level state (the shared library, keyed "_library") lives
+        # independently of any single frame's config entry, so don't tear
+        # the whole domain dict down just because it's the only thing left.
+        remaining_frame_entries = [
+            key for key in hass.data[DOMAIN] if not key.startswith("_")
+        ]
+        if not remaining_frame_entries:
+            # Remove services when the last frame entry is gone.
             for service in ("send_image", "refresh", "sleep", "restart"):
                 hass.services.async_remove(DOMAIN, service)
 
