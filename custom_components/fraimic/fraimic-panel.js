@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '0.3.1';
+  const PANEL_VERSION = '0.3.2';
 
   // -------------------------------------------------------------------------
   // Styles

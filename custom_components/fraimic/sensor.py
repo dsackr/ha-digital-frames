@@ -70,14 +70,26 @@ class FraimicBaseSensor(CoordinatorEntity, SensorEntity):
         fw: str | None = None
         if self.coordinator.data:
             fw = self.coordinator.data.get("firmware_version")
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.data[CONF_NAME],
-            manufacturer="Fraimic",
-            model="E-Ink Canvas",
-            sw_version=fw,
-            configuration_url=f"/fraimic?entry={self._entry.entry_id}",
-        )
+
+        info: dict[str, Any] = {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": self._entry.data[CONF_NAME],
+            "manufacturer": "Fraimic",
+            "model": "E-Ink Canvas",
+            "sw_version": fw,
+        }
+
+        # configuration_url must be an absolute URL -- HA rejects relative
+        # paths outright (and will fail entity setup entirely if it isn't
+        # valid), so only add it when we actually have a base URL to anchor
+        # to. Falls back to internal_url if no external_url is configured.
+        base_url = self.hass.config.external_url or self.hass.config.internal_url
+        if base_url:
+            info["configuration_url"] = (
+                f"{base_url.rstrip('/')}/fraimic?entry={self._entry.entry_id}"
+            )
+
+        return DeviceInfo(**info)
 
 
 # ---------------------------------------------------------------------------
