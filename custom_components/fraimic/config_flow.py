@@ -81,18 +81,32 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
 
         mac = mac_from_info(info)
 
-        # Check every existing entry — match on device_key (new entries) or
-        # MAC (entries set up before this version that lack device_key).
+        # Check every existing entry — match on device_key (new entries), MAC
+        # (belt-and-braces), or — for entries created before 0.4.1 that don't
+        # have a device_key/MAC yet (only backfilled lazily on the frame's
+        # next successful coordinator poll) — fall back to matching on the
+        # entry's currently configured host. Without this fallback, a DHCP
+        # event arriving before that first poll completes (e.g. right after
+        # upgrading and restarting) would fail to match any existing entry
+        # and create a duplicate config entry for an already-configured frame.
         for entry in self._async_current_entries():
             entry_key = entry.data.get(CONF_DEVICE_KEY)
             entry_mac = entry.data.get(CONF_MAC, "")
-            if entry_key == key or (mac and entry_mac == mac):
-                # Same physical frame — update host if it moved.
-                if entry.data.get(CONF_HOST) != ip:
+            entry_host = entry.data.get(CONF_HOST)
+            is_same_frame = (
+                (entry_key and entry_key == key)
+                or (mac and entry_mac and entry_mac == mac)
+                or (not entry_key and not entry_mac and entry_host == ip)
+            )
+            if is_same_frame:
+                # Same physical frame — update host if it moved, and/or
+                # backfill the device_key/MAC fingerprint if this was a
+                # legacy entry that didn't have one yet.
+                if entry_host != ip or not entry_key or not entry_mac:
                     _LOGGER.info(
                         "Fraimic frame %s moved: %s → %s",
                         key,
-                        entry.data.get(CONF_HOST),
+                        entry_host,
                         ip,
                     )
                     self.hass.config_entries.async_update_entry(
