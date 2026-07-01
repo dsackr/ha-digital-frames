@@ -1,16 +1,9 @@
 {
   "domain": "fraimic",
   "name": "Fraimic",
-  "version": "0.4.2",
-  "documentation": "https://github.com/dsackr/fraimic-homeassistant",
-  "issue_tracker": "https://github.com/dsackr/fraimic-homeassistant/issues",
   "codeowners": [
     "@dsackr"
   ],
-  "requirements": [
-    "Pillow>=10.0.0"
-  ],
-  "iot_class": "local_polling",
   "config_flow": true,
   "dependencies": [
     "frontend",
@@ -25,5 +18,12 @@
     {
       "macaddress": "3CDC75*"
     }
-  ]
+  ],
+  "documentation": "https://github.com/dsackr/fraimic-homeassistant",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/dsackr/fraimic-homeassistant/issues",
+  "requirements": [
+    "Pillow>=10.0.0"
+  ],
+  "version": "0.4.2"
 }
