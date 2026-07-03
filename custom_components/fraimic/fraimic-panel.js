@@ -237,6 +237,7 @@
       gap: 16px;
     }
     .lib-thumb {
+      position: relative;
       border-radius: 8px;
       overflow: hidden;
       background: var(--secondary-background-color, #f1f5f9);
@@ -253,6 +254,34 @@
     }
     .lib-card .btns select { flex: 1; }
     .lib-thumb { cursor: pointer; }
+    .lib-card .btns + .btns { margin-top: 6px; }
+
+    /* ---- library multi-select ---- */
+    .lib-select-check {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: rgba(15,23,42,.55);
+      color: #fff;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+    }
+    .lib-card.selected .lib-select-check {
+      opacity: 1;
+      background: var(--primary-color, #3b82f6);
+    }
+    .lib-card.selectable { cursor: pointer; }
+    .lib-card.selected { outline: 2px solid var(--primary-color, #3b82f6); outline-offset: 2px; }
+    .lib-select-count {
+      font-size: 13px;
+      color: var(--secondary-text-color);
+    }
 
     /* ---- albums ---- */
     .lib-breadcrumb {
@@ -646,6 +675,9 @@
       this._albumPickerImage = null;  // image currently open in the "Add to Album" picker
       this._albumCreateSelected = new Set();  // image_ids selected in the "Create Album" picker
 
+      this._librarySelectMode = false;  // true = photo grid is in multi-select-for-delete mode
+      this._librarySelected   = new Set();  // image_ids selected while in that mode
+
       this._scenes        = [];       // [{ scene_id, name, mappings: { entry_id: image_id } }]
       this._sceneEditorId  = null;    // scene_id being edited, or null when creating a new one
 
@@ -767,6 +799,14 @@
         <div class="lib-breadcrumb" id="lib-breadcrumb">
           <button id="lib-back-btn">← Albums</button>
           <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
+          <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
+        </div>
+        <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
+          <span class="lib-select-count" id="lib-select-count">0 selected</span>
+          <button class="btn-primary" id="lib-select-delete"
+            style="flex:0 0 auto;padding-left:14px;padding-right:14px">🗑 Delete Selected</button>
+          <button class="btn-ghost" id="lib-select-cancel"
+            style="flex:0 0 auto;padding-left:14px;padding-right:14px">Cancel</button>
         </div>
         <div class="lib-grid" id="lib-grid">
           <div class="empty">
@@ -1080,15 +1120,91 @@
     // -----------------------------------------------------------------------
 
     _wireLibraryToolbar() {
-      const uploadBtn      = this.shadowRoot.getElementById('lib-upload-btn');
-      const backendSelect  = this.shadowRoot.getElementById('backend-select');
-      const backBtn        = this.shadowRoot.getElementById('lib-back-btn');
-      const albumCreateBtn = this.shadowRoot.getElementById('album-create-btn');
+      const uploadBtn       = this.shadowRoot.getElementById('lib-upload-btn');
+      const backendSelect   = this.shadowRoot.getElementById('backend-select');
+      const backBtn         = this.shadowRoot.getElementById('lib-back-btn');
+      const albumCreateBtn  = this.shadowRoot.getElementById('album-create-btn');
+      const selectToggleBtn = this.shadowRoot.getElementById('lib-select-toggle');
+      const selectCancelBtn = this.shadowRoot.getElementById('lib-select-cancel');
+      const selectDeleteBtn = this.shadowRoot.getElementById('lib-select-delete');
 
       uploadBtn.addEventListener('click', () => this._openUploadModal());
       backendSelect.addEventListener('change', e => this._renderBackendConfig(e.target.value));
       backBtn.addEventListener('click', () => this._openAlbumFolders());
       albumCreateBtn.addEventListener('click', () => this._openAlbumCreateModal());
+      selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
+      selectCancelBtn.addEventListener('click', () => this._setLibrarySelectMode(false));
+      selectDeleteBtn.addEventListener('click', () => this._deleteSelectedFromLibrary());
+    }
+
+    // -----------------------------------------------------------------------
+    // Library: multi-select delete
+    // -----------------------------------------------------------------------
+
+    _setLibrarySelectMode(on) {
+      this._librarySelectMode = on;
+      this._librarySelected = new Set();
+      this._syncLibrarySelectUI();
+      this._renderLibraryGrid();
+    }
+
+    _syncLibrarySelectUI() {
+      const toolbar = this.shadowRoot.getElementById('lib-select-toolbar');
+      const toggle  = this.shadowRoot.getElementById('lib-select-toggle');
+      const count   = this.shadowRoot.getElementById('lib-select-count');
+      const inAlbum = this._currentAlbum !== null;
+      if (toolbar) toolbar.style.display = (inAlbum && this._librarySelectMode) ? 'flex' : 'none';
+      if (toggle)  toggle.style.display  = (inAlbum && !this._librarySelectMode) ? '' : 'none';
+      if (count)   count.textContent = `${this._librarySelected.size} selected`;
+    }
+
+    _toggleLibrarySelection(imageId, el) {
+      if (this._librarySelected.has(imageId)) {
+        this._librarySelected.delete(imageId);
+        el.classList.remove('selected');
+      } else {
+        this._librarySelected.add(imageId);
+        el.classList.add('selected');
+      }
+      this._syncLibrarySelectUI();
+    }
+
+    async _deleteSelectedFromLibrary() {
+      const ids = [...this._librarySelected];
+      if (!ids.length) return;
+      if (!window.confirm(
+        `Remove ${ids.length} photo${ids.length === 1 ? '' : 's'} from the library? This can't be undone.`
+      )) return;
+
+      const fb  = this.shadowRoot.getElementById('lib-fb');
+      const btn = this.shadowRoot.getElementById('lib-select-delete');
+      btn.disabled = true;
+
+      const failures = [];
+      for (const id of ids) {
+        try {
+          const resp = await fetch(`/api/fraimic/library/image/${id}`, {
+            method: 'DELETE', headers: this._authHeaders(),
+          });
+          const result = await resp.json().catch(() => ({}));
+          if (!resp.ok || !result.success) failures.push(id);
+        } catch (err) {
+          failures.push(id);
+        }
+      }
+      btn.disabled = false;
+
+      await this._loadAlbums();
+      if (this._currentAlbum) await this._loadLibrary(this._currentAlbum);
+      this._librarySelectMode = false;
+      this._librarySelected = new Set();
+      this._renderLibrary();
+
+      if (failures.length) {
+        fb.className = 'feedback err';
+        fb.textContent = `Deleted ${ids.length - failures.length} of ${ids.length} photos -- ${failures.length} failed.`;
+        fb.style.display = 'block';
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -1286,6 +1402,9 @@
       if (this._currentAlbum === null) {
         breadcrumb.style.display = 'none';
         albumCreateBtn.style.display = '';
+        this._librarySelectMode = false;
+        this._librarySelected = new Set();
+        this._syncLibrarySelectUI();
         this._renderAlbumFolders();
         return;
       }
@@ -1293,6 +1412,7 @@
       breadcrumb.style.display = 'flex';
       albumCreateBtn.style.display = 'none';
       title.textContent = `📁 ${this._currentAlbum}`;
+      this._syncLibrarySelectUI();
       this._renderLibraryGrid();
     }
 
@@ -1440,9 +1560,24 @@
 
     _buildLibraryCard(image) {
       const el  = document.createElement('div');
-      el.className = 'card lib-card';
       const sid = this._sid(image.image_id);
 
+      if (this._librarySelectMode) {
+        el.className = 'card lib-card selectable';
+        el.classList.toggle('selected', this._librarySelected.has(image.image_id));
+        el.innerHTML = `
+          <div class="lib-thumb" id="thumb-${sid}">
+            <div style="font-size:32px;text-align:center;padding:30px 0">🖼</div>
+            <div class="lib-select-check">✓</div>
+          </div>
+          <div class="preview-name">${this._esc(image.filename)}</div>
+        `;
+        this._loadThumbnail(image.image_id, el.querySelector(`#thumb-${sid}`));
+        el.addEventListener('click', () => this._toggleLibrarySelection(image.image_id, el));
+        return el;
+      }
+
+      el.className = 'card lib-card';
       const frameOptions = this._frames.map(f =>
         `<option value="${this._esc(f.entityId)}">${this._esc(f.title)}</option>`
       ).join('');
@@ -1457,8 +1592,10 @@
             ${frameOptions || '<option>No frames available</option>'}
           </select>
           <button class="btn-primary" id="lib-send-${sid}" ${this._frames.length ? '' : 'disabled'}>⬆ Send</button>
-          <button class="btn-ghost" id="lib-album-${sid}" title="Add to album">🏷</button>
-          <button class="btn-ghost" id="lib-delete-${sid}" title="Remove from library">🗑</button>
+        </div>
+        <div class="btns">
+          <button class="btn-ghost" id="lib-album-${sid}" title="Add to album">🏷 Album</button>
+          <button class="btn-ghost" id="lib-delete-${sid}" title="Remove from library">🗑 Delete</button>
         </div>
         <div class="feedback" id="lib-card-fb-${sid}"></div>
       `;
