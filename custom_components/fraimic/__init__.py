@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import voluptuous as vol
 
+from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
@@ -22,6 +23,8 @@ from .const import (
     CONF_HEIGHT,
     CONF_WIDTH,
     DOMAIN,
+    HUB_PLATFORMS,
+    KIND_SCENES_HUB,
     PLATFORMS,
 )
 from .coordinator import FraimicCoordinator
@@ -162,6 +165,22 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(FraimicSceneView())
     hass.http.register_view(FraimicSceneSendView())
 
+    # Auto-create the device-less "scenes hub" entry (hosts scene.* entities
+    # for voice control) if it doesn't exist yet -- self-heals on upgrade,
+    # no user action required.
+    has_hub = any(
+        entry.data.get("kind") == KIND_SCENES_HUB
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
+    if not has_hub:
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_IMPORT},
+                data={"kind": KIND_SCENES_HUB},
+            )
+        )
+
     # Inject the Lovelace card JS so it's available on any dashboard.
     from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 
@@ -193,6 +212,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     """Set up a Fraimic frame from a config entry."""
 
+    if entry.data.get("kind") == KIND_SCENES_HUB:
+        # Device-less entry: no coordinator, just hosts the scene entities.
+        await hass.config_entries.async_forward_entry_setups(entry, HUB_PLATFORMS)
+        if not hass.services.has_service(DOMAIN, "send_image"):
+            _register_services(hass)
+        return True
+
     coordinator = FraimicCoordinator(hass, entry)
 
     # Perform the first data fetch; raises ConfigEntryNotReady on failure so
@@ -222,6 +248,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     """Unload a Fraimic config entry."""
+
+    if entry.data.get("kind") == KIND_SCENES_HUB:
+        return await hass.config_entries.async_unload_platforms(entry, HUB_PLATFORMS)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

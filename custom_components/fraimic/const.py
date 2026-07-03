@@ -45,3 +45,13 @@ FRAME_RESOLUTIONS: dict[str, tuple[int, int]] = {
 
 # HA platforms this integration provides
 PLATFORMS = [Platform.SENSOR]
+
+# The "kind" marker (entry.data["kind"]) for the auto-created, device-less
+# config entry that hosts scene entities -- see scenes.py / scene.py for why
+# scenes can't just live on a frame's own config entry.
+KIND_SCENES_HUB = "scenes_hub"
+HUB_PLATFORMS = [Platform.SCENE]
+
+# Dispatcher signal fired whenever a scene is created, edited, or deleted so
+# the scene entity platform can add/remove/rename entities without a reload.
+SIGNAL_SCENES_UPDATED = f"{DOMAIN}_scenes_updated"

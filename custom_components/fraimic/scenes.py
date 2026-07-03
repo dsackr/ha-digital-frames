@@ -16,9 +16,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
-from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN
+from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN, SIGNAL_SCENES_UPDATED
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -39,6 +40,10 @@ class Scene:
     name: str
     mappings: dict[str, str] = field(default_factory=dict)
     created_at: float = 0.0
+    # Which album the editor was scoped to when this scene was built. Purely
+    # a UI convenience for reopening the editor pre-scoped -- sending a scene
+    # never consults this, since mappings already carry the resolved image_ids.
+    album: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +51,7 @@ class Scene:
             "name": self.name,
             "mappings": self.mappings,
             "created_at": self.created_at,
+            "album": self.album,
         }
 
     @classmethod
@@ -55,6 +61,7 @@ class Scene:
             name=data["name"],
             mappings=dict(data.get("mappings") or {}),
             created_at=data.get("created_at", 0.0),
+            album=data.get("album"),
         )
 
 
@@ -77,6 +84,11 @@ class SceneManager:
             {"scenes": [scene.to_dict() for scene in self._scenes.values()]}
         )
 
+    @property
+    def scenes(self) -> dict[str, Scene]:
+        """Synchronous read-only view, for the scene entity platform."""
+        return self._scenes
+
     async def async_list_scenes(self) -> list[dict[str, Any]]:
         return [scene.to_dict() for scene in self._scenes.values()]
 
@@ -95,6 +107,7 @@ class SceneManager:
         name: str,
         mappings: dict[str, str],
         scene_id: str | None = None,
+        album: str | None = None,
     ) -> dict[str, Any]:
         """Create a new scene (scene_id=None) or update an existing one."""
         name = (name or "").strip()
@@ -123,22 +136,26 @@ class SceneManager:
             scene = self._scenes[scene_id]
             scene.name = name
             scene.mappings = mappings
+            scene.album = album
         else:
             scene = Scene(
                 scene_id=uuid.uuid4().hex[:12],
                 name=name,
                 mappings=mappings,
                 created_at=time.time(),
+                album=album,
             )
             self._scenes[scene.scene_id] = scene
 
         await self._async_persist()
+        async_dispatcher_send(self.hass, SIGNAL_SCENES_UPDATED)
         return scene.to_dict()
 
     async def async_delete_scene(self, scene_id: str) -> None:
         if scene_id in self._scenes:
             del self._scenes[scene_id]
             await self._async_persist()
+            async_dispatcher_send(self.hass, SIGNAL_SCENES_UPDATED)
 
     async def async_send_scene(
         self, hass: "HomeAssistant", scene_id: str

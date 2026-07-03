@@ -805,7 +805,11 @@
               <input type="text" id="scene-editor-name" placeholder="e.g. Countdown Wall">
             </div>
             <div class="modal-row">
-              <label>Frame → Image</label>
+              <label>Album</label>
+              <select id="scene-editor-album"></select>
+            </div>
+            <div class="modal-row">
+              <label>Image → Frame</label>
               <div id="scene-editor-mappings"></div>
             </div>
             <div class="feedback" id="scene-editor-fb"></div>
@@ -2367,8 +2371,8 @@
           <div class="empty">
             <div style="font-size:48px">🎬</div>
             <h2>No scenes yet</h2>
-            <p>Map each of your frames to an image, then send them all at once —
-               e.g. four frames showing "1", "2", "3", "4" in order on the wall.</p>
+            <p>Pick an album, match its photos to frames, then send them all to
+               your wall at once — e.g. four frames showing "1", "2", "3", "4" in order.</p>
           </div>
         `;
         return;
@@ -2385,10 +2389,11 @@
       el.className = 'card scene-card';
       const sid = this._sid(scene.scene_id);
       const count = Object.keys(scene.mappings || {}).length;
+      const albumNote = scene.album ? ` · ${this._esc(scene.album)}` : '';
 
       el.innerHTML = `
         <div class="scene-card-title">${this._esc(scene.name)}</div>
-        <div class="scene-card-summary">${count} frame${count === 1 ? '' : 's'} mapped</div>
+        <div class="scene-card-summary">${count} frame${count === 1 ? '' : 's'} mapped${albumNote}</div>
         <div class="btns" style="margin-top:10px">
           <button class="btn-primary" id="scene-send-${sid}">▶ Send</button>
           <button class="btn-ghost" id="scene-edit-${sid}">✎ Edit</button>
@@ -2412,63 +2417,112 @@
     async _openSceneEditor(scene) {
       this._sceneEditorId = scene ? scene.scene_id : null;
 
-      const overlay   = this.shadowRoot.getElementById('scene-editor-overlay');
-      const title      = this.shadowRoot.getElementById('scene-editor-title');
-      const nameInput = this.shadowRoot.getElementById('scene-editor-name');
-      const mappingsEl = this.shadowRoot.getElementById('scene-editor-mappings');
-      const fb         = this.shadowRoot.getElementById('scene-editor-fb');
+      const overlay     = this.shadowRoot.getElementById('scene-editor-overlay');
+      const title       = this.shadowRoot.getElementById('scene-editor-title');
+      const nameInput   = this.shadowRoot.getElementById('scene-editor-name');
+      const albumSelect = this.shadowRoot.getElementById('scene-editor-album');
+      const fb          = this.shadowRoot.getElementById('scene-editor-fb');
 
       title.textContent = scene ? 'Edit Scene' : 'New Scene';
       nameInput.value = scene ? scene.name : '';
       fb.style.display = 'none';
 
-      // Fetch the full, unfiltered library fresh -- this._library means
-      // "whatever album is currently open" elsewhere in the panel, so it
-      // can't be reused here.
+      if (!this._albums || !this._albums.length) await this._loadAlbums();
+
+      const existingMappings = (scene && scene.mappings) || {};
+      const defaultAlbum = (scene && scene.album && this._albums.some(a => a.name === scene.album))
+        ? scene.album
+        : (this._albums[0] ? this._albums[0].name : DEFAULT_ALBUM);
+
+      albumSelect.innerHTML = this._albums.map(a =>
+        `<option value="${this._esc(a.name)}">${this._esc(a.name)}</option>`
+      ).join('');
+      albumSelect.value = defaultAlbum;
+      // Switching album mid-edit invalidates the old mappings (different
+      // images), so it's assigned via .onchange (overwritten every open,
+      // never stacked) rather than addEventListener.
+      albumSelect.onchange = () => this._renderSceneMappingRows(albumSelect.value, {});
+
+      await this._renderSceneMappingRows(defaultAlbum, existingMappings);
+
+      overlay.style.display = 'flex';
+    }
+
+    async _renderSceneMappingRows(albumName, existingMappings) {
+      const mappingsEl = this.shadowRoot.getElementById('scene-editor-mappings');
+
       let images = [];
       try {
-        const resp = await fetch('/api/fraimic/library/list', { headers: this._authHeaders() });
+        const resp = await fetch(`/api/fraimic/library/list?album=${encodeURIComponent(albumName)}`, {
+          headers: this._authHeaders(),
+        });
         const result = await resp.json();
         images = result.images || [];
       } catch (err) {
         console.warn('[fraimic-panel] library load for scene editor failed:', err);
       }
 
-      const existingMappings = (scene && scene.mappings) || {};
-      const imageOptions = images.map(img =>
-        `<option value="${this._esc(img.image_id)}">${this._esc(img.filename)}</option>`
-      ).join('');
+      if (!images.length) {
+        mappingsEl.innerHTML = `
+          <p style="font-size:13px;color:var(--secondary-text-color);margin:6px 0">
+            No photos in this album yet.
+          </p>
+        `;
+        return;
+      }
 
-      mappingsEl.innerHTML = this._frames.map(frame => {
-        const rid = this._sid(frame.entryId);
+      mappingsEl.innerHTML = images.map(img => {
+        const rid = this._sid(img.image_id);
+        const assignedEntryId = Object.keys(existingMappings)
+          .find(entryId => existingMappings[entryId] === img.image_id) || '';
         return `
-          <div class="scene-mapping-row" data-entry-id="${this._esc(frame.entryId)}">
+          <div class="scene-mapping-row" data-image-id="${this._esc(img.image_id)}"
+               data-initial-entry-id="${this._esc(assignedEntryId)}">
             <div class="scene-mapping-thumb" id="scene-map-thumb-${rid}">🖼</div>
-            <div class="scene-mapping-frame">${this._esc(frame.title)}</div>
-            <select class="scene-mapping-select" id="scene-map-select-${rid}">
-              <option value="">— none —</option>
-              ${imageOptions}
-            </select>
+            <div class="scene-mapping-frame">${this._esc(img.filename)}</div>
+            <select class="scene-mapping-select" id="scene-map-select-${rid}"></select>
           </div>
         `;
       }).join('');
 
-      for (const frame of this._frames) {
-        const rid = this._sid(frame.entryId);
+      for (const img of images) {
+        const rid = this._sid(img.image_id);
+        this._loadThumbnail(img.image_id, mappingsEl.querySelector(`#scene-map-thumb-${rid}`));
         const select = mappingsEl.querySelector(`#scene-map-select-${rid}`);
-        const thumb  = mappingsEl.querySelector(`#scene-map-thumb-${rid}`);
-        const assigned = existingMappings[frame.entryId];
-        if (assigned && [...select.options].some(o => o.value === assigned)) {
-          select.value = assigned;
-          this._loadThumbnail(assigned, thumb);
-        }
         select.addEventListener('change', () => {
-          thumb.innerHTML = '<div style="font-size:16px">🖼</div>';
-          if (select.value) this._loadThumbnail(select.value, thumb);
+          select.dataset.touched = '1';
+          this._updateSceneFrameOptions();
         });
       }
 
-      overlay.style.display = 'flex';
+      this._updateSceneFrameOptions();
+    }
+
+    // Rebuilds every row's frame <select> options so a frame already claimed
+    // by another image in this scene can't be picked twice -- each select
+    // only ever offers frames that are free, plus whichever frame it already
+    // has selected.
+    _updateSceneFrameOptions() {
+      const mappingsEl = this.shadowRoot.getElementById('scene-editor-mappings');
+      const rows = [...mappingsEl.querySelectorAll('.scene-mapping-row')];
+
+      const current = rows.map(row => {
+        const select = row.querySelector('.scene-mapping-select');
+        return select.dataset.touched === '1' ? select.value : row.dataset.initialEntryId;
+      });
+      const used = new Set(current.filter(Boolean));
+
+      rows.forEach((row, i) => {
+        const select = row.querySelector('.scene-mapping-select');
+        const own = current[i];
+        const options = ['<option value="">— none —</option>'].concat(
+          this._frames
+            .filter(f => f.entryId === own || !used.has(f.entryId))
+            .map(f => `<option value="${this._esc(f.entryId)}">${this._esc(f.title)}</option>`)
+        );
+        select.innerHTML = options.join('');
+        select.value = own;
+      });
     }
 
     _closeSceneEditor() {
@@ -2477,10 +2531,11 @@
     }
 
     async _saveSceneEditor() {
-      const nameInput = this.shadowRoot.getElementById('scene-editor-name');
-      const mappingsEl = this.shadowRoot.getElementById('scene-editor-mappings');
-      const fb         = this.shadowRoot.getElementById('scene-editor-fb');
-      const saveBtn    = this.shadowRoot.getElementById('scene-editor-save');
+      const nameInput   = this.shadowRoot.getElementById('scene-editor-name');
+      const albumSelect = this.shadowRoot.getElementById('scene-editor-album');
+      const mappingsEl  = this.shadowRoot.getElementById('scene-editor-mappings');
+      const fb          = this.shadowRoot.getElementById('scene-editor-fb');
+      const saveBtn     = this.shadowRoot.getElementById('scene-editor-save');
 
       const name = nameInput.value.trim();
       if (!name) {
@@ -2493,11 +2548,11 @@
       const mappings = {};
       mappingsEl.querySelectorAll('.scene-mapping-row').forEach(row => {
         const select = row.querySelector('.scene-mapping-select');
-        if (select.value) mappings[row.dataset.entryId] = select.value;
+        if (select && select.value) mappings[select.value] = row.dataset.imageId;
       });
       if (!Object.keys(mappings).length) {
         fb.className = 'feedback err';
-        fb.textContent = 'Assign an image to at least one frame.';
+        fb.textContent = 'Assign a frame to at least one image.';
         fb.style.display = 'block';
         return;
       }
@@ -2512,7 +2567,7 @@
         const resp = await fetch(url, {
           method: 'POST',
           headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, mappings }),
+          body: JSON.stringify({ name, mappings, album: albumSelect.value }),
         });
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {

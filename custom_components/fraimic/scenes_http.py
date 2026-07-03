@@ -30,16 +30,17 @@ def _get_scene_manager(hass):
     return manager
 
 
-def _parse_scene_body(body: Any) -> tuple[str | None, dict]:
+def _parse_scene_body(body: Any) -> tuple[str | None, dict, str | None]:
     # body is whatever request.json() decoded -- could be a list, number, or
     # string for a syntactically-valid but wrongly-shaped request.
     if not isinstance(body, dict):
-        return None, {}
+        return None, {}, None
     name = body.get("name")
     mappings = body.get("mappings")
     if not isinstance(mappings, dict):
         mappings = {}
-    return name, mappings
+    album = body.get("album")
+    return name, mappings, album
 
 
 class FraimicScenesView(HomeAssistantView):
@@ -64,12 +65,12 @@ class FraimicScenesView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Invalid JSON body: {err}", status_code=400)
 
-        name, mappings = _parse_scene_body(body)
+        name, mappings, album = _parse_scene_body(body)
 
         from .scenes import SceneError  # noqa: PLC0415
 
         try:
-            scene = await manager.async_save_scene(name, mappings)
+            scene = await manager.async_save_scene(name, mappings, album=album)
         except SceneError as err:
             return self.json_message(str(err), status_code=400)
         except Exception as err:  # noqa: BLE001
@@ -95,12 +96,14 @@ class FraimicSceneView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Invalid JSON body: {err}", status_code=400)
 
-        name, mappings = _parse_scene_body(body)
+        name, mappings, album = _parse_scene_body(body)
 
         from .scenes import SceneError  # noqa: PLC0415
 
         try:
-            scene = await manager.async_save_scene(name, mappings, scene_id=scene_id)
+            scene = await manager.async_save_scene(
+                name, mappings, scene_id=scene_id, album=album
+            )
         except SceneError as err:
             return self.json_message(str(err), status_code=400)
         except Exception as err:  # noqa: BLE001

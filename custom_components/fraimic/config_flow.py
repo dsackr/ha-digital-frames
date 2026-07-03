@@ -24,6 +24,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     FRAME_RESOLUTIONS,
+    KIND_SCENES_HUB,
 )
 from .helpers import (
     device_key_from_info,
@@ -57,6 +58,27 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered: list[dict[str, Any]] = []
         self._selected_host: str = ""
         self._selected_info: dict[str, Any] = {}
+
+    # ------------------------------------------------------------------
+    # Import — used internally (not user-facing) to auto-create the
+    # device-less "scenes hub" config entry that hosts scene entities.
+    # See scenes.py / scene.py for why scenes can't live on a frame's entry.
+    # ------------------------------------------------------------------
+
+    async def async_step_import(
+        self, import_info: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle programmatic entry creation (currently: the scenes hub)."""
+        if not import_info or import_info.get("kind") != KIND_SCENES_HUB:
+            return self.async_abort(reason="not_implemented")
+
+        await self.async_set_unique_id(f"{DOMAIN}_{KIND_SCENES_HUB}")
+        self._abort_if_unique_id_configured()
+
+        return self.async_create_entry(
+            title="Fraimic Scenes",
+            data={"kind": KIND_SCENES_HUB},
+        )
 
     # ------------------------------------------------------------------
     # DHCP discovery — called automatically when HA sees a DHCP lease
