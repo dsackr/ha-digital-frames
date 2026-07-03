@@ -1589,6 +1589,7 @@
         <div class="preview-name">${this._esc(image.filename)}</div>
         <div class="btns" style="margin-top:10px">
           <select id="frame-select-${sid}" ${this._frames.length ? '' : 'disabled'}>
+            ${this._frames.length ? '<option value="">Select a Frame</option>' : ''}
             ${frameOptions || '<option>No frames available</option>'}
           </select>
           <button class="btn-primary" id="lib-send-${sid}" ${this._frames.length ? '' : 'disabled'}>⬆ Send</button>
@@ -1608,7 +1609,14 @@
 
       el.querySelector(`#lib-send-${sid}`).addEventListener('click', () => {
         const entityId = el.querySelector(`#frame-select-${sid}`).value;
-        if (entityId) this._sendFromLibrary(image.image_id, entityId, el, sid);
+        if (!entityId) {
+          const fb = el.querySelector(`#lib-card-fb-${sid}`);
+          fb.className = 'feedback err';
+          fb.textContent = 'Choose a frame first.';
+          fb.style.display = 'block';
+          return;
+        }
+        this._sendFromLibrary(image.image_id, entityId, el, sid);
       });
 
       el.querySelector(`#lib-album-${sid}`).addEventListener('click', () => {
