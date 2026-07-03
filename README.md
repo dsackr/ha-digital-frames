@@ -10,7 +10,7 @@ Local Home Assistant integration for Fraimic e-ink canvas frames. Controls your 
 - **Controls** — refresh display, put frame to sleep, restart frame
 - **Daily agenda mode** — pulls calendar events and renders them as an image for the frame
 - **Shared photo library with albums** — upload one or many photos at once into a new or existing album; a photo can belong to multiple albums with no duplication, and albums show up as folders in the panel
-- **Scenes** — map each frame to a specific image (e.g. four frames on a wall each showing "1", "2", "3", "4") and send the whole layout at once, from the panel or via the `fraimic.send_scene` service
+- **Scenes** — pick an album and match its photos to frames (e.g. four frames on a wall each showing a different photo), then send the whole layout at once from the panel, via the `fraimic.send_scene` service, or by voice — every scene is also a native `scene.*` entity, so once exposed to your voice assistant, "Alexa, activate Countdown Wall" or "Hey Google, activate Countdown Wall" works out of the box
 - **Photo rotation mode** — cycles through albums from Google Photos or iCloud
 
 ## Installation
