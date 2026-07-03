@@ -36,7 +36,7 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN
+from .const import CONF_HEIGHT, CONF_HOST, CONF_SIZE, CONF_WIDTH, DOMAIN
 from .http_api import resolve_frame_by_entity
 
 _LOGGER = logging.getLogger(__name__)
@@ -434,10 +434,10 @@ class FraimicLibraryAlbumImagesView(HomeAssistantView):
 
 class FraimicFramesView(HomeAssistantView):
     """List every configured Fraimic frame's entry_id plus its fixed
-    width/height. entry.data isn't exposed via the generic
-    config_entries/get WS command the panel otherwise uses for discovery,
-    so the crop editor calls this directly to know which frames match a
-    given Frame size + Orientation selection."""
+    width/height, physical size label, and host. entry.data isn't exposed
+    via the generic config_entries/get WS command the panel otherwise uses
+    for discovery, so the crop editor and sidebar panel call this directly
+    for data that only lives in entry.data."""
 
     url = "/api/fraimic/frames"
     name = "api:fraimic:frames"
@@ -456,6 +456,8 @@ class FraimicFramesView(HomeAssistantView):
                         "title": entry.title,
                         "width": width,
                         "height": height,
+                        "size": entry.data.get(CONF_SIZE),
+                        "host": entry.data.get(CONF_HOST),
                     }
                 )
         return self.json({"frames": frames})

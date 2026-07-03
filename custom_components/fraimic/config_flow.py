@@ -19,6 +19,7 @@ from .const import (
     CONF_HOST,
     CONF_MAC,
     CONF_NAME,
+    CONF_SIZE,
     CONF_WIDTH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -242,11 +243,16 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             name = user_input[CONF_NAME].strip()
 
+            # The diagonal size label (e.g. "13.1" vs "13.3") can't be
+            # derived from resolution alone once two physical panels share
+            # the same pixel dimensions, so it's always asked for and
+            # persisted verbatim -- even when the frame's own API already
+            # reports trustworthy width/height.
+            size = user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
             if has_api_dims:
                 width, height = api_width, api_height
             else:
-                resolution = user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
-                width, height = FRAME_RESOLUTIONS[resolution]
+                width, height = FRAME_RESOLUTIONS[size]
 
             key = device_key_from_info(self._selected_info)
             mac = mac_from_info(self._selected_info)
@@ -271,22 +277,20 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_NAME: name,
                     CONF_WIDTH: width,
                     CONF_HEIGHT: height,
+                    CONF_SIZE: size,
                     CONF_DEVICE_KEY: key or "",
                     CONF_MAC: mac,
                 },
             )
 
-        if has_api_dims:
-            schema = vol.Schema({vol.Required(CONF_NAME): str})
-        else:
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_NAME): str,
-                    vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION): vol.In(
-                        list(FRAME_RESOLUTIONS.keys())
-                    ),
-                }
-            )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME): str,
+                vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION): vol.In(
+                    list(FRAME_RESOLUTIONS.keys())
+                ),
+            }
+        )
 
         return self.async_show_form(
             step_id="name_device",
@@ -325,19 +329,39 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class FraimicOptionsFlow(OptionsFlow):
-    """Allow changing the frame name and scan interval after setup."""
+    """Allow changing the frame name, scan interval, and (for entries set up
+    before physical size was tracked) backfilling the size after setup."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
+            # Unlike name/scan_interval (stored as options), size belongs in
+            # entry.data alongside width/height/host -- it's frame identity,
+            # not a runtime preference.
+            size = user_input.pop(CONF_RESOLUTION, "")
+            if size:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, CONF_SIZE: size},
+                )
             return self.async_create_entry(title="", data=user_input)
 
         current_name: str = self.config_entry.data.get(CONF_NAME, "")
         current_interval: int = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
+        current_size: str | None = self.config_entry.data.get(CONF_SIZE)
+
+        # Entries created before CONF_SIZE existed have no size on file --
+        # rather than guess one (ambiguous once multiple panels share a
+        # resolution), offer an explicit "leave unchanged" sentinel so this
+        # field is never silently defaulted to a real size.
+        size_options: dict[str, str] = (
+            {} if current_size else {"": "Leave unset"}
+        )
+        size_options.update({key: f'{key}"' for key in FRAME_RESOLUTIONS})
 
         schema = vol.Schema(
             {
@@ -345,6 +369,9 @@ class FraimicOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_SCAN_INTERVAL, default=current_interval
                 ): vol.All(int, vol.Range(min=30)),
+                vol.Optional(
+                    CONF_RESOLUTION, default=current_size or ""
+                ): vol.In(size_options),
             }
         )
 

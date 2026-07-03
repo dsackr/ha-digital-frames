@@ -24,6 +24,7 @@ CONF_HEIGHT = "height"
 CONF_DEVICE_KEY = "device_key"  # persistent Fraimic device identifier
 CONF_MAC = "mac_address"         # WiFi MAC (normalised, no colons)
 CONF_MODE = "mode"
+CONF_SIZE = "size"                # diagonal panel size label, e.g. "13.3"
 
 # Frame display modes
 MODE_MANUAL = "manual"
@@ -36,8 +37,10 @@ MODE_ROTATION = "rotation"
 # panel spec sheet (landscape-native) -- these are real hardware pixel
 # counts, not placeholders.
 FRAME_RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "13.1": (1200, 1600),
     "13.3": (1200, 1600),
     "31.5": (2560, 1440),
+    "7.3": (800, 480),
 }
 
 # HA platforms this integration provides

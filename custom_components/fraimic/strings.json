@@ -43,6 +43,20 @@
       "already_configured": "This frame is already configured"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "name": "Frame Name",
+          "scan_interval": "Update Interval (seconds)",
+          "resolution": "Physical Size"
+        },
+        "data_description": {
+          "resolution": "The physical print size of your frame. Leave unset if you don't need to change it."
+        }
+      }
+    }
+  },
   "services": {
     "restart": {
       "name": "Restart",

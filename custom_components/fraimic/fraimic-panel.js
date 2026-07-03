@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '0.7.0';
+  const PANEL_VERSION = '0.8.0';
 
   // Mirrors const.py's FRAME_RESOLUTIONS -- real hardware pixel counts for
   // each physical panel size, in their native (un-rotated) orientation.
@@ -45,8 +45,8 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 12px;
     }
 
     .card {
@@ -60,25 +60,29 @@
       outline-offset: 2px;
       transition: outline-color 0.3s ease;
     }
+    .card.frame-tile {
+      padding: 10px;
+    }
 
-    /* ---- card header ---- */
-    .card-header {
+    /* ---- frame tile ---- */
+    .frame-link {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 14px;
+      gap: 10px;
+      text-decoration: none;
+      color: inherit;
     }
     .frame-icon {
-      width: 44px; height: 44px;
-      border-radius: 10px;
+      width: 32px; height: 32px;
+      border-radius: 8px;
       background: var(--primary-color, #3b82f6);
       display: flex; align-items: center; justify-content: center;
-      font-size: 22px;
+      font-size: 16px;
       flex-shrink: 0;
     }
     .frame-meta { flex: 1; min-width: 0; }
     .frame-name {
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 600;
       color: var(--primary-text-color);
       white-space: nowrap;
@@ -86,29 +90,15 @@
       text-overflow: ellipsis;
     }
     .frame-status {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--secondary-text-color);
-      margin-top: 3px;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .dot-on  { color: var(--success-color,  #16a34a); }
     .dot-off { color: var(--error-color,    #dc2626); }
-
-    /* ---- preview ---- */
-    .preview {
-      display: none;
-      border-radius: 8px;
-      overflow: hidden;
-      border: 1px solid var(--divider-color, rgba(0,0,0,.1));
-      background: var(--secondary-background-color, #f1f5f9);
-      margin-bottom: 12px;
-      text-align: center;
-    }
-    .preview img {
-      display: block;
-      width: 100%;
-      max-height: 200px;
-      object-fit: contain;
-    }
     .preview-name {
       padding: 4px 8px;
       font-size: 11px;
@@ -156,8 +146,6 @@
     }
     .feedback.ok  { background: rgba(22,163,74,.1);  color: var(--success-color, #15803d); }
     .feedback.err { background: rgba(220,38,38,.08); color: var(--error-color,   #b91c1c); }
-
-    input[type="file"] { display: none; }
 
     /* ---- empty state ---- */
     .empty {
@@ -681,7 +669,7 @@
     }
 
     // Coming from a device page's "Visit" link (/fraimic?entry=<entry_id>):
-    // jump straight to that frame's card and pop its upload dialog open.
+    // jump straight to that frame's tile and highlight it.
     _handleDeepLink() {
       let entryId;
       try {
@@ -699,10 +687,6 @@
       card.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       card.el.classList.add('deep-link-highlight');
       setTimeout(() => card.el.classList.remove('deep-link-highlight'), 3000);
-
-      const sid = this._sid(frame.entityId);
-      const fileInput = this.shadowRoot.getElementById(`file-${sid}`);
-      if (fileInput) fileInput.click();
     }
 
     _buildShell() {
@@ -925,7 +909,12 @@
           for (const f of (result.frames || [])) byEntry[f.entry_id] = f;
           for (const frame of this._frames) {
             const match = byEntry[frame.entryId];
-            if (match) { frame.width = match.width; frame.height = match.height; }
+            if (match) {
+              frame.width  = match.width;
+              frame.height = match.height;
+              frame.size   = match.size;
+              frame.host   = match.host;
+            }
           }
         }
       } catch (err) {
@@ -966,49 +955,26 @@
 
     _buildCard(frame) {
       const el = document.createElement('div');
-      el.className = 'card';
+      el.className = 'card frame-tile';
+      const sid = this._sid(frame.entityId);
+      const sizeLabel = frame.size ? `${this._esc(frame.size)}"` : '';
+      const tag = frame.host ? 'a' : 'div';
+      const linkAttrs = frame.host
+        ? `href="http://${this._esc(frame.host)}" target="_blank" rel="noopener"`
+        : '';
+
       el.innerHTML = `
-        <div class="card-header">
+        <${tag} class="frame-link" ${linkAttrs}>
           <div class="frame-icon">🖼</div>
           <div class="frame-meta">
             <div class="frame-name">${this._esc(frame.title)}</div>
-            <div class="frame-status" id="status-${this._sid(frame.entityId)}"></div>
+            <div class="frame-status" id="status-${sid}"></div>
+            ${sizeLabel ? `<div class="frame-status">${sizeLabel}</div>` : ''}
           </div>
-        </div>
-        <div class="preview" id="preview-${this._sid(frame.entityId)}">
-          <img id="img-${this._sid(frame.entityId)}" alt="preview" />
-          <div class="preview-name" id="imgname-${this._sid(frame.entityId)}"></div>
-        </div>
-        <div class="btns">
-          <button class="btn-primary" id="pick-${this._sid(frame.entityId)}">📷 Send Image</button>
-          <button class="btn-primary" id="send-${this._sid(frame.entityId)}" style="display:none">⬆ Send to Frame</button>
-          <button class="btn-ghost"   id="cancel-${this._sid(frame.entityId)}" style="display:none">✕</button>
-        </div>
-        <div class="feedback" id="fb-${this._sid(frame.entityId)}"></div>
-        <input type="file" id="file-${this._sid(frame.entityId)}"
-          accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/*">
+        </${tag}>
       `;
 
-      const sid = this._sid(frame.entityId);
-
-      el.querySelector(`#pick-${sid}`).addEventListener('click', () => {
-        el.querySelector(`#file-${sid}`).click();
-      });
-
-      el.querySelector(`#file-${sid}`).addEventListener('change', e => {
-        const file = e.target.files && e.target.files[0];
-        if (file) this._onFile(frame.entityId, file, el);
-      });
-
-      el.querySelector(`#send-${sid}`).addEventListener('click', () => {
-        this._send(frame.entityId, el);
-      });
-
-      el.querySelector(`#cancel-${sid}`).addEventListener('click', () => {
-        this._resetCard(frame.entityId, el);
-      });
-
-      return { el, file: null, previewUrl: null };
+      return { el };
     }
 
     // -----------------------------------------------------------------------
@@ -1034,103 +1000,6 @@
       const pct = parseFloat(state.state);
       const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}%&nbsp; `;
       statusEl.innerHTML = `${bat}<span class="dot-on">● Online</span>`;
-    }
-
-    // -----------------------------------------------------------------------
-    // File selection → preview
-    // -----------------------------------------------------------------------
-
-    _onFile(entityId, file, el) {
-      const sid = this._sid(entityId);
-      const card = this._cards[entityId];
-
-      // Release previous preview URL.
-      if (card.previewUrl) URL.revokeObjectURL(card.previewUrl);
-      card.previewUrl = URL.createObjectURL(file);
-      card.file = file;
-
-      el.querySelector(`#img-${sid}`).src = card.previewUrl;
-      el.querySelector(`#imgname-${sid}`).textContent = file.name;
-      el.querySelector(`#preview-${sid}`).style.display = 'block';
-      el.querySelector(`#pick-${sid}`).style.display   = 'none';
-      el.querySelector(`#send-${sid}`).style.display   = '';
-      el.querySelector(`#cancel-${sid}`).style.display = '';
-      this._hideFb(sid, el);
-    }
-
-    // -----------------------------------------------------------------------
-    // Send image
-    // -----------------------------------------------------------------------
-
-    async _send(entityId, el) {
-      const sid  = this._sid(entityId);
-      const card = this._cards[entityId];
-      if (!card || !card.file) return;
-
-      const btnSend   = el.querySelector(`#send-${sid}`);
-      const btnCancel = el.querySelector(`#cancel-${sid}`);
-      btnSend.textContent = '⏳ Sending…';
-      btnSend.disabled    = true;
-      btnCancel.disabled  = true;
-
-      const form = new FormData();
-      form.append('entity_id', entityId);
-      form.append('image', card.file);
-
-      try {
-        const resp = await fetch('/api/fraimic/send_image', {
-          method: 'POST', headers: this._authHeaders(), body: form,
-        });
-        let result;
-        try { result = await resp.json(); } catch (_) { result = {}; }
-
-        if (resp.ok && result.success) {
-          this._showFb(sid, el, 'ok', '✓ Image sent!');
-          setTimeout(() => this._resetCard(entityId, el), 3000);
-        } else {
-          const msg = result.message || resp.statusText || `HTTP ${resp.status}`;
-          this._showFb(sid, el, 'err', `Failed: ${msg}`);
-          btnSend.textContent = '⬆ Send to Frame';
-          btnSend.disabled    = false;
-          btnCancel.disabled  = false;
-        }
-      } catch (err) {
-        this._showFb(sid, el, 'err', `Network error: ${err.message}`);
-        btnSend.textContent = '⬆ Send to Frame';
-        btnSend.disabled    = false;
-        btnCancel.disabled  = false;
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // Reset card to idle state
-    // -----------------------------------------------------------------------
-
-    _resetCard(entityId, el) {
-      const sid  = this._sid(entityId);
-      const card = this._cards[entityId];
-
-      if (card) {
-        if (card.previewUrl) { URL.revokeObjectURL(card.previewUrl); card.previewUrl = null; }
-        card.file = null;
-      }
-
-      const fi = el.querySelector(`#file-${sid}`);
-      if (fi) fi.value = '';
-      const img = el.querySelector(`#img-${sid}`);
-      if (img) img.src = '';
-
-      el.querySelector(`#preview-${sid}`).style.display = 'none';
-      el.querySelector(`#pick-${sid}`).style.display    = '';
-      el.querySelector(`#send-${sid}`).style.display    = 'none';
-      el.querySelector(`#cancel-${sid}`).style.display  = 'none';
-
-      const btnSend = el.querySelector(`#send-${sid}`);
-      btnSend.textContent = '⬆ Send to Frame';
-      btnSend.disabled    = false;
-      el.querySelector(`#cancel-${sid}`).disabled = false;
-
-      this._hideFb(sid, el);
     }
 
     // -----------------------------------------------------------------------
@@ -2735,18 +2604,6 @@
       return (str || '')
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
         .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-    }
-
-    _showFb(sid, el, type, msg) {
-      const fb = el.querySelector(`#fb-${sid}`);
-      fb.className     = `feedback ${type}`;
-      fb.textContent   = msg;
-      fb.style.display = 'block';
-    }
-
-    _hideFb(sid, el) {
-      const fb = el.querySelector(`#fb-${sid}`);
-      if (fb) fb.style.display = 'none';
     }
   }
 
