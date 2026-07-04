@@ -5,16 +5,25 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
 from typing import Any
 
 import aiohttp
 
-from .const import API_INFO
+from .const import API_INFO, FRAME_RESOLUTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 _SCAN_TIMEOUT = aiohttp.ClientTimeout(total=0.5)
+
+# /info's "Device Type" row looks like:
+#   <span class='info-label'>Device Type</span><span class='info-value'>13.3" E-Ink</span>
+_DEVICE_TYPE_RE = re.compile(
+    r"Device\s*Type\s*</span>\s*<span[^>]*>\s*([^<]*?)\s*</span>",
+    re.IGNORECASE,
+)
+_SIZE_INCHES_RE = re.compile(r'([\d.]+)\s*"')
 
 
 async def probe_frame(
@@ -31,6 +40,37 @@ async def probe_frame(
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+async def probe_device_size(
+    session: aiohttp.ClientSession, host: str
+) -> str | None:
+    """Best-effort auto-detect of a frame's physical size, scraped from its
+    /info admin page's "Device Type" field (e.g. '13.3" E-Ink' -> "13.3").
+
+    /api/info -- the JSON endpoint the rest of this integration relies on --
+    doesn't expose size or resolution at all (confirmed against real
+    hardware, not just undocumented). /info is a separate, human-facing
+    HTML page with no stability guarantee, so any request failure or
+    unexpected markup here just means "couldn't detect" -- config_flow
+    falls back to asking the user for size instead of raising.
+    """
+    try:
+        async with session.get(f"http://{host}/info", timeout=_PROBE_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None
+            html = await resp.text()
+    except Exception:  # noqa: BLE001
+        return None
+
+    match = _DEVICE_TYPE_RE.search(html)
+    if not match:
+        return None
+    inches_match = _SIZE_INCHES_RE.search(match.group(1))
+    if not inches_match:
+        return None
+    size = inches_match.group(1)
+    return size if size in FRAME_RESOLUTIONS else None
 
 
 def device_key_from_info(info: dict[str, Any]) -> str | None:

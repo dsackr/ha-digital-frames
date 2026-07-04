@@ -13,7 +13,8 @@ Thanks for your interest in contributing. This is a custom HACS integration for 
 - **`scenes_http.py`** — HTTP views for scene CRUD + send, mirroring `library_http.py`'s shape
 - **`scene.py`** — exposes each saved scene as a `scene.*` entity (so Alexa/Google Assistant/Assist can activate it by name); lives on an auto-created, device-less "scenes hub" config entry rather than any frame's entry, since scenes are cross-frame state
 - **`scene_packs.py`** / **`scene_packs_http.py`** — curated, installable image bundles (see "Scene packs" below)
-- **`helpers.py`** — network utilities: `/api/info` probe, subnet scanner for IP self-healing
+- **`helpers.py`** — network utilities: `/api/info` probe, subnet scanner for IP self-healing, and `probe_device_size` (see below)
+- **`config_flow.py`** — setup wizard. Physical panel size (`CONF_SIZE`, e.g. "13.3") is auto-detected during setup by scraping the "Device Type" field off `/info` -- a separate, human-facing HTML admin page, not `/api/info` -- since the JSON API doesn't expose size or resolution at all (confirmed against real hardware). The size dropdown only appears if that scrape fails. This is a best-effort parse of an undocumented page with no stability guarantee; if Fraimic ever changes that page's markup, setup just falls back to asking, it won't break.
 
 ## Scene packs
 

@@ -29,6 +29,7 @@ from .const import (
 from .helpers import (
     device_key_from_info,
     mac_from_info,
+    probe_device_size,
     probe_frame,
     scan_subnet,
 )
@@ -58,6 +59,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered: list[dict[str, Any]] = []
         self._selected_host: str = ""
         self._selected_info: dict[str, Any] = {}
+        self._detected_size: str | None = None
 
     # ------------------------------------------------------------------
     # Import — used internally (not user-facing) to auto-create the
@@ -146,9 +148,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         # Genuinely new frame — start the normal setup flow.
         await self.async_set_unique_id(key)
         self._abort_if_unique_id_configured()
-        self._selected_host = ip
-        self._selected_info = info
-        return await self.async_step_name_device()
+        return await self._async_use_device(ip, info)
 
     # ------------------------------------------------------------------
     # Step 1 — user (manual IP or leave blank to scan)
@@ -187,9 +187,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
                 if info is None:
                     errors[CONF_HOST] = "cannot_connect"
                 else:
-                    self._selected_host = host
-                    self._selected_info = info
-                    return await self.async_step_name_device()
+                    return await self._async_use_device(host, info)
 
         else:
             # First visit — auto-scan.
@@ -231,9 +229,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
             if match is None:
                 errors["base"] = "unknown"
             else:
-                self._selected_host = selected_ip
-                self._selected_info = match["info"]
-                return await self.async_step_name_device()
+                return await self._async_use_device(selected_ip, match["info"])
 
         device_options = {
             d["ip"]: "{} — firmware {}".format(
@@ -262,15 +258,17 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         api_height: int | None = self._selected_info.get("height")
         has_api_dims = isinstance(api_width, int) and isinstance(api_height, int)
 
+        # _async_use_device() already scraped this from the frame's own
+        # /info admin page. When it succeeds there's no ambiguity to ask the
+        # user to resolve -- the size dropdown below only appears as a
+        # fallback for that detection failing (unrecognized/unreachable
+        # /info page).
+        detected_size = self._detected_size
+
         if user_input is not None:
             name = user_input[CONF_NAME].strip()
 
-            # The diagonal size label (e.g. "13.1" vs "13.3") can't be
-            # derived from resolution alone once two physical panels share
-            # the same pixel dimensions, so it's always asked for and
-            # persisted verbatim -- even when the frame's own API already
-            # reports trustworthy width/height.
-            size = user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
+            size = detected_size or user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
             if has_api_dims:
                 width, height = api_width, api_height
             else:
@@ -305,14 +303,12 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
                 },
             )
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME): str,
-                vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION): vol.In(
-                    list(FRAME_RESOLUTIONS.keys())
-                ),
-            }
-        )
+        schema_fields: dict[Any, Any] = {vol.Required(CONF_NAME): str}
+        if not detected_size:
+            schema_fields[vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION)] = vol.In(
+                list(FRAME_RESOLUTIONS.keys())
+            )
+        schema = vol.Schema(schema_fields)
 
         return self.async_show_form(
             step_id="name_device",
@@ -334,6 +330,24 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _async_use_device(
+        self, host: str, info: dict[str, Any]
+    ) -> FlowResult:
+        """Common continuation once a target frame's host + /api/info
+        payload are known: best-effort auto-detect its physical size from
+        /info's admin page (the JSON API doesn't expose size or resolution
+        at all) before moving to naming, so setup only has to ask the user
+        to pick a size when that detection fails."""
+        self._selected_host = host
+        self._selected_info = info
+
+        import aiohttp  # local import avoids top-level cost when flow unused
+
+        async with aiohttp.ClientSession() as session:
+            self._detected_size = await probe_device_size(session, host)
+
+        return await self.async_step_name_device()
 
     def _get_local_ip(self) -> str:
         """Return the IPv4 address of the HA machine, falling back to 192.168.1.1."""
