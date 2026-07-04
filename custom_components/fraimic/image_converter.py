@@ -6,7 +6,8 @@ expected by the target panel. All Fraimic-supported panels share the same 4bpp
 Spectra 6 palette, but NOT the same byte layout -- see "Binary format
 specification" below. Getting this wrong doesn't error, it silently produces a
 garbled/duplicated image on the physical frame (confirmed the hard way: see
-the 7.3" panel investigation that added SPLIT_HALF_RESOLUTIONS).
+the 7.3" panel investigation that led to declaring byte_layout explicitly
+per frame type in frame_types.py).
 
 Binary format specification
 ----------------------------
@@ -24,8 +25,8 @@ Common to every panel:
     5 = Blue
     6 = Green
 
-Byte ordering differs by physical panel construction, keyed by resolution
-(see SPLIT_HALF_RESOLUTIONS):
+Byte ordering differs by physical panel construction, declared per frame
+type in frame_types.py (FrameType.byte_layout) rather than inferred:
 
 - **Split-half** (confirmed against Fraimic's own reference converter,
   github.com/Fraimic/fraimic_bin_converter, EL133UF1 / Spectra 6 13.3"):
@@ -64,6 +65,8 @@ except ImportError as exc:  # pragma: no cover
         "Install it with: pip install Pillow"
     ) from exc
 
+from .frame_types import LAYOUT_SPLIT_HALF, byte_layout_for_resolution
+
 
 # ---------------------------------------------------------------------------
 # Palette constants
@@ -88,21 +91,6 @@ SPECTRA6_NIBBLE_VALUES: Tuple[int, ...] = (0, 1, 2, 3, 5, 6)
 
 # Sanity check: palette and nibble tables must stay in sync.
 assert len(SPECTRA6_REAL_WORLD_RGB) == len(SPECTRA6_NIBBLE_VALUES)
-
-# (width, height) pairs whose physical panel is built from two independent
-# half-width e-ink halves and therefore needs the left-half-then-right-half
-# byte ordering (see module docstring). Any resolution NOT listed here is
-# assumed to use a single contiguous buffer in plain row-major order.
-#
-# Keyed by resolution rather than the frame's size label (CONF_SIZE) purely
-# for simplicity -- today's panels don't have two different physical
-# constructions sharing one resolution. If that ever changes, this needs to
-# become a size-label lookup instead (the same ambiguity problem CONF_SIZE
-# was introduced to solve for physical size labels).
-SPLIT_HALF_RESOLUTIONS: frozenset = frozenset({
-    (1200, 1600),  # 13.1" / 13.3" (EL133UF1)
-    (2560, 1440),  # 31.5"
-})
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -301,17 +289,18 @@ def _pack_row_half(
 def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     """
     Pack a quantized RGB image into the raw Spectra 6 binary format, using
-    the byte ordering that matches this image's resolution (see
-    SPLIT_HALF_RESOLUTIONS and the module docstring).
+    the byte ordering declared for a registered frame type at this image's
+    resolution (see frame_types.py and the module docstring).
 
     :param quantized_image: RGB image whose pixels are restricted to the six
         entries of :data:`SPECTRA6_REAL_WORLD_RGB`.
     :returns: Raw bytes ready to be sent as a ``.bin`` file.
     :raises ValueError: If a pixel colour does not match any palette entry
-        (indicates a bug in the quantization step).
+        (indicates a bug in the quantization step), or if no registered
+        frame type has this image's resolution.
     """
-    size = (quantized_image.width, quantized_image.height)
-    if size in SPLIT_HALF_RESOLUTIONS:
+    layout = byte_layout_for_resolution(quantized_image.width, quantized_image.height)
+    if layout == LAYOUT_SPLIT_HALF:
         return _pack_split_halves(quantized_image)
     return _pack_sequential(quantized_image)
 

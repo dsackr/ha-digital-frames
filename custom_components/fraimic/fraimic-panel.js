@@ -108,6 +108,12 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .frame-origin-clone {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--warning-color, #b45309);
+    }
     .dot-on  { color: var(--success-color,  #16a34a); }
     .dot-off { color: var(--error-color,    #dc2626); }
     .preview-name {
@@ -1025,10 +1031,12 @@
           for (const frame of this._frames) {
             const match = byEntry[frame.entryId];
             if (match) {
-              frame.width  = match.width;
-              frame.height = match.height;
-              frame.size   = match.size;
-              frame.host   = match.host;
+              frame.width    = match.width;
+              frame.height   = match.height;
+              frame.size     = match.size;
+              frame.host     = match.host;
+              frame.origin   = match.origin;
+              frame.platform = match.platform;
             }
           }
         }
@@ -1073,6 +1081,9 @@
       el.className = 'card frame-tile';
       const sid = this._sid(frame.entityId);
       const sizeLabel = frame.size ? `${this._esc(frame.size)}"` : '';
+      const originLabel = frame.origin === 'clone'
+        ? `Community Clone${frame.platform ? ` · ${this._esc(frame.platform)}` : ''}`
+        : '';
       const tag = frame.host ? 'a' : 'div';
       const linkAttrs = frame.host
         ? `href="http://${this._esc(frame.host)}" target="_blank" rel="noopener"`
@@ -1085,6 +1096,7 @@
             <div class="frame-name">${this._esc(frame.title)}</div>
             <div class="frame-status" id="status-${sid}"></div>
             ${sizeLabel ? `<div class="frame-status">${sizeLabel}</div>` : ''}
+            ${originLabel ? `<div class="frame-origin-clone">${originLabel}</div>` : ''}
           </div>
         </${tag}>
       `;
@@ -1894,8 +1906,8 @@
     // Size key ('13.3' / '31.5' / ...) -> native {width, height}, built from
     // whichever sizes are actually configured on a frame right now -- not a
     // hardcoded catalog, so a newly-introduced physical size shows up here
-    // automatically as soon as one frame is set to it (see const.py's
-    // FRAME_RESOLUTIONS + config_flow.py's CONF_SIZE).
+    // automatically as soon as one frame is set to it (see frame_types.py's
+    // FRAME_TYPES + config_flow.py's CONF_SIZE).
     _computeAvailableSizes() {
       const sizes = {};
       for (const frame of this._frames) {

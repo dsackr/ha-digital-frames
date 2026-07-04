@@ -31,17 +31,8 @@ MODE_MANUAL = "manual"
 MODE_AGENDA = "agenda"
 MODE_ROTATION = "rotation"
 
-# Frame resolutions: name → (width_px, height_px), keyed to match the
-# physical panel sizes Fraimic itself uses ("13.3" / "31.5"). Verified
-# against E Ink's EL133UF1 (13.3", portrait-native) and the 31.5" Spectra 6
-# panel spec sheet (landscape-native) -- these are real hardware pixel
-# counts, not placeholders.
-FRAME_RESOLUTIONS: dict[str, tuple[int, int]] = {
-    "13.1": (1200, 1600),
-    "13.3": (1200, 1600),
-    "31.5": (2560, 1440),
-    "7.3": (800, 480),
-}
+# Frame types (physical size, resolution, byte layout, official-vs-clone
+# origin) live in frame_types.py's FRAME_TYPES registry, not here.
 
 # HA platforms this integration provides
 PLATFORMS = [Platform.SENSOR]

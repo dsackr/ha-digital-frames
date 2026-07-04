@@ -20,7 +20,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import FraimicCoordinator
 
-from .const import CONF_NAME, DOMAIN
+from .const import CONF_NAME, CONF_SIZE, DOMAIN
+from .frame_types import FRAME_TYPES, ORIGIN_OFFICIAL
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,11 +72,22 @@ class FraimicBaseSensor(CoordinatorEntity, SensorEntity):
         if self.coordinator.data:
             fw = self.coordinator.data.get("firmware_version")
 
+        frame_type = FRAME_TYPES.get(self._entry.data.get(CONF_SIZE))
+        if frame_type is not None:
+            manufacturer = (
+                "Fraimic" if frame_type.origin == ORIGIN_OFFICIAL
+                else "Community (Fraimic-compatible)"
+            )
+            model = frame_type.display_name
+        else:
+            manufacturer = "Fraimic"
+            model = "E-Ink Canvas"
+
         info: dict[str, Any] = {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": self._entry.data[CONF_NAME],
-            "manufacturer": "Fraimic",
-            "model": "E-Ink Canvas",
+            "manufacturer": manufacturer,
+            "model": model,
             "sw_version": fw,
         }
 

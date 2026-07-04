@@ -23,9 +23,9 @@ from .const import (
     CONF_WIDTH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    FRAME_RESOLUTIONS,
     KIND_SCENES_HUB,
 )
+from .frame_types import FRAME_TYPES
 from .helpers import (
     device_key_from_info,
     mac_from_info,
@@ -272,7 +272,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
             if has_api_dims:
                 width, height = api_width, api_height
             else:
-                width, height = FRAME_RESOLUTIONS[size]
+                width, height = FRAME_TYPES[size].resolution
 
             key = device_key_from_info(self._selected_info)
             mac = mac_from_info(self._selected_info)
@@ -306,7 +306,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         schema_fields: dict[Any, Any] = {vol.Required(CONF_NAME): str}
         if not detected_size:
             schema_fields[vol.Optional(CONF_RESOLUTION, default=_DEFAULT_RESOLUTION)] = vol.In(
-                list(FRAME_RESOLUTIONS.keys())
+                {key: ft.display_name for key, ft in FRAME_TYPES.items()}
             )
         schema = vol.Schema(schema_fields)
 
@@ -397,7 +397,7 @@ class FraimicOptionsFlow(OptionsFlow):
         size_options: dict[str, str] = (
             {} if current_size else {"": "Leave unset"}
         )
-        size_options.update({key: f'{key}"' for key in FRAME_RESOLUTIONS})
+        size_options.update({key: ft.display_name for key, ft in FRAME_TYPES.items()})
 
         schema = vol.Schema(
             {

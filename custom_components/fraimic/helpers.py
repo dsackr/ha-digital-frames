@@ -10,7 +10,8 @@ from typing import Any
 
 import aiohttp
 
-from .const import API_INFO, FRAME_RESOLUTIONS
+from .const import API_INFO
+from .frame_types import FRAME_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ async def probe_device_size(
     if not inches_match:
         return None
     size = inches_match.group(1)
-    return size if size in FRAME_RESOLUTIONS else None
+    return size if size in FRAME_TYPES else None
 
 
 def device_key_from_info(info: dict[str, Any]) -> str | None:

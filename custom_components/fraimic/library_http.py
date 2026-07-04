@@ -40,6 +40,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CONF_HEIGHT, CONF_HOST, CONF_SIZE, CONF_WIDTH, DOMAIN
+from .frame_types import FRAME_TYPES
 from .http_api import resolve_frame_by_entity
 
 _LOGGER = logging.getLogger(__name__)
@@ -438,10 +439,10 @@ class FraimicLibraryAlbumImagesView(HomeAssistantView):
 
 class FraimicFramesView(HomeAssistantView):
     """List every configured Fraimic frame's entry_id plus its fixed
-    width/height, physical size label, and host. entry.data isn't exposed
-    via the generic config_entries/get WS command the panel otherwise uses
-    for discovery, so the crop editor and sidebar panel call this directly
-    for data that only lives in entry.data."""
+    width/height, physical size label, origin (official/clone), and host.
+    entry.data isn't exposed via the generic config_entries/get WS command
+    the panel otherwise uses for discovery, so the crop editor and sidebar
+    panel call this directly for data that only lives in entry.data."""
 
     url = "/api/fraimic/frames"
     name = "api:fraimic:frames"
@@ -454,6 +455,7 @@ class FraimicFramesView(HomeAssistantView):
             width = entry.data.get(CONF_WIDTH)
             height = entry.data.get(CONF_HEIGHT)
             if isinstance(width, int) and isinstance(height, int):
+                frame_type = FRAME_TYPES.get(entry.data.get(CONF_SIZE))
                 frames.append(
                     {
                         "entry_id": entry.entry_id,
@@ -462,6 +464,8 @@ class FraimicFramesView(HomeAssistantView):
                         "height": height,
                         "size": entry.data.get(CONF_SIZE),
                         "host": entry.data.get(CONF_HOST),
+                        "origin": frame_type.origin if frame_type else None,
+                        "platform": frame_type.platform if frame_type else None,
                     }
                 )
         return self.json({"frames": frames})
