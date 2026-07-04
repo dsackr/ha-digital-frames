@@ -550,6 +550,7 @@
       color: var(--success-color, #16a34a);
       font-size: 12px;
       font-weight: 600;
+      white-space: nowrap;
     }
     .scene-mapping-row {
       display: flex;
@@ -750,7 +751,7 @@
       this._sceneEditorId  = null;    // scene_id being edited, or null when creating a new one
 
       this._scenePacks    = [];       // [{ id, name, description, license, cover, images, installed, scene_created }]
-      this._activeTab     = 'frames'; // 'frames' | 'library' | 'scenes' | 'addons'
+      this._activeTab     = 'library'; // 'library' | 'frames' | 'scenes' | 'addons'
 
       this._editorState = null;   // active crop-editor session, or null when closed
       this._editorDrag  = null;   // in-progress pointer drag, or null
@@ -814,26 +815,29 @@
       const card = this._cards[frame.entityId];
       if (!card) return;
 
+      // Frames is no longer the default tab -- switch to it so the
+      // highlighted card is actually visible.
+      this._setTab('frames');
       card.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       card.el.classList.add('deep-link-highlight');
       setTimeout(() => card.el.classList.remove('deep-link-highlight'), 3000);
     }
 
     // -----------------------------------------------------------------------
-    // Tab bar: Frames / Library / Scenes / Add-ons
+    // Tab bar: Library / Frames / Scenes / Add-ons
     // -----------------------------------------------------------------------
 
     _wireNav() {
       this.shadowRoot.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => this._setTab(btn.dataset.tab));
       });
-      this._setTab('frames');
+      this._setTab('library');
     }
 
     _setTab(name) {
       this._activeTab = name;
       const root = this.shadowRoot;
-      ['frames', 'library', 'scenes', 'addons'].forEach(tab => {
+      ['library', 'frames', 'scenes', 'addons'].forEach(tab => {
         const content = root.getElementById(`tab-${tab}`);
         const btn     = root.querySelector(`.tab-btn[data-tab="${tab}"]`);
         if (content) content.classList.toggle('active', tab === name);
@@ -846,22 +850,13 @@
         <style>${CSS}</style>
 
         <div class="tab-bar" id="tab-bar">
-          <button class="tab-btn active" data-tab="frames">Frames</button>
-          <button class="tab-btn" data-tab="library">Library</button>
+          <button class="tab-btn active" data-tab="library">Library</button>
+          <button class="tab-btn" data-tab="frames">Frames</button>
           <button class="tab-btn" data-tab="scenes">Scenes</button>
           <button class="tab-btn" data-tab="addons">Add-ons</button>
         </div>
 
-        <div class="tab-content active" id="tab-frames">
-        <div class="grid" id="grid">
-          <div class="empty">
-            <div class="empty-icon">⋯</div>
-            <h2>Discovering frames…</h2>
-          </div>
-        </div>
-        </div><!-- /tab-frames -->
-
-        <div class="tab-content" id="tab-library">
+        <div class="tab-content active" id="tab-library">
         <div class="lib-toolbar">
           <div class="lib-backend">
             <label for="backend-select">Storage:</label>
@@ -897,6 +892,15 @@
           </div>
         </div>
         </div><!-- /tab-library -->
+
+        <div class="tab-content" id="tab-frames">
+        <div class="grid" id="grid">
+          <div class="empty">
+            <div class="empty-icon">⋯</div>
+            <h2>Discovering frames…</h2>
+          </div>
+        </div>
+        </div><!-- /tab-frames -->
 
         <div class="tab-content" id="tab-scenes">
         <div class="lib-toolbar" style="justify-content:flex-end">
@@ -3053,11 +3057,16 @@
       const coverUrl = `${SCENE_PACK_RAW_BASE}/${pack.cover}`;
 
       let statusHtml;
+      let badgeHtml = '';
       if (pack.installed) {
         statusHtml = `
           <button class="btn-ghost" id="pack-sync-${sid}" title="Re-check for missing or newly added images">🔄 Sync</button>
           <button class="btn-ghost" id="pack-remove-${sid}">🗑 Remove</button>
-          <span class="badge-installed">✓ ${pack.scene_created ? 'Installed · scene created' : 'Installed'}</span>
+        `;
+        badgeHtml = `
+          <div style="margin-top:10px">
+            <span class="badge-installed">✓ ${pack.scene_created ? 'Installed · scene created' : 'Installed'}</span>
+          </div>
         `;
       } else {
         statusHtml = `<button class="btn-primary" id="pack-install-${sid}">⬇ Install</button>`;
@@ -3068,7 +3077,8 @@
         <div class="scene-card-title">${this._esc(pack.name)}</div>
         <div class="pack-desc">${this._esc(pack.description || '')}</div>
         <div class="scene-card-summary">${count} image${count === 1 ? '' : 's'} · ${this._esc(pack.license || '')}</div>
-        <div class="btns" style="margin-top:10px;align-items:center">${statusHtml}</div>
+        <div class="btns" style="margin-top:10px">${statusHtml}</div>
+        ${badgeHtml}
         <div class="feedback" id="pack-card-fb-${sid}"></div>
       `;
 
