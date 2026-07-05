@@ -501,6 +501,20 @@ def _encode_preview_png(image: "Image.Image") -> bytes:
     return buf.getvalue()
 
 
+def make_thumbnail(raw_bytes: bytes, edge: int, quality: int = 82) -> bytes:
+    """
+    Downscale an original image to at most *edge* px on its longest side and
+    encode it as JPEG. Serves the panel's grid/picker tiles (see
+    FraimicLibraryImageView's ?thumb= handling) so they never have to download
+    and decode multi-MB originals client-side.
+    """
+    image = _open_as_rgb(raw_bytes)
+    image.thumbnail((edge, edge), Image.LANCZOS)
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 def _process(
     image: "Image.Image",
     width: int,

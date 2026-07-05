@@ -1062,7 +1062,14 @@
 
       this._library      = [];        // [{ image_id, filename, content_type, resolutions, albums }]
       this._backend       = 'local';  // active library storage backend
-      this._libThumbUrls  = {};       // image_id → blob: URL (revoked on re-render)
+
+      // image_id → blob: URL for the ?thumb= endpoint variant. One cache
+      // shared by every grid (library, albums, scenes, walls, pickers),
+      // kept for the panel's lifetime so re-renders reuse the already-
+      // downloaded thumbnail instead of refetching; entries are evicted
+      // only when the image itself is deleted (see _evictThumb).
+      this._thumbUrls    = {};
+      this._thumbFetches = {};        // image_id → in-flight fetch promise (dedupes concurrent tiles)
 
       this._albums        = [];       // [{ name, count, cover_image_id }]
       this._currentAlbum  = null;     // null = album folder view; a name = viewing that album
@@ -1074,7 +1081,6 @@
 
       this._scenes        = [];       // [{ scene_id, name, mappings: { entry_id: image_id }, source }]
       this._sceneEditorId  = null;    // scene_id being edited, or null when creating a new one
-      this._sceneThumbUrls = {};      // image_id → blob: URL, for scene cards
 
       this._scenePacks    = [];       // [{ id, name, description, category, license, cover, images, installed, scene_created }]
       this._activeTab     = 'library'; // 'library' | 'frames' | 'scenes' | 'addons'
@@ -1093,8 +1099,6 @@
                                           // pending pick was made ('' = "All Photos") -- see _wallSceneAlbumLock
       this._wallImagePickerEntryId = null; // entry_id whose "choose an image" picker is open, or null
       this._wallImagePickerToken = 0;      // incremented per open -- lets a stale fetch detect it's superseded
-      this._wallThumbUrls       = {}; // image_id → blob: URL, for wall tile thumbnails
-      this._wallPickerThumbUrls = {}; // image_id → blob: URL, for the wall image picker grid
       this._onWallPointerMove = this._onWallPointerMove.bind(this);
       this._onWallPointerUp   = this._onWallPointerUp.bind(this);
 
@@ -1133,18 +1137,30 @@
       this._wireFramesSubnav();
       this._wireWallToolbar();
       this._wireWallImagePicker();
-      await this._discoverFrames();
+      // Fire every tab's data load concurrently and render each section as
+      // its data lands -- these are independent endpoints, and awaiting
+      // them serially made first paint wait on the sum of all round trips
+      // (the old behavior). Render order below still preserves each
+      // section's data dependencies (walls also needs frames, which is
+      // awaited first).
+      const framesP  = this._discoverFrames();
+      const packsP   = this._loadScenePacks();
+      const backendP = this._loadBackendSettings();
+      const albumsP  = this._loadAlbums();
+      const scenesP  = this._loadScenes();
+      const wallsP   = this._loadWalls();
+
+      await framesP;
       this._renderFrames();
       this._handleDeepLink();
-      await this._loadScenePacks();
-      this._renderScenePacks();
-      await this._loadBackendSettings();
-      await this._loadAlbums();
+      await Promise.all([backendP, albumsP]);
       this._renderLibrary();
-      await this._loadScenes();
+      await scenesP;
       this._renderScenes();
-      await this._loadWalls();
+      await wallsP;
       this._renderWallsSubview();
+      await packsP;
+      this._renderScenePacks();
     }
 
     // Coming from a device page's "Visit" link (/fraimic?entry=<entry_id>):
@@ -1656,8 +1672,13 @@
               body: JSON.stringify({ entry_id: entryId })
             });
             if (resp.ok) {
-              // Reloaded! Give HA a brief moment to re-initialize before refreshing view
-              setTimeout(() => this._loadFrames(), 2000);
+              // Reloaded! Give HA a brief moment to re-initialize before
+              // refreshing the view. (This used to call this._loadFrames(),
+              // which doesn't exist -- the refresh silently never happened.)
+              setTimeout(async () => {
+                await this._discoverFrames();
+                this._renderFrames();
+              }, 2000);
             } else {
               alert('Failed to reload frame integration.');
             }
@@ -1760,7 +1781,7 @@
       // one of these branches applies.
       let thumbSrc = null;
       if (frame.lastImageId) {
-        thumbSrc = `/api/fraimic/library/image/${this._esc(frame.lastImageId)}`;
+        thumbSrc = `/api/fraimic/library/image/${this._esc(frame.lastImageId)}?thumb=480`;
       } else if (frame.hasThumbnail) {
         thumbSrc = `/api/fraimic/frame/${this._esc(frame.entryId)}/thumbnail`;
       }
@@ -1808,13 +1829,21 @@
       if (!statusEl) return;
 
       const state = this._hass.states[frame.entityId];
+      let html;
       if (!state || state.state === 'unavailable' || state.state === 'unknown') {
-        statusEl.innerHTML = '<span class="dot-off">● Offline</span>';
-        return;
+        html = '<span class="dot-off">● Offline</span>';
+      } else {
+        const pct = parseFloat(state.state);
+        const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}%&nbsp; `;
+        html = `${bat}<span class="dot-on">● Online</span>`;
       }
-      const pct = parseFloat(state.state);
-      const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}%&nbsp; `;
-      statusEl.innerHTML = `${bat}<span class="dot-on">● Online</span>`;
+      // hass is re-assigned on every state change of ANY entity in the
+      // house -- skip the DOM write when this frame's status text is
+      // unchanged, or the constant innerHTML churn janks whatever screen
+      // is open.
+      if (statusEl._fraimicLastStatus === html) return;
+      statusEl._fraimicLastStatus = html;
+      statusEl.innerHTML = html;
     }
 
     // -----------------------------------------------------------------------
@@ -1892,6 +1921,7 @@
           });
           const result = await resp.json().catch(() => ({}));
           if (!resp.ok || !result.success) failures.push(id);
+          else this._evictThumb(id);
         } catch (err) {
           failures.push(id);
         }
@@ -2164,14 +2194,8 @@
       this._renderLibraryGrid();
     }
 
-    _clearThumbCache() {
-      for (const url of Object.values(this._libThumbUrls)) URL.revokeObjectURL(url);
-      this._libThumbUrls = {};
-    }
-
     _renderAlbumFolders() {
       const grid = this.shadowRoot.getElementById('lib-grid');
-      this._clearThumbCache();
 
       // The default album is always present (even with 0 photos), so
       // "library is empty" has to be judged by total photo count, not
@@ -2306,7 +2330,6 @@
 
     _renderLibraryGrid() {
       const grid = this.shadowRoot.getElementById('lib-grid');
-      this._clearThumbCache();
 
       if (!this._library.length) {
         grid.innerHTML = `
@@ -2397,18 +2420,41 @@
       return el;
     }
 
-    async _loadThumbnail(imageId, container, cache) {
-      cache = cache || this._libThumbUrls;
+    // Fetches the small server-side thumbnail (?thumb=) once per image_id
+    // and paints it into `container`. Cached hits paint synchronously;
+    // concurrent requests for the same image share one fetch.
+    async _loadThumbnail(imageId, container) {
+      const cached = this._thumbUrls[imageId];
+      if (cached) {
+        container.innerHTML = `<img src="${cached}" alt="">`;
+        return;
+      }
       try {
-        const resp = await fetch(`/api/fraimic/library/image/${imageId}`, { headers: this._authHeaders() });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
-        const url  = URL.createObjectURL(blob);
-        cache[imageId] = url;
+        if (!this._thumbFetches[imageId]) {
+          this._thumbFetches[imageId] = (async () => {
+            const resp = await fetch(`/api/fraimic/library/image/${imageId}?thumb=480`, { headers: this._authHeaders() });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const url  = URL.createObjectURL(blob);
+            this._thumbUrls[imageId] = url;
+            return url;
+          })();
+        }
+        const url = await this._thumbFetches[imageId];
         container.innerHTML = `<img src="${url}" alt="">`;
       } catch (err) {
+        delete this._thumbFetches[imageId]; // allow a later retry
         console.warn('[fraimic-panel] thumbnail load failed:', err);
       }
+    }
+
+    // Drop a deleted image's thumbnail so the blob memory is released --
+    // the shared cache is otherwise kept for the panel's lifetime.
+    _evictThumb(imageId) {
+      const url = this._thumbUrls[imageId];
+      if (url) URL.revokeObjectURL(url);
+      delete this._thumbUrls[imageId];
+      delete this._thumbFetches[imageId];
     }
 
     // -----------------------------------------------------------------------
@@ -2423,6 +2469,7 @@
         });
         const result = await resp.json().catch(() => ({}));
         if (resp.ok && result.success) {
+          this._evictThumb(imageId);
           await this._loadAlbums();
           if (this._currentAlbum) await this._loadLibrary(this._currentAlbum);
           this._renderLibrary();
@@ -3230,15 +3277,6 @@
             <div class="image-picker-thumb">🖼</div>
             <div class="image-picker-check">✓</div>
           `;
-          // This modal loads a thumbnail for every photo in the library --
-          // reopening it repeatedly would otherwise overwrite the shared
-          // this._libThumbUrls cache entries without ever revoking the
-          // blob: URLs they replace (every other _loadThumbnail call site
-          // is preceded by a _clearThumbCache() sweep; this one can't use
-          // that since it'd revoke thumbnails still visible in the grid
-          // behind this modal).
-          const previousUrl = this._libThumbUrls[image.image_id];
-          if (previousUrl) URL.revokeObjectURL(previousUrl);
           this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'));
           cell.addEventListener('click', () => {
             const id = cell.dataset.imageId;
@@ -3348,11 +3386,6 @@
       }
     }
 
-    _clearSceneThumbCache() {
-      for (const url of Object.values(this._sceneThumbUrls)) URL.revokeObjectURL(url);
-      this._sceneThumbUrls = {};
-    }
-
     // A scene from a scene pack install carries source: 'addon'; anything
     // else (including scenes saved before that field existed) is 'user'.
     _scenesInGroup(key) {
@@ -3364,7 +3397,6 @@
     // Both groups render as sections on one screen -- no drill-in click.
     _renderScenes() {
       const grid = this.shadowRoot.getElementById('scene-grid');
-      this._clearSceneThumbCache();
 
       if (!this._scenes.length) {
         grid.innerHTML = `
@@ -3427,7 +3459,7 @@
       `;
 
       if (coverImageId) {
-        this._loadThumbnail(coverImageId, el.querySelector(`#scene-thumb-${sid}`), this._sceneThumbUrls);
+        this._loadThumbnail(coverImageId, el.querySelector(`#scene-thumb-${sid}`));
       }
 
       el.querySelector(`#scene-send-${sid}`).addEventListener('click', () => this._sendScene(scene, el, sid));
@@ -3834,21 +3866,6 @@
       this._openWall(null);
     }
 
-    // Revokes only the cached thumbnails that no longer belong to any tile in
-    // this render -- unlike a full wipe, this lets a tile whose image_id is
-    // unchanged (e.g. after repositioning it, or after editing a *different*
-    // tile) keep showing its already-loaded thumbnail instantly instead of
-    // blanking out and re-fetching it, which reads as "thumbnails clearing"
-    // on anything slower than localhost.
-    _pruneWallThumbCache(neededImageIds) {
-      for (const imageId of Object.keys(this._wallThumbUrls)) {
-        if (!neededImageIds.has(imageId)) {
-          URL.revokeObjectURL(this._wallThumbUrls[imageId]);
-          delete this._wallThumbUrls[imageId];
-        }
-      }
-    }
-
     // A frame tile's on-canvas size, aspect-ratio-correct for that frame's
     // real resolution (orientation-swapped if the frame is orientation-
     // locked) -- normalized to a fixed longest edge so every tile reads
@@ -3867,13 +3884,6 @@
     _renderWallCanvas() {
       const palette = this.shadowRoot.getElementById('wall-palette');
       const canvas  = this.shadowRoot.getElementById('wall-canvas');
-
-      const neededImageIds = new Set();
-      for (const entryId of Object.keys(this._wallPlacements)) {
-        const imageId = this._wallEffectiveMapping(entryId);
-        if (imageId) neededImageIds.add(imageId);
-      }
-      this._pruneWallThumbCache(neededImageIds);
 
       const placedEntryIds = new Set(Object.keys(this._wallPlacements));
       const unplaced = this._frames.filter(f => !placedEntryIds.has(f.entryId));
@@ -3967,14 +3977,10 @@
         return;
       }
       tile.innerHTML = '';
-      if (this._wallThumbUrls[imageId]) {
-        // Same image already loaded for another tile this render pass --
-        // reuse it rather than issuing a duplicate fetch (and orphaning the
-        // first blob: URL when _loadThumbnail overwrites the cache entry).
-        tile.innerHTML = `<img src="${this._wallThumbUrls[imageId]}" alt="">`;
-      } else {
-        this._loadThumbnail(imageId, tile, this._wallThumbUrls);
-      }
+      // _loadThumbnail paints synchronously on a cache hit and dedupes
+      // concurrent fetches, so repeated renders and same-image tiles are
+      // cheap.
+      this._loadThumbnail(imageId, tile);
     }
 
     // NOT a CSS attribute-selector lookup: this file's top-level `CSS` const
@@ -4304,9 +4310,7 @@
         cell.title = image.filename;
         cell.innerHTML = `<div class="image-picker-thumb">🖼</div>`;
 
-        const previousUrl = this._wallPickerThumbUrls[image.image_id];
-        if (previousUrl) URL.revokeObjectURL(previousUrl);
-        this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'), this._wallPickerThumbUrls);
+        this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'));
 
         cell.addEventListener('click', () => {
           this._wallPendingMappings[entryId] = image.image_id;

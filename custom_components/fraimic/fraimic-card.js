@@ -240,17 +240,26 @@
           .replace(/\s+battery$/i, '')
           .trim() || this._config.entity;
       }
-      nameEl.textContent = name || this._config.entity;
+      const finalName = name || this._config.entity;
+      if (nameEl.textContent !== finalName) nameEl.textContent = finalName;
 
       const statusEl = this._q('frameStatus');
       if (!entity || entity.state === 'unavailable' || entity.state === 'unknown') {
-        statusEl.innerHTML = '<span class="dot-offline">● Offline</span>';
+        this._setStatusHtml(statusEl, '<span class="dot-offline">● Offline</span>');
         return;
       }
 
       const pct = parseFloat(entity.state);
       const battText = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}% `;
-      statusEl.innerHTML = `${battText}<span class="dot-online">● Online</span>`;
+      this._setStatusHtml(statusEl, `${battText}<span class="dot-online">● Online</span>`);
+    }
+
+    // hass is re-assigned on every state change of ANY entity -- skip the
+    // DOM write when this frame's status text is unchanged.
+    _setStatusHtml(statusEl, html) {
+      if (statusEl._fraimicLastStatus === html) return;
+      statusEl._fraimicLastStatus = html;
+      statusEl.innerHTML = html;
     }
 
     // ------------------------------------------------------------------ //

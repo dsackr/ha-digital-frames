@@ -74,28 +74,27 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     base_dir = hass.config.path("custom_components/fraimic")
 
     # Serve the Lovelace card JS and the sidebar panel JS at stable URLs.
+    # Cache headers are ON: the ?v=<version> suffix below changes the URL
+    # every release, so browsers can cache the ~200 KB panel bundle
+    # aggressively without ever serving a stale one across upgrades.
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
                 "/fraimic/fraimic-card.js",
                 f"{base_dir}/fraimic-card.js",
-                False,
+                True,
             ),
             StaticPathConfig(
                 "/fraimic/fraimic-panel.js",
                 f"{base_dir}/fraimic-panel.js",
-                False,
+                True,
             ),
         ]
     )
 
-    # Cache-busting suffix for the card/panel JS URLs below. Browsers (and
-    # the HA frontend's own ES-module cache) will happily keep serving an
-    # old fraimic-panel.js/fraimic-card.js indefinitely across releases
-    # since the static file response carries no Cache-Control header --
-    # tying the URL to the integration version forces a real fetch of the
-    # new file every time the version changes, instead of relying on users
-    # to know to hard-refresh.
+    # Cache-busting suffix for the card/panel JS URLs below -- tying the URL
+    # to the integration version forces a real fetch of the new file every
+    # time the version changes, instead of relying on users to hard-refresh.
     from homeassistant.loader import async_get_integration  # noqa: PLC0415
 
     integration = await async_get_integration(hass, DOMAIN)

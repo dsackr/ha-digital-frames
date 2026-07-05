@@ -87,8 +87,13 @@ class FraimicSendImageView(HomeAssistantView):
             return self.json_message("image file is required", status_code=400)
 
         # Read raw image bytes from the uploaded file field.
+        # image_field.file is a spooled temp file -- .read() is blocking I/O
+        # and must not run directly on the event loop (it would stall every
+        # other request for the duration of a multi-MB read).
         try:
-            raw_bytes: bytes = image_field.file.read()  # type: ignore[union-attr]
+            raw_bytes: bytes = await hass.async_add_executor_job(
+                image_field.file.read  # type: ignore[union-attr]
+            )
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Could not read image data: {err}", status_code=400)
 

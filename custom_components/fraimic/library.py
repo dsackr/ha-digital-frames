@@ -342,7 +342,16 @@ class LocalLibraryBackend(LibraryBackend):
             None,
         )
         content_type = entry.get("content_type", "application/octet-stream") if entry else "application/octet-stream"
-        path = self._find_original_path(image_id)
+        # The path is derivable from the manifest record (uploads write it
+        # exactly this way) -- the originals/ directory scan is only a
+        # fallback for files whose manifest filename doesn't match on disk.
+        path = None
+        if entry and entry.get("filename"):
+            candidate = self._original_path_for(image_id, entry["filename"])
+            if os.path.isfile(candidate):
+                path = candidate
+        if path is None:
+            path = self._find_original_path(image_id)
         if path is None:
             raise LibraryBackendError(f"Original for image '{image_id}' not found")
         with open(path, "rb") as f:
@@ -368,8 +377,11 @@ class LocalLibraryBackend(LibraryBackend):
                 resolutions = d.setdefault("resolutions", [])
                 if [width, height] not in resolutions:
                     resolutions.append([width, height])
+                    # Only rewrite when something changed -- regenerations
+                    # (rotation/lock variants, crop updates) hit this for
+                    # already-recorded resolutions on every save.
+                    self._write_manifest(manifest)
                 break
-        self._write_manifest(manifest)
 
     def _delete_image_sync(self, image_id: str) -> None:
         path = self._find_original_path(image_id)
@@ -1123,6 +1135,13 @@ class LibraryManager:
         self._backend: LibraryBackend = LocalLibraryBackend(hass)
         self._pending_google_oauth: dict[str, dict[str, Any]] = {}
 
+        # Downscaled JPEG previews for the panel's grids, cached on local
+        # disk keyed by image_id + edge -- local regardless of backend, since
+        # image_ids are immutable (fresh uuid per upload, originals never
+        # rewritten) a cached thumbnail can never go stale; entries are only
+        # removed when the image itself is deleted.
+        self._thumb_dir = hass.config.path("fraimic_library", "thumbs")
+
         # .bin generation runs in the background instead of blocking whatever
         # triggered the upload (a manual upload, a scene pack install, or
         # discovery adopting an externally-added file) -- each entry is
@@ -1215,6 +1234,54 @@ class LibraryManager:
 
     async def async_get_original(self, image_id: str) -> tuple[bytes, str]:
         return await self._backend.async_get_original(image_id)
+
+    # -- thumbnails (local disk cache, backend-agnostic) --
+
+    def _thumb_path(self, image_id: str, edge: int) -> str:
+        return os.path.join(self._thumb_dir, f"{image_id}_{edge}.jpg")
+
+    def _read_thumbnail_sync(self, path: str) -> bytes | None:
+        if not os.path.isfile(path):
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _write_thumbnail_sync(self, path: str, raw_bytes: bytes, edge: int) -> bytes:
+        from .image_converter import make_thumbnail  # noqa: PLC0415
+
+        thumb = make_thumbnail(raw_bytes, edge)
+        os.makedirs(self._thumb_dir, exist_ok=True)
+        # Unique temp name: two concurrent requests for the same not-yet-
+        # cached image must not race on one shared .tmp file.
+        tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+        with open(tmp, "wb") as f:
+            f.write(thumb)
+        os.replace(tmp, path)
+        return thumb
+
+    def _purge_thumbnails_sync(self, image_id: str) -> None:
+        if not os.path.isdir(self._thumb_dir):
+            return
+        prefix = f"{image_id}_"
+        for fn in os.listdir(self._thumb_dir):
+            if fn.startswith(prefix):
+                try:
+                    os.remove(os.path.join(self._thumb_dir, fn))
+                except OSError:  # pragma: no cover - best-effort cleanup
+                    pass
+
+    async def async_get_thumbnail(self, image_id: str, edge: int) -> bytes:
+        """A downscaled JPEG of the original, generated on first request and
+        cached on local disk -- even when the originals live in Dropbox or
+        Google Drive, so grid loads never re-download from the cloud."""
+        path = self._thumb_path(image_id, edge)
+        cached = await self.hass.async_add_executor_job(self._read_thumbnail_sync, path)
+        if cached is not None:
+            return cached
+        raw_bytes, _content_type = await self._backend.async_get_original(image_id)
+        return await self.hass.async_add_executor_job(
+            self._write_thumbnail_sync, path, raw_bytes, edge
+        )
 
     async def async_upload(
         self, filename: str, raw_bytes: bytes, albums: list[str] | None = None
@@ -1378,6 +1445,7 @@ class LibraryManager:
 
     async def async_delete(self, image_id: str) -> None:
         await self._backend.async_delete_image(image_id)
+        await self.hass.async_add_executor_job(self._purge_thumbnails_sync, image_id)
 
     async def async_list_albums(self) -> list[dict[str, Any]]:
         """Every distinct album tag in use, with a photo count and a cover

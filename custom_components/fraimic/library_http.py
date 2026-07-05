@@ -6,7 +6,9 @@ Endpoints:
     POST /api/fraimic/library/upload                      upload one or more originals (multipart
                                                             "image", repeatable) into an album
                                                             (optional "album" / "new_album" fields)
-    GET  /api/fraimic/library/image/{id}                  stream an original (for thumbnails)
+    GET  /api/fraimic/library/image/{id}                  stream an original; ?thumb=<edge>
+                                                            serves a small cached JPEG instead
+                                                            (what the panel's grids use)
     POST /api/fraimic/library/image/{id}/albums           replace an image's album tags
     POST /api/fraimic/library/send                        send a library image to a frame
     POST /api/fraimic/library/crop                         save a manual crop rect for one image+resolution
@@ -34,6 +36,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from urllib.parse import urlencode
 
@@ -145,20 +148,52 @@ class FraimicLibraryUploadView(HomeAssistantView):
 
 
 class FraimicLibraryImageView(HomeAssistantView):
-    """Stream a stored original (GET, for thumbnails) or remove it (DELETE)."""
+    """Stream a stored original (GET; add ?thumb=<edge> for a small cached
+    JPEG -- what the panel's grids use) or remove it (DELETE)."""
 
     url = "/api/fraimic/library/image/{image_id}"
     name = "api:fraimic:library:image"
     requires_auth = True
 
+    # image_ids are immutable (fresh uuid per upload, originals never
+    # rewritten), so both the original and its thumbnails can be cached
+    # indefinitely -- `private` because it's authenticated content.
+    _CACHE_CONTROL = "private, max-age=31536000, immutable"
+
     async def get(self, request: web.Request, image_id: str) -> web.Response:
         hass = request.app["hass"]
         manager = _get_manager(hass)
+
+        thumb = request.query.get("thumb")
+        if thumb:
+            try:
+                edge = max(64, min(1024, int(thumb)))
+            except ValueError:
+                edge = 480
+            try:
+                jpeg = await manager.async_get_thumbnail(image_id, edge)
+            except Exception as err:  # noqa: BLE001
+                # Un-decodable original or backend hiccup -- fall through to
+                # streaming the original rather than failing the tile.
+                _LOGGER.debug(
+                    "Thumbnail for %s failed (%s); serving original", image_id, err
+                )
+            else:
+                return web.Response(
+                    body=jpeg,
+                    content_type="image/jpeg",
+                    headers={"Cache-Control": self._CACHE_CONTROL},
+                )
+
         try:
             raw_bytes, content_type = await manager.async_get_original(image_id)
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Image not found: {err}", status_code=404)
-        return web.Response(body=raw_bytes, content_type=content_type)
+        return web.Response(
+            body=raw_bytes,
+            content_type=content_type,
+            headers={"Cache-Control": self._CACHE_CONTROL},
+        )
 
     async def delete(self, request: web.Request, image_id: str) -> web.Response:
         hass = request.app["hass"]
@@ -525,7 +560,16 @@ class FraimicFrameThumbnailView(HomeAssistantView):
         thumbnail = getattr(coordinator, "last_thumbnail", None) if coordinator else None
         if thumbnail is None:
             return self.json_message("No thumbnail available", status_code=404)
-        return web.Response(body=thumbnail, content_type="image/png")
+        # Unlike library image_ids this URL's content changes per send, so
+        # revalidate with an ETag instead of caching blind.
+        etag = f'"{hashlib.md5(thumbnail).hexdigest()}"'
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304, headers={"ETag": etag})
+        return web.Response(
+            body=thumbnail,
+            content_type="image/png",
+            headers={"ETag": etag, "Cache-Control": "private, no-cache"},
+        )
 
 
 class FraimicLibrarySettingsView(HomeAssistantView):
