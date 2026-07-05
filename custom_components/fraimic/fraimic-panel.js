@@ -77,6 +77,30 @@
       gap: 12px;
     }
 
+    /* Full-width group labels inside a .grid/.lib-grid -- see
+       _buildSectionHeader/_buildSectionEmpty. */
+    .section-header {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--secondary-text-color);
+      padding-bottom: 4px;
+      margin-top: 4px;
+      border-bottom: 1px solid var(--divider-color, #e2e8f0);
+    }
+    .section-header:first-child { margin-top: 0; }
+    .section-empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 16px 8px 24px;
+      color: var(--secondary-text-color);
+    }
+    .section-empty-icon { font-size: 24px; margin-bottom: 4px; }
+    .section-empty-title { font-size: 13px; font-weight: 600; color: var(--primary-text-color); }
+    .section-empty-body { font-size: 12px; max-width: 420px; margin: 4px auto 0; }
+
     .card {
       background: var(--card-background-color, #fff);
       border-radius: var(--ha-card-border-radius, 12px);
@@ -884,8 +908,7 @@
 
       this._scenes        = [];       // [{ scene_id, name, mappings: { entry_id: image_id }, source }]
       this._sceneEditorId  = null;    // scene_id being edited, or null when creating a new one
-      this._sceneThumbUrls = {};      // image_id → blob: URL, for scene cards/group tiles
-      this._sceneGroup     = null;    // null = group tiles view; 'user' | 'addon' = drilled into that group
+      this._sceneThumbUrls = {};      // image_id → blob: URL, for scene cards
 
       this._scenePacks    = [];       // [{ id, name, description, category, license, cover, images, installed, scene_created }]
       this._activeTab     = 'library'; // 'library' | 'frames' | 'scenes' | 'addons'
@@ -1065,10 +1088,6 @@
         </div><!-- /tab-frames -->
 
         <div class="tab-content" id="tab-scenes">
-        <div class="lib-breadcrumb" id="scene-breadcrumb">
-          <button id="scene-back-btn">← Scenes</button>
-          <span class="lib-breadcrumb-title" id="scene-breadcrumb-title"></span>
-        </div>
         <div class="lib-toolbar" style="justify-content:flex-end">
           <button class="btn-primary" id="scene-new-btn" style="flex:0 0 auto">＋ New Scene</button>
         </div>
@@ -1318,13 +1337,34 @@
         return;
       }
 
+      // frame.origin comes from /api/fraimic/frames (see FRAME_TYPES in
+      // frame_types.py) and is only known once that fetch resolves; a frame
+      // with no origin yet is grouped with Official rather than dropped, so
+      // it doesn't flicker between sections as data arrives.
+      const officialFrames = this._frames.filter(f => f.origin !== 'clone');
+      const cloneFrames    = this._frames.filter(f => f.origin === 'clone');
+
       grid.innerHTML = '';
       this._cards = {};
 
-      for (const frame of this._frames) {
-        const card = this._buildCard(frame);
-        grid.appendChild(card.el);
-        this._cards[frame.entityId] = card;
+      grid.appendChild(this._buildSectionHeader('🖼 Official Frames'));
+      if (officialFrames.length) {
+        for (const frame of officialFrames) {
+          const card = this._buildCard(frame);
+          grid.appendChild(card.el);
+          this._cards[frame.entityId] = card;
+        }
+      } else {
+        grid.appendChild(this._buildSectionEmpty('🖼', 'No official frames yet', 'Add a Fraimic Canvas frame to see it here.'));
+      }
+
+      if (cloneFrames.length) {
+        grid.appendChild(this._buildSectionHeader('🧩 Community Frames'));
+        for (const frame of cloneFrames) {
+          const card = this._buildCard(frame);
+          grid.appendChild(card.el);
+          this._cards[frame.entityId] = card;
+        }
       }
 
       // Wire reload buttons
@@ -1869,9 +1909,28 @@
         return;
       }
 
+      // An album created by a scene pack install shares its name with the
+      // pack (see ScenePackManager.async_install_pack: album = pack["name"]).
+      // Matching on that, rather than tracking a separate flag, means this
+      // stays correct even for packs installed before this grouping existed.
+      const addonAlbumNames = new Set(
+        (this._scenePacks || []).filter(p => p.installed).map(p => p.name)
+      );
+      const userAlbums  = this._albums.filter(a => !addonAlbumNames.has(a.name));
+      const addonAlbums = this._albums.filter(a => addonAlbumNames.has(a.name));
+
       grid.innerHTML = '';
-      for (const album of this._albums) {
-        grid.appendChild(this._buildAlbumTile(album));
+
+      grid.appendChild(this._buildSectionHeader('👤 Your Albums'));
+      if (userAlbums.length) {
+        for (const album of userAlbums) grid.appendChild(this._buildAlbumTile(album));
+      } else {
+        grid.appendChild(this._buildSectionEmpty('📁', 'No albums yet', 'Upload a photo to create one.'));
+      }
+
+      if (addonAlbums.length) {
+        grid.appendChild(this._buildSectionHeader('🧩 Add-on Albums'));
+        for (const album of addonAlbums) grid.appendChild(this._buildAlbumTile(album));
       }
     }
 
@@ -2995,7 +3054,6 @@
 
     _wireSceneToolbar() {
       this.shadowRoot.getElementById('scene-new-btn').addEventListener('click', () => this._openSceneEditor());
-      this.shadowRoot.getElementById('scene-back-btn').addEventListener('click', () => this._backToSceneGroups());
     }
 
     async _loadScenes() {
@@ -3022,37 +3080,8 @@
       );
     }
 
-    _openSceneGroup(key) {
-      this._sceneGroup = key;
-      this._renderScenes();
-    }
-
-    _backToSceneGroups() {
-      this._sceneGroup = null;
-      this._renderScenes();
-    }
-
+    // Both groups render as sections on one screen -- no drill-in click.
     _renderScenes() {
-      const breadcrumb = this.shadowRoot.getElementById('scene-breadcrumb');
-      const title      = this.shadowRoot.getElementById('scene-breadcrumb-title');
-      const newBtn     = this.shadowRoot.getElementById('scene-new-btn');
-
-      if (this._sceneGroup === null) {
-        breadcrumb.style.display = 'none';
-        newBtn.style.display = 'none';
-        this._renderSceneGroups();
-        return;
-      }
-
-      breadcrumb.style.display = 'flex';
-      // Add-on scenes come from installing a scene pack (Add-ons tab), not
-      // from this editor, so "New Scene" only makes sense in the user group.
-      newBtn.style.display = this._sceneGroup === 'user' ? '' : 'none';
-      title.textContent = this._sceneGroup === 'addon' ? '🧩 Add-on Scenes' : '👤 User Generated Scenes';
-      this._renderSceneGrid();
-    }
-
-    _renderSceneGroups() {
       const grid = this.shadowRoot.getElementById('scene-grid');
       this._clearSceneThumbCache();
 
@@ -3068,61 +3097,29 @@
         return;
       }
 
-      grid.innerHTML = '';
-      grid.appendChild(this._buildSceneGroupTile('user', '👤', 'User Generated Scenes'));
-      grid.appendChild(this._buildSceneGroupTile('addon', '🧩', 'Add-on Scenes'));
-    }
-
-    _buildSceneGroupTile(key, icon, label) {
-      const el = document.createElement('div');
-      el.className = 'card album-tile';
-      const scenes = this._scenesInGroup(key);
-      const coverImageId = scenes.length ? Object.values(scenes[0].mappings || {})[0] : null;
-
-      el.innerHTML = `
-        <div class="lib-thumb" id="scene-group-thumb-${key}">
-          <div style="font-size:32px;text-align:center;padding:30px 0">${icon}</div>
-        </div>
-        <div class="album-name">${this._esc(label)}</div>
-        <div class="album-count">${scenes.length} scene${scenes.length === 1 ? '' : 's'}</div>
-      `;
-
-      if (coverImageId) {
-        this._loadThumbnail(coverImageId, el.querySelector(`#scene-group-thumb-${key}`), this._sceneThumbUrls);
-      }
-
-      el.addEventListener('click', () => this._openSceneGroup(key));
-      return el;
-    }
-
-    _renderSceneGrid() {
-      const grid = this.shadowRoot.getElementById('scene-grid');
-      this._clearSceneThumbCache();
-
-      const scenes = this._scenesInGroup(this._sceneGroup);
-      if (!scenes.length) {
-        grid.innerHTML = this._sceneGroup === 'addon'
-          ? `
-            <div class="empty">
-              <div class="empty-icon">🧩</div>
-              <h2>No Add-on scenes yet</h2>
-              <p>Install a scene pack from the Add-ons tab to get one automatically.</p>
-            </div>
-          `
-          : `
-            <div class="empty">
-              <div class="empty-icon">▶</div>
-              <h2>No user-generated scenes yet</h2>
-              <p>Pick an album, match its photos to frames, then send them all to
-                 your wall at once — e.g. four frames showing "1", "2", "3", "4" in order.</p>
-            </div>
-          `;
-        return;
-      }
+      const userScenes  = this._scenesInGroup('user');
+      const addonScenes = this._scenesInGroup('addon');
 
       grid.innerHTML = '';
-      for (const scene of scenes) {
-        grid.appendChild(this._buildSceneCard(scene));
+
+      grid.appendChild(this._buildSectionHeader('👤 User Generated Scenes'));
+      if (userScenes.length) {
+        for (const scene of userScenes) grid.appendChild(this._buildSceneCard(scene));
+      } else {
+        grid.appendChild(this._buildSectionEmpty(
+          '▶', 'No user-generated scenes yet',
+          'Pick an album, match its photos to frames, then send them all to your wall at once — e.g. four frames showing "1", "2", "3", "4" in order.'
+        ));
+      }
+
+      grid.appendChild(this._buildSectionHeader('🧩 Add-on Scenes'));
+      if (addonScenes.length) {
+        for (const scene of addonScenes) grid.appendChild(this._buildSceneCard(scene));
+      } else {
+        grid.appendChild(this._buildSectionEmpty(
+          '🧩', 'No Add-on scenes yet',
+          'Install a scene pack from the Add-ons tab to get one automatically.'
+        ));
       }
     }
 
@@ -3826,6 +3823,31 @@
       return (str || '')
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
         .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared section-header helpers -- used to split Library/Frames/Scenes
+    // grids into labeled groups (user vs. add-on content) without an extra
+    // drill-in click. Both are full-width items inside a CSS grid (see
+    // .section-header / .section-empty, which span all columns).
+    // -----------------------------------------------------------------------
+
+    _buildSectionHeader(label) {
+      const el = document.createElement('div');
+      el.className = 'section-header';
+      el.textContent = label;
+      return el;
+    }
+
+    _buildSectionEmpty(icon, title, body) {
+      const el = document.createElement('div');
+      el.className = 'section-empty';
+      el.innerHTML = `
+        <div class="section-empty-icon">${icon}</div>
+        <div class="section-empty-title">${this._esc(title)}</div>
+        <div class="section-empty-body">${this._esc(body)}</div>
+      `;
+      return el;
     }
   }
 
