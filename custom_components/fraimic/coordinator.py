@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -35,6 +37,14 @@ _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # the frame at its new IP.
 _FAILURES_BEFORE_RESCAN = 3
 
+# Storage.Store (writes to .storage/, not entry.options) for the Frames panel
+# thumbnail hint. One file per config entry, keyed on entry_id, so concurrent
+# sends to different frames never race on the same file. Deliberately not
+# entry.options -- that would trigger a full entry reload on every single
+# send (see FraimicOrientationSelect for why that reload is fine there but
+# not here).
+_PREVIEW_STORE_VERSION = 1
+
 
 class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator that polls a single Fraimic frame for status data."""
@@ -60,16 +70,71 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._rescan_in_progress: bool = False
 
         # Library image_id of the last successful send (Library "Send to
-        # Canvas" or a Scene push -- both know the image_id up front). Not
-        # persisted to entry.options: it's a UI-only preview hint for the
-        # Frames dashboard card, and writing to options would trigger an
-        # entry reload on every single send (see FraimicOrientationSelect
-        # for why that reload is fine there but not here). Resets to None
-        # on restart, which just falls back to the generic frame icon until
-        # the next send. Not set by the raw-upload HTTP view or the
-        # send_image service, since those resolve a media_content_id rather
-        # than a library image_id.
+        # Canvas" or a Scene push -- both know the image_id up front). UI-only
+        # preview hint for the Frames dashboard card; persisted via
+        # _preview_store (see async_load_last_image/async_set_last_image)
+        # rather than entry.options so it survives a restart without
+        # triggering an entry reload on every send. Not set by the raw-upload
+        # HTTP view or the send_image service, since those resolve a
+        # media_content_id rather than a library image_id -- see
+        # last_thumbnail below for how those paths still populate a preview.
         self.last_image_id: str | None = None
+
+        # Small PNG preview of the last-sent image, for callers that have no
+        # Library image_id to hand -- currently the generic send_image
+        # service and the raw-upload card path, both of which resolve
+        # something other than a Library-managed image (see
+        # _handle_send_image in __init__.py and FraimicSendImageView in
+        # http_api.py). Mutually exclusive with last_image_id: whichever send
+        # path ran most recently clears the other, so the Frames panel never
+        # shows a stale thumbnail from a different source. Also persisted via
+        # _preview_store.
+        self.last_thumbnail: bytes | None = None
+
+        self._preview_store: Store = Store(
+            hass, _PREVIEW_STORE_VERSION, f"{DOMAIN}_last_image_{config_entry.entry_id}"
+        )
+
+    async def async_load_last_image(self) -> None:
+        """Hydrate last_image_id/last_thumbnail from disk. Call this once
+        during setup, before the Frames panel can query /api/fraimic/frames,
+        so the thumbnail survives a Home Assistant restart instead of
+        dropping back to the generic icon until the next send."""
+        try:
+            data = await self._preview_store.async_load()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Failed to load cached frame preview for %s: %s", self.host, err)
+            return
+        if not data:
+            return
+        self.last_image_id = data.get("last_image_id")
+        thumb_b64 = data.get("last_thumbnail_b64")
+        if thumb_b64:
+            try:
+                self.last_thumbnail = base64.b64decode(thumb_b64)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Failed to decode cached frame preview for %s: %s", self.host, err
+                )
+
+    async def async_set_last_image(
+        self, *, image_id: str | None = None, thumbnail: bytes | None = None
+    ) -> None:
+        """Record which image was last sent to this frame, for the Frames
+        panel thumbnail, and persist it to disk so it survives a restart.
+        Callers should pass exactly one of *image_id* / *thumbnail* -- the
+        other is cleared, keeping last_image_id/last_thumbnail mutually
+        exclusive (see their docstrings above)."""
+        self.last_image_id = image_id
+        self.last_thumbnail = thumbnail
+        await self._preview_store.async_save(
+            {
+                "last_image_id": image_id,
+                "last_thumbnail_b64": (
+                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+                ),
+            }
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers

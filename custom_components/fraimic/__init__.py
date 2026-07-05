@@ -116,6 +116,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     from .library_http import (  # noqa: PLC0415
         FraimicFramesView,
+        FraimicFrameThumbnailView,
         FraimicLibraryAlbumImagesView,
         FraimicLibraryAlbumsView,
         FraimicLibraryCropView,
@@ -141,6 +142,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(FraimicLibraryAlbumsView())
     hass.http.register_view(FraimicLibraryAlbumImagesView())
     hass.http.register_view(FraimicFramesView())
+    hass.http.register_view(FraimicFrameThumbnailView())
     hass.http.register_view(FraimicLibrarySettingsView())
     hass.http.register_view(FraimicLibraryDiscoverView())
     hass.http.register_view(FraimicLibraryGoogleRedirectUriView())
@@ -249,6 +251,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         return True
 
     coordinator = FraimicCoordinator(hass, entry)
+
+    # Hydrate the Frames panel thumbnail hint from disk before anything else
+    # can query it, so a restart doesn't drop back to the generic icon until
+    # the next send.
+    await coordinator.async_load_last_image()
 
     # Perform the first data fetch; raises ConfigEntryNotReady on failure so
     # HA will retry automatically.
@@ -396,11 +403,11 @@ def _register_services(hass: HomeAssistant) -> None:
         if not os.path.isfile(abs_path):
             raise HomeAssistantError(f"Media file not found: {abs_path}")
 
-        from .image_converter import convert_image  # noqa: PLC0415
+        from .image_converter import convert_image_with_preview  # noqa: PLC0415
 
         try:
-            image_bytes: bytes = await hass.async_add_executor_job(
-                convert_image, abs_path, spec.width, spec.height,
+            image_bytes, preview_bytes = await hass.async_add_executor_job(
+                convert_image_with_preview, abs_path, spec.width, spec.height,
                 spec.rotation, spec.locked,
             )
         except Exception as err:  # noqa: BLE001
@@ -409,6 +416,12 @@ def _register_services(hass: HomeAssistant) -> None:
             ) from err
 
         await coordinator.async_send_image(image_bytes)
+
+        # Update (and persist) the Frames panel's thumbnail hint. This
+        # service resolves a media_content_id, not a Library image_id, so it
+        # goes through last_thumbnail rather than last_image_id.
+        await coordinator.async_set_last_image(thumbnail=preview_bytes)
+
         _LOGGER.info(
             "Image '%s' (%dx%d) sent to frame %s",
             abs_path,

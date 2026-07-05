@@ -1310,6 +1310,7 @@
               frame.platform = match.platform;
               frame.orientation  = match.orientation;
               frame.lastImageId  = match.last_image_id;
+              frame.hasThumbnail = match.has_thumbnail;
             }
           }
         }
@@ -1483,8 +1484,18 @@
         }
       }
 
-      const thumbIcon = frame.lastImageId
-        ? `<img src="/api/fraimic/library/image/${this._esc(frame.lastImageId)}" alt="">`
+      // lastImageId (Library/Scene sends) and hasThumbnail (send_image
+      // service / raw upload sends) are mutually exclusive on the backend --
+      // see FraimicCoordinator.last_image_id / last_thumbnail -- so at most
+      // one of these branches applies.
+      let thumbSrc = null;
+      if (frame.lastImageId) {
+        thumbSrc = `/api/fraimic/library/image/${this._esc(frame.lastImageId)}`;
+      } else if (frame.hasThumbnail) {
+        thumbSrc = `/api/fraimic/frame/${this._esc(frame.entryId)}/thumbnail`;
+      }
+      const thumbIcon = thumbSrc
+        ? `<img src="${thumbSrc}" alt="">`
         : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
              <rect x="3" y="3" width="18" height="18" rx="2"/>
              <rect x="7" y="7" width="10" height="10" rx="1"/>

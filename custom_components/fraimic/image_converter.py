@@ -422,7 +422,30 @@ def convert_image(
     :raises ImportError: If Pillow is not installed.
     """
     image = _open_as_rgb(image_path)
-    return _process(image, width, height, rotation, locked)
+    bin_bytes, _quantized = _process(image, width, height, rotation, locked)
+    return bin_bytes
+
+
+def convert_image_with_preview(
+    image_path: str,
+    width: int,
+    height: int,
+    rotation: int = 0,
+    locked: bool = False,
+) -> "Tuple[bytes, bytes]":
+    """
+    Like :func:`convert_image`, but also returns a small PNG preview of the
+    final quantized image (see :func:`_encode_preview_png`) for callers that
+    need a UI thumbnail of what was sent -- currently the generic
+    ``send_image`` service, which resolves an arbitrary ``media_content_id``
+    rather than a Library image_id and so can't reuse the Library's
+    original-image thumbnail endpoint.
+
+    :returns: ``(bin_bytes, preview_png_bytes)``.
+    """
+    image = _open_as_rgb(image_path)
+    bin_bytes, quantized = _process(image, width, height, rotation, locked)
+    return bin_bytes, _encode_preview_png(quantized)
 
 
 def convert_image_bytes(
@@ -439,7 +462,43 @@ def convert_image_bytes(
     BMP, TIFF, …). See :func:`convert_image` for parameter details.
     """
     image = _open_as_rgb(image_data)
-    return _process(image, width, height, rotation, locked)
+    bin_bytes, _quantized = _process(image, width, height, rotation, locked)
+    return bin_bytes
+
+
+def convert_image_bytes_with_preview(
+    image_data: bytes,
+    width: int,
+    height: int,
+    rotation: int = 0,
+    locked: bool = False,
+) -> "Tuple[bytes, bytes]":
+    """
+    Like :func:`convert_image_bytes`, but also returns a small PNG preview of
+    the final quantized image. See :func:`convert_image_with_preview` for why
+    this exists -- used here by the raw-upload HTTP view
+    (FraimicSendImageView), which also has no Library image_id to hand.
+
+    :returns: ``(bin_bytes, preview_png_bytes)``.
+    """
+    image = _open_as_rgb(image_data)
+    bin_bytes, quantized = _process(image, width, height, rotation, locked)
+    return bin_bytes, _encode_preview_png(quantized)
+
+
+def _encode_preview_png(image: "Image.Image") -> bytes:
+    """
+    Encode *image* (already quantized to the Spectra 6 palette) as a small PNG,
+    downscaled to icon size. Used to give callers that don't have a Library
+    image_id (e.g. the generic send_image service / media browser sends) a
+    UI-viewable thumbnail of what actually went to the frame, without needing
+    the original source file to still be reachable later.
+    """
+    preview = image.copy()
+    preview.thumbnail((240, 240), Image.LANCZOS)
+    buf = io.BytesIO()
+    preview.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def _process(
@@ -448,8 +507,10 @@ def _process(
     height: int,
     rotation: int = 0,
     locked: bool = False,
-) -> bytes:
-    """Shared implementation used by both public entry points."""
+) -> "Tuple[bytes, Image.Image]":
+    """Shared implementation used by both public entry points. Returns the
+    packed bytes alongside the final quantized image so preview-generating
+    callers can reuse it without re-running the pipeline."""
     if not locked:
         # The Fraimic way: a mismatched image lies sideways at full size.
         image = _auto_rotate(image, width, height)
@@ -459,7 +520,7 @@ def _process(
     if rotation:
         image = image.rotate(rotation, expand=True)
     image = _quantize_to_spectra6(image)
-    return _pack_to_spectra6_bin(image)
+    return _pack_to_spectra6_bin(image), image
 
 
 def convert_image_cropped(

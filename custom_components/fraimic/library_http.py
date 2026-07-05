@@ -17,6 +17,9 @@ Endpoints:
     POST /api/fraimic/library/albums/{name}/images         add a batch of images to an album (creates it
                                                             if the name isn't in use yet)
     GET  /api/fraimic/frames                              list frames with their configured width/height
+    GET  /api/fraimic/frame/{entry_id}/thumbnail          last-sent-image preview for sends with no
+                                                            Library image_id (send_image service / raw
+                                                            upload) -- see FraimicCoordinator.last_thumbnail
     GET  /api/fraimic/library/settings                    current backend name
     POST /api/fraimic/library/settings                    change backend (validates first;
                                                             used directly by Local + Dropbox)
@@ -250,7 +253,7 @@ class FraimicLibrarySendView(HomeAssistantView):
             )
             return self.json_message(f"Failed to send to frame: {err}", status_code=502)
 
-        coordinator.last_image_id = image_id
+        await coordinator.async_set_last_image(image_id=image_id)
 
         return self.json({"success": True, "bytes_sent": len(bin_bytes)})
 
@@ -493,9 +496,36 @@ class FraimicFramesView(HomeAssistantView):
                         # the first send of this HA session, or if the last
                         # send came from the raw-upload card path.
                         "last_image_id": getattr(coordinator, "last_image_id", None),
+                        # True when last_image_id is unset but a same-session
+                        # send still left a preview to show (send_image
+                        # service / raw upload) -- see
+                        # FraimicCoordinator.last_thumbnail and
+                        # FraimicFrameThumbnailView below.
+                        "has_thumbnail": getattr(coordinator, "last_thumbnail", None) is not None,
                     }
                 )
         return self.json({"frames": frames})
+
+
+class FraimicFrameThumbnailView(HomeAssistantView):
+    """Serve the cached preview PNG (FraimicCoordinator.last_thumbnail) for a
+    frame's last-sent image, for send paths that have no Library image_id to
+    reuse FraimicLibraryImageView for (the generic send_image service and the
+    raw-upload card path). 404 until the first such send this session, or
+    whenever the last send instead came from the Library/Scene path (which
+    uses last_image_id + FraimicLibraryImageView instead)."""
+
+    url = "/api/fraimic/frame/{entry_id}/thumbnail"
+    name = "api:fraimic:frame:thumbnail"
+    requires_auth = True
+
+    async def get(self, request: web.Request, entry_id: str) -> web.Response:
+        hass = request.app["hass"]
+        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+        thumbnail = getattr(coordinator, "last_thumbnail", None) if coordinator else None
+        if thumbnail is None:
+            return self.json_message("No thumbnail available", status_code=404)
+        return web.Response(body=thumbnail, content_type="image/png")
 
 
 class FraimicLibrarySettingsView(HomeAssistantView):

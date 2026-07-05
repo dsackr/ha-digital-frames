@@ -248,6 +248,8 @@ class SceneManager:
                 results.append({"entry_id": entry_id, "success": False, "message": str(outcome)})
             else:
                 results.append({"entry_id": entry_id, "success": True})
-                prepared[entry_id][0].last_image_id = prepared[entry_id][2]
+                await prepared[entry_id][0].async_set_last_image(
+                    image_id=prepared[entry_id][2]
+                )
 
         return {"results": results}

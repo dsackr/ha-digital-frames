@@ -104,11 +104,11 @@ class FraimicSendImageView(HomeAssistantView):
         spec = render_spec_for_entry(entry)
 
         # Convert image in a thread-pool (CPU-bound Pillow work).
-        from .image_converter import convert_image_bytes  # noqa: PLC0415
+        from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415
 
         try:
-            bin_bytes: bytes = await hass.async_add_executor_job(
-                convert_image_bytes, raw_bytes, spec.width, spec.height,
+            bin_bytes, preview_bytes = await hass.async_add_executor_job(
+                convert_image_bytes_with_preview, raw_bytes, spec.width, spec.height,
                 spec.rotation, spec.locked,
             )
         except Exception as err:  # noqa: BLE001
@@ -127,6 +127,12 @@ class FraimicSendImageView(HomeAssistantView):
             return self.json_message(
                 f"Failed to send to frame: {err}", status_code=502
             )
+
+        # Update (and persist) the Frames panel's thumbnail hint. This upload
+        # has no Library image_id (it's a raw multipart file, never added to
+        # the Library), so unlike a Library/Scene send it goes through
+        # last_thumbnail rather than last_image_id.
+        await coordinator.async_set_last_image(thumbnail=preview_bytes)
 
         _LOGGER.info(
             "Image sent to frame %s (%d raw bytes → %d bin bytes)",
