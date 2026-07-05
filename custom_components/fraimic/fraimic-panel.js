@@ -3849,6 +3849,14 @@
       }
     }
 
+    // NOT a CSS attribute-selector lookup: this file's top-level `CSS` const
+    // (the stylesheet template string, see top of file) shadows the global
+    // `CSS` object everywhere in this closure, so `CSS.escape` is unavailable
+    // here -- it would throw "CSS.escape is not a function".
+    _wallTileEl(canvas, entryId) {
+      return [...canvas.querySelectorAll('.wall-tile')].find(el => el.dataset.entryId === entryId) || null;
+    }
+
     _positionWallGhost(clientX, clientY) {
       const drag = this._wallDrag;
       if (!drag) return;
@@ -3872,7 +3880,7 @@
 
       let startLeft = 0, startTop = 0;
       if (kind === 'tile') {
-        const tileEl = canvas.querySelector(`.wall-tile[data-entry-id="${CSS.escape(entryId)}"]`);
+        const tileEl = this._wallTileEl(canvas, entryId);
         if (tileEl) {
           startLeft = parseFloat(tileEl.style.left) || 0;
           startTop  = parseFloat(tileEl.style.top) || 0;
@@ -3910,7 +3918,7 @@
       this._wallDrag = null;
 
       const canvas = this.shadowRoot.getElementById('wall-canvas');
-      const tileEl = canvas.querySelector(`.wall-tile[data-entry-id="${CSS.escape(drag.entryId)}"]`);
+      const tileEl = this._wallTileEl(canvas, drag.entryId);
       if (tileEl) tileEl.classList.remove('dragging');
 
       if (drag.kind === 'tile' && !drag.moved) {
