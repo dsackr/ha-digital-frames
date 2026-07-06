@@ -22,9 +22,11 @@
   // each pack's index.json entry -- the Add-ons tab browses packs grouped
   // into these tiles before drilling into a flat pack grid.
   const PACK_CATEGORIES = {
-    art: { label: 'Art' },
-    seasonal: { label: 'Seasonal & Holiday' },
-    widgets: { label: 'Active Add-ons' },
+    famous_artists: { label: 'Famous Artists' },
+    nature: { label: 'Nature' },
+    architecture: { label: 'Architecture' },
+    seasons: { label: 'Seasons & Holidays' },
+    productivity: { label: 'Productivity' }
   };
 
   // -------------------------------------------------------------------------
@@ -791,6 +793,15 @@
     }
 
     /* ---- scene pack categories ---- */
+    .addons-section-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      margin: 0 0 16px;
+      border-bottom: 2px solid var(--primary-color, #03a9f4);
+      padding-bottom: 8px;
+      display: inline-block;
+    }
     .addons-crumb {
       display: none;
       align-items: center;
@@ -4996,12 +5007,32 @@
 
       if (!this._packCategory) {
         crumb.style.display = 'none';
-        grid.className = 'category-grid';
-        grid.innerHTML = '';
-        for (const catId of Object.keys(PACK_CATEGORIES)) {
-          const packs = this._scenePacks.filter(p => (p.category || 'art') === catId);
-          if (!packs.length) continue;
-          grid.appendChild(this._buildCategoryTile(catId, packs));
+        grid.className = '';
+        grid.innerHTML = `
+          <div class="addons-section">
+            <h2 class="addons-section-title">Art Packs</h2>
+            <div class="category-grid" id="art-categories-grid"></div>
+          </div>
+          <div class="addons-section" style="margin-top: 40px;">
+            <h2 class="addons-section-title">Productivity Packs</h2>
+            <div class="lib-grid" id="productivity-grid"></div>
+          </div>
+        `;
+        
+        const artGrid = grid.querySelector('#art-categories-grid');
+        const prodGrid = grid.querySelector('#productivity-grid');
+        
+        const artCatIds = ['famous_artists', 'nature', 'architecture', 'seasons'];
+        for (const catId of artCatIds) {
+          const packs = this._scenePacks.filter(p => (p.category || 'famous_artists') === catId);
+          if (packs.length > 0) {
+            artGrid.appendChild(this._buildCategoryTile(catId, packs));
+          }
+        }
+        
+        const prodPacks = this._scenePacks.filter(p => (p.category || 'famous_artists') === 'productivity');
+        for (const pack of prodPacks) {
+          prodGrid.appendChild(this._buildPackCard(pack));
         }
         return;
       }
@@ -5019,7 +5050,7 @@
 
       grid.className = 'lib-grid';
       grid.innerHTML = '';
-      for (const pack of this._scenePacks.filter(p => (p.category || 'art') === this._packCategory)) {
+      for (const pack of this._scenePacks.filter(p => (p.category || 'famous_artists') === this._packCategory)) {
         grid.appendChild(this._buildPackCard(pack));
       }
     }
