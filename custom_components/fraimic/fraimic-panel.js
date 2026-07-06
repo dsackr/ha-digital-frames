@@ -1079,16 +1079,16 @@
       // all of this and paint synchronously (see _loadThumbnail).
       this._thumbQueue  = [];   // [{ imageId, container }] waiting for a fetch slot
       this._thumbActive = 0;    // thumbnail fetches currently in flight
-      this._thumbObserver = (typeof IntersectionObserver !== 'undefined')
-        ? new IntersectionObserver((entries) => {
-            for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              this._thumbObserver.unobserve(entry.target);
-              const imageId = entry.target._fraimicThumbId;
-              if (imageId) this._enqueueThumbFetch(imageId, entry.target);
-            }
-          }, { rootMargin: '200px' })
-        : null;
+      this._thumbObserver = this._makeThumbObserver();
+
+      // Every window/document-level listener is registered with this
+      // controller's signal so disconnecting the panel (navigating to
+      // another HA panel) severs them all at once -- without this, each
+      // visit left behind global listeners closing over the whole detached
+      // shadow tree. See disconnectedCallback/_dispose/_revive.
+      this._abort = new AbortController();
+      this._disposed = false;      // true after _dispose ran (detached for real)
+      this._disposeTimer = null;   // pending deferred dispose, cancellable by a same-tick reattach
 
       this._albums        = [];       // [{ name, count, cover_image_id }]
       this._currentAlbum  = null;     // null = album folder view; a name = viewing that album
@@ -1129,6 +1129,96 @@
       this._editorImgUrl = null;  // blob: URL for the editor's full-size image
       this._onEditorPointerMove = this._onEditorPointerMove.bind(this);
       this._onEditorPointerUp   = this._onEditorPointerUp.bind(this);
+    }
+
+    // -----------------------------------------------------------------------
+    // Element lifecycle: sever global listeners + release blob memory when
+    // the panel leaves the DOM (HA navigations), and recover if it returns.
+    // -----------------------------------------------------------------------
+
+    _makeThumbObserver() {
+      if (typeof IntersectionObserver === 'undefined') return null;
+      return new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          this._thumbObserver.unobserve(entry.target);
+          const imageId = entry.target._fraimicThumbId;
+          if (imageId) this._enqueueThumbFetch(imageId, entry.target);
+        }
+      }, { rootMargin: '200px' });
+    }
+
+    disconnectedCallback() {
+      // Defer: a same-tick detach/reattach (the surrounding app moving
+      // nodes) must not tear anything down. connectedCallback cancels this.
+      this._disposeTimer = setTimeout(() => {
+        this._disposeTimer = null;
+        this._dispose();
+      }, 0);
+    }
+
+    connectedCallback() {
+      if (this._disposeTimer) {
+        clearTimeout(this._disposeTimer);
+        this._disposeTimer = null;
+      }
+      if (this._disposed) this._revive();
+    }
+
+    _dispose() {
+      this._disposed = true;
+      this._abort.abort();
+      if (this._thumbObserver) this._thumbObserver.disconnect();
+      if (this._wallDrag) {
+        if (this._wallDrag.ghost) this._wallDrag.ghost.remove();
+        this._wallDrag = null;
+      }
+      this._editorDrag = null;
+      // blob: URLs are registered on the document, not this element -- left
+      // unrevoked they'd keep every thumbnail's bytes alive until a full
+      // page reload, once per panel visit.
+      for (const url of Object.values(this._thumbUrls)) URL.revokeObjectURL(url);
+      this._thumbUrls = {};
+      this._thumbFetches = {};
+      this._thumbQueue = [];
+      if (this._editorImgUrl) {
+        URL.revokeObjectURL(this._editorImgUrl);
+        this._editorImgUrl = null;
+      }
+    }
+
+    // Defensive: today's HA recreates a custom panel element per visit, but
+    // if this exact element ever re-enters the DOM, put it back in working
+    // order instead of leaving dead listeners and revoked image URLs.
+    _revive() {
+      this._disposed = false;
+      this._abort = new AbortController();
+      this._thumbObserver = this._makeThumbObserver();
+      this._addGlobalListeners();
+      if (!this._loaded) return;
+      // Grid <img>s still point at revoked blob: URLs -- re-render from
+      // in-memory state so tiles re-register with the observer and refetch
+      // (cheap: server-side disk thumbnail cache + browser HTTP cache).
+      this._renderFrames();
+      this._renderLibrary();
+      this._renderScenes();
+      this._renderScenePacks();
+      this._renderWallsSubview();
+    }
+
+    // The three long-lived window/document listeners the panel needs.
+    // Handler fields are created by _wireUploadModal/_wirePackPreview (run
+    // once in _init); registration is separate so _revive can re-attach
+    // them under the replacement AbortController.
+    _addGlobalListeners() {
+      const signal = this._abort.signal;
+      if (this._sweepUploadInput) {
+        window.addEventListener('focus', this._sweepUploadInput, { signal });
+        document.addEventListener('visibilitychange', this._onDocVisibility, { signal });
+      }
+      if (this._onPackPreviewKeydown) {
+        window.addEventListener('keydown', this._onPackPreviewKeydown, { signal });
+      }
     }
 
     // HA sets this whenever state changes.
@@ -1180,6 +1270,7 @@
       this._wireWallToolbar();
       this._wireWallImagePicker();
       this._wirePackTest();
+      this._addGlobalListeners();
       // Fire every tab's data load concurrently and render each section as
       // its data lands -- these are independent endpoints, and awaiting
       // them serially made first paint wait on the sum of all round trips
@@ -2649,15 +2740,16 @@
       // Last-resort sweep for WebViews that fire neither event on return
       // from the picker: re-check the input whenever the page regains focus
       // or becomes visible again (Android fires visibilitychange, not
-      // window focus, when returning from the picker activity).
-      const sweepIfOpen = () => {
+      // window focus, when returning from the picker activity). Kept as
+      // instance fields and registered via _addGlobalListeners so the
+      // element lifecycle can detach/re-attach them.
+      this._sweepUploadInput = () => {
         const overlay = this.shadowRoot.getElementById('upload-modal-overlay');
         if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') captureFiles();
       };
-      window.addEventListener('focus', sweepIfOpen);
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) sweepIfOpen();
-      });
+      this._onDocVisibility = () => {
+        if (!document.hidden) this._sweepUploadInput();
+      };
 
       albumSelect.addEventListener('change', () => {
         newAlbumRow.style.display = albumSelect.value === '' ? 'block' : 'none';
@@ -3269,8 +3361,9 @@
         startBox: this._editorState.cropBox.slice(),
         imgRect: this._editorImageRect(),
       };
-      window.addEventListener('pointermove', this._onEditorPointerMove);
-      window.addEventListener('pointerup', this._onEditorPointerUp);
+      // signal: if the panel is detached mid-drag, _dispose severs these.
+      window.addEventListener('pointermove', this._onEditorPointerMove, { signal: this._abort.signal });
+      window.addEventListener('pointerup', this._onEditorPointerUp, { signal: this._abort.signal });
     }
 
     _onEditorPointerMove(e) {
@@ -4363,8 +4456,9 @@
       };
 
       this._positionWallGhost(e.clientX, e.clientY);
-      window.addEventListener('pointermove', this._onWallPointerMove);
-      window.addEventListener('pointerup', this._onWallPointerUp);
+      // signal: if the panel is detached mid-drag, _dispose severs these.
+      window.addEventListener('pointermove', this._onWallPointerMove, { signal: this._abort.signal });
+      window.addEventListener('pointerup', this._onWallPointerUp, { signal: this._abort.signal });
     }
 
     _onWallPointerMove(e) {
@@ -4556,8 +4650,9 @@
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
         };
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
+        // signal: if the panel is detached mid-drag, _dispose severs these.
+        window.addEventListener('pointermove', onMove, { signal: this._abort.signal });
+        window.addEventListener('pointerup', onUp, { signal: this._abort.signal });
       });
     }
 
@@ -5074,13 +5169,14 @@
       // shadowRoot listener if focus is already inside the shadow tree,
       // which isn't guaranteed here (the pack cover that opened this modal
       // doesn't take focus). Window-level catches the keypress regardless
-      // of where focus happens to be.
-      window.addEventListener('keydown', (e) => {
+      // of where focus happens to be. Registered via _addGlobalListeners
+      // so the element lifecycle can detach/re-attach it.
+      this._onPackPreviewKeydown = (e) => {
         if (!this._packPreview) return;
         if (e.key === 'Escape') this._closePackPreview();
         else if (e.key === 'ArrowLeft') this._packPreviewStep(-1);
         else if (e.key === 'ArrowRight') this._packPreviewStep(1);
-      });
+      };
     }
 
     _openPackPreview(pack, index) {
