@@ -1458,6 +1458,9 @@ class LibraryManager:
         raw_bytes, _content_type = await self._backend.async_get_original(image_id)
         record = await self._find_image(image_id)
         crop_box = (record.crops if record else {}).get(f"{width}x{height}")
+        if not crop_box and record and record.crops:
+            fallback_key = "portrait" if width < height else "landscape"
+            crop_box = record.crops.get(fallback_key)
         effective_method = pack_method or "fast"
 
         if crop_box:
@@ -1479,33 +1482,85 @@ class LibraryManager:
         return bin_bytes
 
     async def async_set_crop(
-        self, image_id: str, width: int, height: int, crop_box: list[float]
+        self, image_id: str, width: int | str, height: int, crop_box: list[float]
     ) -> dict[str, Any]:
-        """Persist a manual crop rectangle for one image at one resolution,
+        """Persist a manual crop rectangle for one image at one resolution or orientation,
         and drop any cached .bin for that resolution so the next send picks
         up the new crop instead of a stale render."""
         record = await self._find_image(image_id)
         if record is None:
             raise LibraryBackendError(f"Image '{image_id}' not found")
         crops = dict(record.crops)
-        crops[f"{width}x{height}"] = [float(v) for v in crop_box]
+        if isinstance(width, str) and width in ("portrait", "landscape"):
+            crops[width] = [float(v) for v in crop_box]
+            # Clear cached bins for all resolutions matching this orientation
+            from .frame_types import FRAME_TYPES  # noqa: PLC0415
+            for ft in FRAME_TYPES.values():
+                w, h = ft.resolution
+                for rw, rh in ((w, h), (h, w)):
+                    is_port = rw < rh
+                    is_land = rw >= rh
+                    if (width == "portrait" and is_port) or (width == "landscape" and is_land):
+                        try:
+                            await self._backend.async_delete_bin(image_id, rw, rh)
+                        except Exception:  # noqa: BLE001
+                            pass
+        else:
+            crops[f"{width}x{height}"] = [float(v) for v in crop_box]
+            # Also update the fallback orientation crop box!
+            # If the user saved a crop for a specific resolution, we also copy it
+            # to the corresponding generic orientation key, so that other frames of the same
+            # orientation immediately pick it up as a default fallback crop.
+            orient_key = "portrait" if width < height else "landscape"
+            crops[orient_key] = [float(v) for v in crop_box]
+
+            await self._backend.async_delete_bin(image_id, width, height)
+            # Delete other resolutions matching this orientation since we updated the fallback
+            from .frame_types import FRAME_TYPES  # noqa: PLC0415
+            for ft in FRAME_TYPES.values():
+                w, h = ft.resolution
+                for rw, rh in ((w, h), (h, w)):
+                    if rw == width and rh == height:
+                        continue
+                    is_port = rw < rh
+                    is_land = rw >= rh
+                    if (orient_key == "portrait" and is_port) or (orient_key == "landscape" and is_land):
+                        try:
+                            await self._backend.async_delete_bin(image_id, rw, rh)
+                        except Exception:  # noqa: BLE001
+                            pass
+
         await self._backend.async_update_image_fields(image_id, crops=crops)
-        await self._backend.async_delete_bin(image_id, width, height)
         record.crops = crops
         return record.to_dict()
 
     async def async_clear_crop(
-        self, image_id: str, width: int, height: int
+        self, image_id: str, width: int | str, height: int
     ) -> dict[str, Any]:
         """Revert to the automatic (centered cover-crop) rendering
-        for one image at one resolution."""
+        for one image at one resolution or orientation."""
         record = await self._find_image(image_id)
         if record is None:
             raise LibraryBackendError(f"Image '{image_id}' not found")
         crops = dict(record.crops)
-        crops.pop(f"{width}x{height}", None)
+        if isinstance(width, str) and width in ("portrait", "landscape"):
+            crops.pop(width, None)
+            from .frame_types import FRAME_TYPES  # noqa: PLC0415
+            for ft in FRAME_TYPES.values():
+                w, h = ft.resolution
+                for rw, rh in ((w, h), (h, w)):
+                    is_port = rw < rh
+                    is_land = rw >= rh
+                    if (width == "portrait" and is_port) or (width == "landscape" and is_land):
+                        try:
+                            await self._backend.async_delete_bin(image_id, rw, rh)
+                        except Exception:  # noqa: BLE001
+                            pass
+        else:
+            crops.pop(f"{width}x{height}", None)
+            await self._backend.async_delete_bin(image_id, width, height)
+
         await self._backend.async_update_image_fields(image_id, crops=crops)
-        await self._backend.async_delete_bin(image_id, width, height)
         record.crops = crops
         return record.to_dict()
 

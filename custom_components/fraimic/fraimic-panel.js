@@ -1590,13 +1590,14 @@
           </div>
           <div class="editor-controls">
             <div class="editor-row" id="editor-frame-row">
-              <span class="editor-label">Send to</span>
+              <span class="editor-label">Target</span>
               <select id="editor-frame-select"></select>
             </div>
             <div class="editor-row">
               <span class="editor-hint" id="editor-frame-hint"></span>
             </div>
             <div class="editor-actions">
+              <button class="btn-primary" id="editor-save-crop">💾 Save Crop</button>
               <button class="btn-primary" id="editor-send">⬆ Send to Canvas</button>
               <button class="btn-ghost" id="editor-add-album">＋ Add to Album</button>
               <button class="btn-ghost" id="editor-reset">↺ Reset crop</button>
@@ -3032,6 +3033,7 @@
       root.getElementById('editor-cancel').addEventListener('click', () => this._closeEditor());
       root.getElementById('editor-reset').addEventListener('click', () => this._editorResetCrop());
       root.getElementById('editor-add-album').addEventListener('click', () => this._editorAddToAlbum());
+      root.getElementById('editor-save-crop').addEventListener('click', () => this._editorSaveCropAction());
       root.getElementById('editor-send').addEventListener('click', () => this._editorSendToCanvas());
       root.getElementById('editor-delete').addEventListener('click', () => this._editorDeleteImage());
 
@@ -3058,19 +3060,26 @@
     // the full image, then renders.
     async _openEditor(image) {
       const frames = this._editorFrames();
-      const hasFrames = frames.length > 0;
 
-      // Default to the first frame whose effective resolution already has a
-      // saved crop, so re-opening an image lands on the crop you last made.
-      let initial = frames[0] || null;
+      // Default to whichever frame or orientation already has a saved crop.
+      let initialVal = 'generic_portrait';
+      if (image.crops && image.crops['portrait']) {
+        initialVal = 'generic_portrait';
+      } else if (image.crops && image.crops['landscape']) {
+        initialVal = 'generic_landscape';
+      }
+
       for (const frame of frames) {
         const key = `${frame.width}x${frame.height}`;
-        if (image.crops && image.crops[key]) { initial = frame; break; }
+        if (image.crops && image.crops[key]) {
+          initialVal = frame.entityId;
+          break;
+        }
       }
 
       this._editorState = {
         image,
-        frameEntityId: initial ? initial.entityId : null,
+        frameEntityId: initialVal,
         targetWidth: 0,
         targetHeight: 0,
         naturalW: 0,
@@ -3080,25 +3089,25 @@
       };
 
       const select = this.shadowRoot.getElementById('editor-frame-select');
-      this.shadowRoot.getElementById('editor-reset').disabled = !hasFrames;
+      this.shadowRoot.getElementById('editor-reset').disabled = false;
       this.shadowRoot.getElementById('editor-add-album').disabled = false;
-      if (hasFrames) {
-        select.disabled = false;
-        select.innerHTML = frames.map(f =>
+
+      let optionsHtml = '';
+      optionsHtml += `<optgroup label="Generic Orientations">`;
+      optionsHtml += `<option value="generic_portrait">Generic Portrait (3:4)</option>`;
+      optionsHtml += `<option value="generic_landscape">Generic Landscape (16:9)</option>`;
+      optionsHtml += `</optgroup>`;
+      if (frames.length > 0) {
+        optionsHtml += `<optgroup label="Frames">`;
+        optionsHtml += frames.map(f =>
           `<option value="${this._esc(f.entityId)}">${this._esc(f.title)} — ${this._esc(this._editorFrameLabel(f))}</option>`
         ).join('');
-        select.value = this._editorState.frameEntityId;
-        this.shadowRoot.getElementById('editor-send').disabled = false;
-      } else {
-        select.innerHTML = '<option value="">No frames configured</option>';
-        select.disabled = true;
-        this.shadowRoot.getElementById('editor-send').disabled = true;
-        // No cropBox will be computed this session -- hide the crop box
-        // rather than leave it showing wherever a previous image's session
-        // last positioned it.
-        this.shadowRoot.getElementById('editor-cropbox').style.display = 'none';
-        this.shadowRoot.getElementById('editor-frame-hint').textContent = '';
+        optionsHtml += `</optgroup>`;
       }
+
+      select.innerHTML = optionsHtml;
+      select.disabled = false;
+      select.value = initialVal;
 
       const overlay = this.shadowRoot.getElementById('editor-overlay');
       overlay.style.display = 'flex';
@@ -3125,11 +3134,7 @@
         return;
       }
 
-      if (hasFrames) {
-        this._editorSetFrame(this._editorState.frameEntityId);
-      } else {
-        this._editorShowFb('err', 'No frames configured yet — add a Fraimic frame to enable cropping.');
-      }
+      this._editorSetFrame(this._editorState.frameEntityId);
     }
 
     _closeEditor() {
@@ -3143,21 +3148,43 @@
       this._editorState = null;
     }
 
-    // Switch the target frame: the frame's effective dimensions dictate the
-    // crop aspect. Loads any crop already saved for that exact resolution,
-    // or otherwise falls back to a centered cover-crop (re-centered on
-    // wherever the previous box was looking, so switching frames doesn't
-    // make the crop jump to a random spot).
     _editorSetFrame(entityId) {
       const st = this._editorState;
-      const frame = this._editorFrames().find(f => f.entityId === entityId)
-        || this._editorFrames()[0];
-      if (!frame) return;
-      st.frameEntityId = frame.entityId;
-      st.targetWidth = frame.width;
-      st.targetHeight = frame.height;
+      let targetWidth, targetHeight, key, isGeneric = false;
 
-      const key = `${frame.width}x${frame.height}`;
+      if (entityId === 'generic_portrait') {
+        targetWidth = 1200;
+        targetHeight = 1600;
+        key = 'portrait';
+        isGeneric = true;
+        st.frameEntityId = 'generic_portrait';
+      } else if (entityId === 'generic_landscape') {
+        targetWidth = 2560;
+        targetHeight = 1440;
+        key = 'landscape';
+        isGeneric = true;
+        st.frameEntityId = 'generic_landscape';
+      } else {
+        const frame = this._editorFrames().find(f => f.entityId === entityId)
+          || this._editorFrames()[0];
+        if (frame) {
+          targetWidth = frame.width;
+          targetHeight = frame.height;
+          key = `${frame.width}x${frame.height}`;
+          st.frameEntityId = frame.entityId;
+        } else {
+          // If no frames exist at all
+          targetWidth = 1200;
+          targetHeight = 1600;
+          key = 'portrait';
+          isGeneric = true;
+          st.frameEntityId = 'generic_portrait';
+        }
+      }
+
+      st.targetWidth = targetWidth;
+      st.targetHeight = targetHeight;
+
       const saved = st.image.crops && st.image.crops[key];
       if (saved) {
         st.cropBox = saved.slice();
@@ -3168,16 +3195,30 @@
           cx = (st.cropBox[0] + st.cropBox[2]) / 2;
           cy = (st.cropBox[1] + st.cropBox[3]) / 2;
         }
-        st.cropBox = this._editorComputeCoverBox(st.naturalW, st.naturalH, frame.width, frame.height, cx, cy);
+        st.cropBox = this._editorComputeCoverBox(st.naturalW, st.naturalH, targetWidth, targetHeight, cx, cy);
         st.cropIsSaved = false;
       }
 
       const hint = this.shadowRoot.getElementById('editor-frame-hint');
-      const portrait = frame.height >= frame.width;
-      const locked = frame.orientation && frame.orientation !== 'auto';
-      hint.textContent = locked
-        ? `Frame is locked to ${frame.orientation} — adjust the ${portrait ? 'portrait' : 'landscape'} crop window below.`
-        : `Crop follows this frame's current ${portrait ? 'portrait' : 'landscape'} orientation.`;
+      const sendBtn = this.shadowRoot.getElementById('editor-send');
+      if (isGeneric) {
+        sendBtn.disabled = true;
+        sendBtn.title = 'Select a physical frame to enable sending.';
+        if (st.frameEntityId === 'generic_portrait') {
+          hint.textContent = 'Generic 3:4 portrait aspect ratio crop. Saved to "portrait" fallback.';
+        } else {
+          hint.textContent = 'Generic 16:9 landscape aspect ratio crop. Saved to "landscape" fallback.';
+        }
+      } else {
+        sendBtn.disabled = false;
+        sendBtn.title = '';
+        const frame = this._editorFrames().find(f => f.entityId === st.frameEntityId);
+        const portrait = frame.height >= frame.width;
+        const locked = frame.orientation && frame.orientation !== 'auto';
+        hint.textContent = locked
+          ? `Frame is locked to ${frame.orientation} — adjust the ${portrait ? 'portrait' : 'landscape'} crop window below.`
+          : `Crop follows this frame's current ${portrait ? 'portrait' : 'landscape'} orientation.`;
+      }
 
       this._editorRenderCropBox();
     }
@@ -3304,13 +3345,23 @@
 
     async _editorSaveCrop() {
       const st = this._editorState;
+      let w = st.targetWidth;
+      let h = st.targetHeight;
+      if (st.frameEntityId === 'generic_portrait') {
+        w = 'portrait';
+        h = 0;
+      } else if (st.frameEntityId === 'generic_landscape') {
+        w = 'landscape';
+        h = 0;
+      }
+
       const resp = await fetch('/api/fraimic/library/crop', {
         method: 'POST',
         headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image_id: st.image.image_id,
-          width: st.targetWidth,
-          height: st.targetHeight,
+          width: w,
+          height: h,
           crop_box: st.cropBox,
         }),
       });
@@ -3324,16 +3375,40 @@
       if (libImg) libImg.crops = result.image.crops;
     }
 
+    async _editorSaveCropAction() {
+      const btn = this.shadowRoot.getElementById('editor-save-crop');
+      const prevText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Saving…';
+      try {
+        await this._editorSaveCrop();
+        this._editorShowFb('ok', '✓ Crop saved!');
+      } catch (err) {
+        this._editorShowFb('err', `Failed to save crop: ${err.message}`);
+      }
+      btn.disabled = false;
+      btn.textContent = prevText;
+    }
+
     // Reverts to the original (uncropped/letterboxed) framing for the
     // current size+orientation -- distinct from Cancel, which just discards
     // unsaved in-editor changes without touching what's persisted.
     async _editorResetCrop() {
       const st = this._editorState;
+      let w = st.targetWidth;
+      let h = st.targetHeight;
+      if (st.frameEntityId === 'generic_portrait') {
+        w = 'portrait';
+        h = 0;
+      } else if (st.frameEntityId === 'generic_landscape') {
+        w = 'landscape';
+        h = 0;
+      }
       try {
         const resp = await fetch('/api/fraimic/library/crop', {
           method: 'DELETE',
           headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_id: st.image.image_id, width: st.targetWidth, height: st.targetHeight }),
+          body: JSON.stringify({ image_id: st.image.image_id, width: w, height: h }),
         });
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {
@@ -3346,7 +3421,7 @@
         st.cropBox = this._editorComputeCoverBox(st.naturalW, st.naturalH, st.targetWidth, st.targetHeight);
         st.cropIsSaved = false;
         this._editorRenderCropBox();
-        this._editorShowFb('ok', 'Reverted to the automatic framing for this frame.');
+        this._editorShowFb('ok', 'Reverted to the automatic framing for this target.');
       } catch (err) {
         this._editorShowFb('err', `Couldn't reset crop: ${err.message}`);
       }

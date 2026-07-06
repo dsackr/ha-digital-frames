@@ -691,13 +691,32 @@ def _process_cropped(
     rotation: int = 0,
     pack_method: str = "fast",
 ) -> bytes:
-    """Shared implementation for the manual-crop public entry points.
+    img_w, img_h = image.width, image.height
+    x0, y0, x1, y1 = crop_box
+    w = x1 - x0
+    h = y1 - y0
+    if w > 0 and h > 0:
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        # Target aspect ratio in normalized coordinates:
+        # nw / nh = (width * img_h) / (height * img_w)
+        target_ar_norm = (width * img_h) / (height * img_w)
 
-    No auto-rotate step here -- unlike the letterbox path, the crop box's
-    position and aspect ratio already fully encode the user's chosen
-    orientation, so rotating the source image first would only make the
-    saved (normalized) crop coordinates harder to reason about.
-    """
+        if w / h > target_ar_norm:
+            # Crop box is too wide, trim the width
+            nh = h
+            nw = h * target_ar_norm
+        else:
+            # Crop box is too tall, trim the height
+            nw = w
+            nh = w / target_ar_norm
+
+        x0 = max(0.0, min(cx - nw / 2.0, 1.0))
+        x1 = max(0.0, min(cx + nw / 2.0, 1.0))
+        y0 = max(0.0, min(cy - nh / 2.0, 1.0))
+        y1 = max(0.0, min(cy + nh / 2.0, 1.0))
+        crop_box = (x0, y0, x1, y1)
+
     image = _crop_to_box(image, crop_box)
     image = image.resize((width, height), Image.LANCZOS)
     if rotation:

@@ -326,11 +326,17 @@ class FraimicLibraryCropView(HomeAssistantView):
     requires_auth = True
 
     @staticmethod
-    def _parse_common(body: dict) -> "tuple[str, int, int] | None":
+    def _parse_common(body: dict) -> "tuple[str, int | str, int] | None":
         image_id = (body or {}).get("image_id")
         width = (body or {}).get("width")
         height = (body or {}).get("height")
-        if not image_id or not isinstance(width, int) or not isinstance(height, int):
+        if not image_id:
+            return None
+        if isinstance(width, str) and width in ("portrait", "landscape"):
+            if not isinstance(height, int):
+                return None
+            return image_id, width, height
+        if not isinstance(width, int) or not isinstance(height, int):
             return None
         return image_id, width, height
 
