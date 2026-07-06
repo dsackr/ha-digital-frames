@@ -5174,6 +5174,33 @@
             </div>
           `;
           basicFieldsHtml += fieldHtml;
+        } else if (field.name === 'bible_translation') {
+          let fieldHtml = `
+            <div class="modal-row">
+              <label for="${fieldId}">${this._esc(label)}</label>
+              <select id="${fieldId}">
+                <option value="niv">NIV (New International Version)</option>
+                <option value="kjv">KJV (King James Version)</option>
+                <option value="web">WEB (World English Bible)</option>
+                <option value="bbe">BBE (Bible in Basic English)</option>
+                <option value="oeb">OEB (Open English Bible)</option>
+                <option value="rvr1960">RVR1960 (Spanish Reina Valera)</option>
+                <option value="almeida">Almeida (Portuguese João Ferreira)</option>
+              </select>
+            </div>
+          `;
+          basicFieldsHtml += fieldHtml;
+        } else if (field.name === 'scripture_source') {
+          let fieldHtml = `
+            <div class="modal-row">
+              <label for="${fieldId}">${this._esc(label)}</label>
+              <select id="${fieldId}">
+                <option value="daily_api">Daily Verse of the Day</option>
+                <option value="custom_list">Custom list configured in JSON</option>
+              </select>
+            </div>
+          `;
+          basicFieldsHtml += fieldHtml;
         } else if (field.name === 'quote_api_url') {
           let fieldHtml = `
             <div class="modal-row" id="widget-quote-custom-row" style="display:none">
