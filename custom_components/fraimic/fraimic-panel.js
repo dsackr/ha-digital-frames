@@ -27,6 +27,7 @@
     architecture: { label: 'Architecture' },
     seasons: { label: 'Seasons & Holidays' },
     history: { label: 'History' },
+    speed: { label: 'Speed' },
     productivity: { label: 'Productivity' }
   };
 
@@ -5190,7 +5191,7 @@
         const artGrid = grid.querySelector('#art-categories-grid');
         const prodGrid = grid.querySelector('#productivity-grid');
         
-        const artCatIds = ['famous_artists', 'nature', 'architecture', 'seasons', 'history'];
+        const artCatIds = ['famous_artists', 'nature', 'architecture', 'seasons', 'history', 'speed'];
         for (const catId of artCatIds) {
           const packs = this._scenePacks.filter(p => (p.category || 'famous_artists') === catId);
           if (packs.length > 0) {
