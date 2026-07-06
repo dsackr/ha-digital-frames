@@ -1126,6 +1126,7 @@
 
       this._editorState = null;   // active crop-editor session, or null when closed
       this._editorDrag  = null;   // in-progress pointer drag, or null
+      this._editorRenderRaf = null; // pending crop-box render frame, or null
       this._editorImgUrl = null;  // blob: URL for the editor's full-size image
       this._onEditorPointerMove = this._onEditorPointerMove.bind(this);
       this._onEditorPointerUp   = this._onEditorPointerUp.bind(this);
@@ -2089,19 +2090,26 @@
       const btn = this.shadowRoot.getElementById('lib-select-delete');
       btn.disabled = true;
 
+      // A small worker pool instead of one request per photo in sequence --
+      // distinct-image deletes commute, and the backend serializes its own
+      // manifest updates, so overlapping the HTTP round trips is safe.
       const failures = [];
-      for (const id of ids) {
-        try {
-          const resp = await fetch(`/api/fraimic/library/image/${id}`, {
-            method: 'DELETE', headers: this._authHeaders(),
-          });
-          const result = await resp.json().catch(() => ({}));
-          if (!resp.ok || !result.success) failures.push(id);
-          else this._evictThumb(id);
-        } catch (err) {
-          failures.push(id);
+      const queue = [...ids];
+      const worker = async () => {
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          try {
+            const resp = await fetch(`/api/fraimic/library/image/${id}`, {
+              method: 'DELETE', headers: this._authHeaders(),
+            });
+            const result = await resp.json().catch(() => ({}));
+            if (!resp.ok || !result.success) failures.push(id);
+            else this._evictThumb(id);
+          } catch (err) {
+            failures.push(id);
+          }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
       btn.disabled = false;
 
       await this._loadAlbums();
@@ -3385,15 +3393,29 @@
         box = this._editorResizeBox(drag.startBox, drag.handle, dxNorm, dyNorm, ar);
       }
 
+      // State updates stay synchronous (pointerup persists cropBox); only
+      // the DOM render is coalesced to one write per frame.
       this._editorState.cropBox = box;
+      if (this._editorRenderRaf) return;
       this._editorRenderCropBox();
+      this._editorRenderRaf = requestAnimationFrame(() => {
+        this._editorRenderRaf = null;
+        if (this._editorState) this._editorRenderCropBox();
+      });
     }
 
     _onEditorPointerUp() {
       this._editorDrag = null;
       window.removeEventListener('pointermove', this._onEditorPointerMove);
       window.removeEventListener('pointerup', this._onEditorPointerUp);
-      if (this._editorState) this._editorState.cropIsSaved = false;
+      if (this._editorRenderRaf) {
+        cancelAnimationFrame(this._editorRenderRaf);
+        this._editorRenderRaf = null;
+      }
+      if (this._editorState) {
+        this._editorState.cropIsSaved = false;
+        this._editorRenderCropBox(); // land exactly on the final box
+      }
     }
 
     // AR-locked resize: the corner opposite the dragged handle stays fixed
@@ -4417,11 +4439,25 @@
       return [...canvas.querySelectorAll('.wall-tile')].find(el => el.dataset.entryId === entryId) || null;
     }
 
+    // Applies immediately when idle, then coalesces bursts to one style
+    // write per frame -- high-rate pointer devices can deliver pointermove
+    // faster than the display can paint.
     _positionWallGhost(clientX, clientY) {
       const drag = this._wallDrag;
       if (!drag) return;
-      drag.ghost.style.left = `${clientX - drag.dims.width / 2}px`;
-      drag.ghost.style.top  = `${clientY - drag.dims.height / 2}px`;
+      drag.lastX = clientX;
+      drag.lastY = clientY;
+      if (drag.raf) return; // a frame is already scheduled; it reads lastX/lastY
+      this._applyWallGhost(drag);
+      drag.raf = requestAnimationFrame(() => {
+        drag.raf = null;
+        if (this._wallDrag === drag) this._applyWallGhost(drag);
+      });
+    }
+
+    _applyWallGhost(drag) {
+      drag.ghost.style.left = `${drag.lastX - drag.dims.width / 2}px`;
+      drag.ghost.style.top  = `${drag.lastY - drag.dims.height / 2}px`;
     }
 
     _wallBeginDrag(e, entryId, kind) {
@@ -4514,7 +4550,15 @@
       const y = Math.max(0, Math.round(rawY / GRID) * GRID);
 
       this._wallPlacements[drag.entryId] = { x, y };
-      this._renderWallCanvas();
+      if (drag.kind === 'tile' && tileEl) {
+        // Repositioning changes nothing structural (same tiles, same
+        // palette, same mappings) -- move the one tile in place instead of
+        // tearing down and rebuilding the whole canvas.
+        tileEl.style.left = `${x}px`;
+        tileEl.style.top  = `${y}px`;
+      } else {
+        this._renderWallCanvas();
+      }
     }
 
     async _saveWallLayout() {
@@ -4641,12 +4685,23 @@
         const startClientX = e.clientX, startClientY = e.clientY;
         const startLeft = rect.left, startTop = rect.top;
 
+        // Coalesce style writes to one per frame (see _positionWallGhost).
+        let lastX = e.clientX, lastY = e.clientY, raf = null;
+        const apply = () => {
+          box.style.left = `${startLeft + (lastX - startClientX)}px`;
+          box.style.top  = `${startTop + (lastY - startClientY)}px`;
+        };
         const onMove = (ev) => {
-          box.style.left = `${startLeft + (ev.clientX - startClientX)}px`;
-          box.style.top  = `${startTop + (ev.clientY - startClientY)}px`;
+          lastX = ev.clientX;
+          lastY = ev.clientY;
+          if (raf) return;
+          apply();
+          raf = requestAnimationFrame(() => { raf = null; apply(); });
         };
         const onUp = () => {
           header.classList.remove('dragging');
+          if (raf) { cancelAnimationFrame(raf); raf = null; }
+          apply(); // land exactly on the final pointer position
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
         };

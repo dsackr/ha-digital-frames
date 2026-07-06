@@ -249,13 +249,19 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.host,
                 self.device_key,
             )
-            import socket
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                    s.connect(("8.8.8.8", 80))
-                    local_ip = s.getsockname()[0]
-            except Exception:  # noqa: BLE001
-                local_ip = "192.168.1.1"
+            def _detect_local_ip() -> str:
+                # A UDP connect() does no I/O, but it's still a syscall that
+                # can block (routing lookups) -- keep it off the event loop.
+                import socket  # noqa: PLC0415
+
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                        s.connect(("8.8.8.8", 80))
+                        return s.getsockname()[0]
+                except Exception:  # noqa: BLE001
+                    return "192.168.1.1"
+
+            local_ip = await self.hass.async_add_executor_job(_detect_local_ip)
 
             new_ip = await find_frame_by_device_key(local_ip, self.device_key)
             if new_ip and new_ip != self.host:
