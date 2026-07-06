@@ -5193,13 +5193,19 @@
         
         const artCatIds = ['famous_artists', 'nature', 'architecture', 'seasons', 'history', 'speed'];
         for (const catId of artCatIds) {
-          const packs = this._scenePacks.filter(p => (p.category || 'famous_artists') === catId);
+          const packs = this._scenePacks.filter(p => {
+            const cats = Array.isArray(p.category) ? p.category : [p.category || 'famous_artists'];
+            return cats.includes(catId);
+          });
           if (packs.length > 0) {
             artGrid.appendChild(this._buildCategoryTile(catId, packs));
           }
         }
         
-        const prodPacks = this._scenePacks.filter(p => (p.category || 'famous_artists') === 'productivity');
+        const prodPacks = this._scenePacks.filter(p => {
+          const cats = Array.isArray(p.category) ? p.category : [p.category || 'famous_artists'];
+          return cats.includes('productivity');
+        });
         for (const pack of prodPacks) {
           prodGrid.appendChild(this._buildPackCard(pack));
         }
@@ -5219,7 +5225,10 @@
 
       grid.className = 'lib-grid';
       grid.innerHTML = '';
-      for (const pack of this._scenePacks.filter(p => (p.category || 'famous_artists') === this._packCategory)) {
+      for (const pack of this._scenePacks.filter(p => {
+        const cats = Array.isArray(p.category) ? p.category : [p.category || 'famous_artists'];
+        return cats.includes(this._packCategory);
+      })) {
         grid.appendChild(this._buildPackCard(pack));
       }
     }
