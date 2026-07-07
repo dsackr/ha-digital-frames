@@ -122,9 +122,14 @@ class FraimicSendImageView(HomeAssistantView):
                 f"Image conversion failed: {err}", status_code=500
             )
 
-        # Upload to the frame.
+        # Upload to the frame, or queue it if the frame is asleep.
+        # async_send_image_or_queue already updates the Frames panel's
+        # thumbnail hint (last_thumbnail -- this upload has no Library
+        # image_id) on success.
         try:
-            await coordinator.async_send_image(bin_bytes)
+            result = await coordinator.async_send_image_or_queue(
+                bin_bytes, thumbnail=preview_bytes
+            )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error(
                 "Failed to send image to frame %s: %s", coordinator.host, err
@@ -133,11 +138,21 @@ class FraimicSendImageView(HomeAssistantView):
                 f"Failed to send to frame: {err}", status_code=502
             )
 
-        # Update (and persist) the Frames panel's thumbnail hint. This upload
-        # has no Library image_id (it's a raw multipart file, never added to
-        # the Library), so unlike a Library/Scene send it goes through
-        # last_thumbnail rather than last_image_id.
-        await coordinator.async_set_last_image(thumbnail=preview_bytes)
+        if result["queued"]:
+            _LOGGER.info(
+                "Frame %s unreachable — image queued for delivery on wake",
+                coordinator.host,
+            )
+            return self.json(
+                {
+                    "success": False,
+                    "queued": True,
+                    "message": (
+                        "Frame is asleep — the image is queued and will be "
+                        "sent when it wakes up."
+                    ),
+                }
+            )
 
         _LOGGER.info(
             "Image sent to frame %s (%d raw bytes → %d bin bytes)",
@@ -145,4 +160,4 @@ class FraimicSendImageView(HomeAssistantView):
             len(raw_bytes),
             len(bin_bytes),
         )
-        return self.json({"success": True, "bytes_sent": len(bin_bytes)})
+        return self.json({"success": True, "queued": False, "bytes_sent": len(bin_bytes)})

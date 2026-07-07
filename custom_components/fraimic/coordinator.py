@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +47,19 @@ _FAILURES_BEFORE_RESCAN = 3
 # not here).
 _PREVIEW_STORE_VERSION = 1
 
+# Same one-file-per-entry shape as the preview store above, but for a queued
+# send awaiting delivery -- see async_send_image_or_queue.
+_PENDING_STORE_VERSION = 1
+
+# While a send is queued, poll much more often than the user's configured
+# scan_interval so a frame that wakes gets its image promptly instead of
+# waiting up to the full (default 5 minute) interval. Fraimic frames have no
+# documented wake-schedule/next-wake-time API to plan around instead -- the
+# official REST API guide says a sleeping frame is "completely unreachable"
+# until physically tapped -- so opportunistic polling is the only mechanism
+# available.
+_FAST_POLL_INTERVAL = timedelta(seconds=30)
+
 
 class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator that polls a single Fraimic frame for status data."""
@@ -58,12 +73,13 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         scan_seconds: int = config_entry.options.get(
             "scan_interval", DEFAULT_SCAN_INTERVAL
         )
+        self._normal_update_interval = timedelta(seconds=scan_seconds)
 
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN} {self.host}",
-            update_interval=timedelta(seconds=scan_seconds),
+            update_interval=self._normal_update_interval,
         )
 
         self._consecutive_failures: int = 0
@@ -94,6 +110,22 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._preview_store: Store = Store(
             hass, _PREVIEW_STORE_VERSION, f"{DOMAIN}_last_image_{config_entry.entry_id}"
         )
+
+        # The newest image this frame hasn't confirmed receiving yet -- set
+        # by async_send_image_or_queue when a send hits an unreachable
+        # (sleeping) frame, and flushed by the poll loop once the frame
+        # answers again. Exactly one entry, never a list: a later send always
+        # overwrites an earlier still-pending one ("latest wins" -- confirmed
+        # with the user, since a frame that slept through several sends
+        # should end up showing the newest one, not flash through stale
+        # intermediates). "token" lets _clear_pending_if_current tell a
+        # slow in-flight send apart from a newer one that has since replaced
+        # it, so a race can never wipe out the fresher entry.
+        self.pending_send: dict[str, Any] | None = None
+        self._pending_store: Store = Store(
+            hass, _PENDING_STORE_VERSION, f"{DOMAIN}_pending_send_{config_entry.entry_id}"
+        )
+        self._flushing: bool = False
 
     async def async_load_last_image(self) -> None:
         """Hydrate last_image_id/last_thumbnail from disk. Call this once
@@ -135,6 +167,116 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ),
             }
         )
+
+    # ------------------------------------------------------------------
+    # Queued sends -- delivered once a sleeping frame answers again
+    # ------------------------------------------------------------------
+
+    async def async_load_pending_send(self) -> None:
+        """Hydrate a queued-but-undelivered send from disk. Call this once
+        during setup, before the first refresh, so a queued send survives a
+        Home Assistant restart instead of being silently dropped."""
+        try:
+            data = await self._pending_store.async_load()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Failed to load pending send for %s: %s", self.host, err)
+            return
+        if not data:
+            return
+        self.pending_send = data
+        self.update_interval = _FAST_POLL_INTERVAL
+
+    async def _set_pending(self, payload: dict[str, Any]) -> None:
+        self.pending_send = payload
+        self.update_interval = _FAST_POLL_INTERVAL
+        await self._pending_store.async_save(payload)
+        self.async_update_listeners()
+
+    async def _clear_pending_if_current(self, token: str) -> None:
+        """Clear pending_send, but only if it's still the entry identified by
+        *token* -- a newer send may have already replaced it while this one
+        was in flight, and that newer entry must not be wiped out."""
+        if self.pending_send is None or self.pending_send.get("token") != token:
+            return
+        self.pending_send = None
+        self.update_interval = self._normal_update_interval
+        await self._pending_store.async_save(None)
+        self.async_update_listeners()
+
+    async def async_send_image_or_queue(
+        self,
+        image_bytes: bytes,
+        *,
+        image_id: str | None = None,
+        thumbnail: bytes | None = None,
+    ) -> dict[str, Any]:
+        """Send *image_bytes* to the frame, or queue it for delivery once the
+        frame wakes if it's currently unreachable.
+
+        This is the entry point every send path (the send_image service, the
+        raw-upload view, the library send view, and scene sends) should call
+        instead of async_send_image directly, so queueing behaviour is
+        applied uniformly regardless of where the image came from.
+        """
+        token = uuid.uuid4().hex
+        payload: dict[str, Any] = {
+            "token": token,
+            "bin_b64": base64.b64encode(image_bytes).decode("ascii"),
+            "image_id": image_id,
+            "thumbnail_b64": (
+                base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+            ),
+            "queued_at": time.time(),
+        }
+        # Recorded before the network call, not after: if Home Assistant
+        # restarts mid-send, the queue must already know about this attempt
+        # so it isn't lost.
+        await self._set_pending(payload)
+
+        self._flushing = True
+        try:
+            await self.async_send_image(image_bytes)
+        except (aiohttp.ClientConnectionError, TimeoutError):
+            # Same failure pair _async_update_data treats as "frame is
+            # unreachable, may be sleeping" -- leave it queued, the poll loop
+            # will retry once the frame answers again.
+            return {"success": False, "queued": True}
+        finally:
+            self._flushing = False
+
+        await self._clear_pending_if_current(token)
+        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+        return {"success": True, "queued": False}
+
+    async def _async_flush_pending_send(self) -> None:
+        """Deliver the queued send now that a poll has succeeded. Guarded by
+        _flushing so overlapping successful polls can't fire this twice."""
+        if self._flushing or self.pending_send is None:
+            return
+        self._flushing = True
+        try:
+            pending = self.pending_send
+            image_bytes = base64.b64decode(pending["bin_b64"])
+            try:
+                await self.async_send_image(image_bytes)
+            except (aiohttp.ClientConnectionError, TimeoutError):
+                # Flaky wake or fell back asleep already -- next successful
+                # poll will try again.
+                return
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Failed to deliver queued image to %s: %s", self.host, err
+                )
+                return
+            await self._clear_pending_if_current(pending["token"])
+            thumb_b64 = pending.get("thumbnail_b64")
+            await self.async_set_last_image(
+                image_id=pending.get("image_id"),
+                thumbnail=base64.b64decode(thumb_b64) if thumb_b64 else None,
+            )
+            _LOGGER.info("Delivered queued image to frame %s", self.host)
+        finally:
+            self._flushing = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -193,6 +335,16 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Successful poll — reset failure counter and migrate fingerprint.
             self._consecutive_failures = 0
             self._maybe_persist_fingerprint(data)
+
+            # The frame answered -- if something's queued, try to deliver it.
+            # Checking "pending_send is not None" here (rather than tracking
+            # a failure→success transition) is sufficient and idempotent: a
+            # flush clears pending_send on success, so later successful
+            # polls just no-op immediately, and it also covers the case
+            # where the frame is already awake on the very first poll after
+            # a Home Assistant restart with a queued send loaded from disk.
+            if self.pending_send is not None and not self._flushing:
+                self.hass.async_create_task(self._async_flush_pending_send())
 
             # Track the frame's reported native dimensions. entry.data
             # width/height are always the panel's own report -- the

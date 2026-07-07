@@ -297,16 +297,33 @@ class FraimicLibrarySendView(HomeAssistantView):
             return self.json_message(f"Conversion failed: {err}", status_code=500)
 
         try:
-            await coordinator.async_send_image(bin_bytes)
+            send_result = await coordinator.async_send_image_or_queue(
+                bin_bytes, image_id=image_id
+            )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error(
                 "Failed to send library image to frame %s: %s", coordinator.host, err
             )
             return self.json_message(f"Failed to send to frame: {err}", status_code=502)
 
-        await coordinator.async_set_last_image(image_id=image_id)
+        if send_result["queued"]:
+            _LOGGER.info(
+                "Frame %s unreachable — library image %s queued for delivery on wake",
+                coordinator.host,
+                image_id,
+            )
+            return self.json(
+                {
+                    "success": False,
+                    "queued": True,
+                    "message": (
+                        "Frame is asleep — the image is queued and will be "
+                        "sent when it wakes up."
+                    ),
+                }
+            )
 
-        result: dict = {"success": True, "bytes_sent": len(bin_bytes)}
+        result: dict = {"success": True, "queued": False, "bytes_sent": len(bin_bytes)}
         if packer is not None:
             result["packer"] = packer
         return self.json(result)
@@ -562,6 +579,10 @@ class FraimicFramesView(HomeAssistantView):
                         # FraimicCoordinator.last_thumbnail and
                         # FraimicFrameThumbnailView below.
                         "has_thumbnail": getattr(coordinator, "last_thumbnail", None) is not None,
+                        # True while a send to this frame is queued awaiting
+                        # delivery (frame asleep/unreachable) -- see
+                        # FraimicCoordinator.pending_send.
+                        "queued": getattr(coordinator, "pending_send", None) is not None,
                     }
                 )
         return self.json({"frames": frames})

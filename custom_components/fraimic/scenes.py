@@ -242,23 +242,25 @@ class SceneManager:
         )
         results.extend(failure for failure in failures if failure is not None)
 
-        async def _send_one(coordinator: Any, bin_bytes: bytes) -> None:
-            await coordinator.async_send_image(bin_bytes)
+        async def _send_one(coordinator: Any, bin_bytes: bytes, image_id: str) -> dict[str, Any]:
+            # async_send_image_or_queue queues (rather than raising) if the
+            # frame is asleep/unreachable, and already updates last_image_id
+            # on immediate success -- see FraimicCoordinator.
+            return await coordinator.async_send_image_or_queue(bin_bytes, image_id=image_id)
 
         sent = await asyncio.gather(
             *(
-                _send_one(coordinator, bin_bytes)
-                for coordinator, bin_bytes, _image_id in prepared.values()
+                _send_one(coordinator, bin_bytes, image_id)
+                for coordinator, bin_bytes, image_id in prepared.values()
             ),
             return_exceptions=True,
         )
         for entry_id, outcome in zip(prepared.keys(), sent):
             if isinstance(outcome, BaseException):
                 results.append({"entry_id": entry_id, "success": False, "message": str(outcome)})
+            elif outcome["queued"]:
+                results.append({"entry_id": entry_id, "success": False, "queued": True})
             else:
                 results.append({"entry_id": entry_id, "success": True})
-                await prepared[entry_id][0].async_set_last_image(
-                    image_id=prepared[entry_id][2]
-                )
 
         return {"results": results}

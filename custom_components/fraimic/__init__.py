@@ -271,6 +271,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     # the next send.
     await coordinator.async_load_last_image()
 
+    # Hydrate any send that was still queued (frame asleep) when Home
+    # Assistant last stopped, before the first refresh, so a restart never
+    # drops it.
+    await coordinator.async_load_pending_send()
+
     # Perform the first data fetch; raises ConfigEntryNotReady on failure so
     # HA will retry automatically.
     await coordinator.async_config_entry_first_refresh()
@@ -452,20 +457,29 @@ def _register_services(hass: HomeAssistant) -> None:
                 f"Failed to convert image '{abs_path}': {err}"
             ) from err
 
-        await coordinator.async_send_image(image_bytes)
-
-        # Update (and persist) the Frames panel's thumbnail hint. This
-        # service resolves a media_content_id, not a Library image_id, so it
-        # goes through last_thumbnail rather than last_image_id.
-        await coordinator.async_set_last_image(thumbnail=preview_bytes)
-
-        _LOGGER.info(
-            "Image '%s' (%dx%d) sent to frame %s",
-            abs_path,
-            spec.width,
-            spec.height,
-            coordinator.host,
+        # async_send_image_or_queue already updates the Frames panel's
+        # thumbnail hint (last_thumbnail, since this service resolves a
+        # media_content_id rather than a Library image_id) on success; on a
+        # sleeping/unreachable frame it queues the image instead of raising,
+        # so this call doesn't fail just because the frame is asleep.
+        result = await coordinator.async_send_image_or_queue(
+            image_bytes, thumbnail=preview_bytes
         )
+
+        if result["queued"]:
+            _LOGGER.info(
+                "Frame %s unreachable — image '%s' queued for delivery on wake",
+                coordinator.host,
+                abs_path,
+            )
+        else:
+            _LOGGER.info(
+                "Image '%s' (%dx%d) sent to frame %s",
+                abs_path,
+                spec.width,
+                spec.height,
+                coordinator.host,
+            )
 
     async def _handle_send_scene(call: ServiceCall) -> None:
         name: str = call.data["name"]
@@ -480,7 +494,12 @@ def _register_services(hass: HomeAssistant) -> None:
 
         result = await scene_manager.async_send_scene(hass, scene.scene_id)
         results = result["results"]
-        failures = [r for r in results if not r.get("success")]
+        # A queued mapping (frame asleep) isn't a failure -- it'll be
+        # delivered once the frame wakes -- so only count real failures here.
+        failures = [
+            r for r in results if not r.get("success") and not r.get("queued")
+        ]
+        queued = [r for r in results if r.get("queued")]
 
         if failures and len(failures) == len(results):
             # Every mapping failed -- raise so the calling automation/script
@@ -494,6 +513,12 @@ def _register_services(hass: HomeAssistant) -> None:
             )
         else:
             _LOGGER.info("Scene '%s' sent to %d frame(s)", name, len(results))
+        if queued:
+            _LOGGER.info(
+                "Scene '%s': %d frame(s) asleep, image queued for delivery on wake",
+                name,
+                len(queued),
+            )
 
     hass.services.async_register(
         DOMAIN, "restart", _handle_restart, schema=_DEVICE_ID_SCHEMA

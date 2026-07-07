@@ -42,6 +42,7 @@ async def async_setup_entry(
             FraimicChargingSensor(coordinator, entry),
             FraimicFirmwareSensor(coordinator, entry),
             FraimicIpAddressSensor(coordinator, entry),
+            FraimicQueuedSendSensor(coordinator, entry),
         ]
     )
 
@@ -259,3 +260,24 @@ class FraimicIpAddressSensor(FraimicBaseSensor):
         except (KeyError, TypeError):
             pass
         return data.get("ip_address")
+
+
+class FraimicQueuedSendSensor(FraimicBaseSensor):
+    """Whether a send to this frame is queued awaiting delivery, because the
+    frame was asleep/unreachable when it was sent -- see
+    FraimicCoordinator.pending_send."""
+
+    def __init__(
+        self,
+        coordinator: FraimicCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_queued_send"
+        self._attr_name = "Queued Image"
+
+    @property
+    def native_value(self) -> str:
+        """Return "queued" while a send is waiting for the frame to wake,
+        else "idle"."""
+        return "queued" if self.coordinator.pending_send is not None else "idle"

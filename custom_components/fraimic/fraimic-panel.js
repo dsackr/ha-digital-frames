@@ -2965,6 +2965,9 @@
         if (resp.ok && result.success) {
           fb.className = 'feedback ok';
           fb.textContent = result.packer ? `✓ Sent! (packer: ${result.packer})` : '✓ Sent!';
+        } else if (result.queued) {
+          fb.className = 'feedback ok';
+          fb.textContent = '⏳ Frame is asleep — image queued, will send when it wakes.';
         } else {
           fb.className = 'feedback err';
           fb.textContent = `Failed: ${result.message || resp.statusText || resp.status}`;
@@ -4131,6 +4134,9 @@
             method: 'POST', headers: this._authHeaders(), body: form,
           });
           const result = await resp.json().catch(() => ({}));
+          if (result.queued) {
+            return { ...t, success: false, queued: true };
+          }
           if (!resp.ok || !result.success) {
             throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
           }
@@ -4141,24 +4147,28 @@
       }));
 
       const ok     = results.filter(r => r.success);
-      const failed = results.filter(r => !r.success);
+      // Queued frames haven't actually received the image yet -- don't
+      // optimistically update lastImageId for those, only for immediate
+      // successes.
+      const queued = results.filter(r => r.queued);
+      const failed = results.filter(r => !r.success && !r.queued);
 
       if (ok.length) {
         for (const r of ok) r.frame.lastImageId = r.imageId;
         this._renderFrames();
       }
 
-      if (!failed.length) {
-        fb.className = 'feedback ok';
-        fb.textContent = `✓ Sent to ${ok.length} frame${ok.length === 1 ? '' : 's'}`;
-      } else if (ok.length) {
-        fb.className = 'feedback err';
-        fb.textContent = `Sent to ${ok.length}/${results.length} frames — failed: `
-          + failed.map(f => `${f.frame.title}: ${f.message}`).join(', ');
-      } else {
-        fb.className = 'feedback err';
-        fb.textContent = `Send failed: ${failed.map(f => `${f.frame.title}: ${f.message}`).join(', ')}`;
+      const parts = [];
+      if (ok.length) parts.push(`✓ Sent to ${ok.length} frame${ok.length === 1 ? '' : 's'}`);
+      if (queued.length) {
+        parts.push(`⏳ ${queued.length} asleep — queued: `
+          + queued.map(q => q.frame.title).join(', '));
       }
+      if (failed.length) {
+        parts.push(`✗ failed: ` + failed.map(f => `${f.frame.title}: ${f.message}`).join(', '));
+      }
+      fb.className = failed.length ? 'feedback err' : 'feedback ok';
+      fb.textContent = parts.join('  ');
       fb.style.display = 'block';
 
       btn.disabled = false;
@@ -5595,16 +5605,22 @@
           method: 'POST', headers: this._authHeaders(), body: form,
         });
         const result = await resp.json().catch(() => ({}));
-        if (!resp.ok || !result.success) {
+        if (result.queued) {
+          // Frame hasn't actually received the image yet -- don't
+          // optimistically update lastImageId, only for immediate sends.
+          this._editorShowFb('ok', '⏳ Frame is asleep — image queued, will send when it wakes.');
+          setTimeout(() => this._closeEditor(), 1800);
+        } else if (!resp.ok || !result.success) {
           throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        } else {
+          const sentFrame = this._frames.find(f => f.entityId === entityId);
+          if (sentFrame) {
+            sentFrame.lastImageId = st.image.image_id;
+            this._renderFrames();
+          }
+          this._editorShowFb('ok', result.packer ? `✓ Sent! (packer: ${result.packer})` : '✓ Sent!');
+          setTimeout(() => this._closeEditor(), 1200);
         }
-        const sentFrame = this._frames.find(f => f.entityId === entityId);
-        if (sentFrame) {
-          sentFrame.lastImageId = st.image.image_id;
-          this._renderFrames();
-        }
-        this._editorShowFb('ok', result.packer ? `✓ Sent! (packer: ${result.packer})` : '✓ Sent!');
-        setTimeout(() => this._closeEditor(), 1200);
       } catch (err) {
         this._editorShowFb('err', `Failed: ${err.message}`);
       }
