@@ -236,6 +236,7 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._flushing = True
         try:
             await self.async_send_image(image_bytes)
+            await self._clear_pending_if_current(token)
         except (aiohttp.ClientConnectionError, TimeoutError):
             # Same failure pair _async_update_data treats as "frame is
             # unreachable, may be sleeping" -- leave it queued, the poll loop
@@ -244,7 +245,6 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._flushing = False
 
-        await self._clear_pending_if_current(token)
         await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
         return {"success": True, "queued": False}
 
