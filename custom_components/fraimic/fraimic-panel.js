@@ -1230,7 +1230,6 @@
     .wall-tile-badge[data-kind="staged"]  { background: var(--primary-color, #03a9f4); }
     .wall-tile-badge[data-kind="scene"]   { background: #8b5cf6; }
     .wall-tile-badge[data-kind="onframe"] { background: rgba(100, 116, 139, .9); }
-    .wall-tile-media.on-frame-only { opacity: .5; }
     .discovery-banner .banner-add-btn {
       padding: 6px 14px;
       border-radius: 8px;
@@ -5063,7 +5062,6 @@
 
       const imageId = this._wallEffectiveMapping(entryId);
       if (imageId) {
-        media.classList.remove('on-frame-only');
         media.innerHTML = '';
         // _loadThumbnail paints synchronously on a cache hit and dedupes
         // concurrent fetches, so repeated renders and same-image tiles are
@@ -5078,26 +5076,28 @@
         return;
       }
 
-      // Not part of the send model -- show what's actually on the physical
-      // frame right now, dimmed and labeled so it can't be mistaken for a
-      // scene assignment. lastImageId (library/scene sends) and
-      // hasThumbnail (raw-upload sends) are mutually exclusive on the
-      // backend; the title text is the true-empty fallback.
-      if (frame.lastImageId) {
-        media.classList.add('on-frame-only');
+      // No assignment for this tile. Two modes (per Dale):
+      // - VIEWING (no scene selected, nothing staged/cleared): show what's
+      //   actually on the physical frame, labeled "on frame".
+      // - MODELING (a scene is selected, or any pick/clear was made this
+      //   session): a tile without an assignment must read BLANK -- blank
+      //   means "Send to Frames will not touch this frame", and showing
+      //   the frame's current content here would make the send model
+      //   ambiguous again.
+      const modeling = !!this._wallActiveSceneId
+        || Object.keys(this._wallPendingMappings).length > 0;
+      if (!modeling && frame.lastImageId) {
         media.innerHTML = '';
         this._loadThumbnail(frame.lastImageId, media);
         badge.textContent = 'on frame';
         badge.dataset.kind = 'onframe';
         badge.style.display = '';
-      } else if (frame.hasThumbnail) {
-        media.classList.add('on-frame-only');
+      } else if (!modeling && frame.hasThumbnail) {
         media.innerHTML = `<img src="/api/fraimic/frame/${this._esc(frame.entryId)}/thumbnail" alt="">`;
         badge.textContent = 'on frame';
         badge.dataset.kind = 'onframe';
         badge.style.display = '';
       } else {
-        media.classList.remove('on-frame-only');
         media.innerHTML = `<div>${this._esc(frame.title)}</div>`;
         badge.style.display = 'none';
       }

@@ -9,6 +9,7 @@ const { gotoPanel, clickTile, pickImageInWallPicker } = require('./fixtures/pane
 
 const FRAMES = [
   { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'auto', last_image_id: 'image_2' },
+  { entry_id: 'entry_2', title: 'Office Frame', width: 1200, height: 1600, orientation: 'auto', last_image_id: 'image_1' },
 ];
 const IMAGES = [
   { image_id: 'image_1', filename: 'one.png', albums: [] },
@@ -112,44 +113,58 @@ test.describe('Consolidated dashboard', () => {
     expect(state.configText).toContain('local storage');
   });
 
-  test('tile badges distinguish scene model from what is merely on the frame', async ({ page }) => {
-    const readTile = () => page.evaluate(() => {
+  test('viewing shows on-frame content; modeling blanks every unassigned tile', async ({ page }) => {
+    const readTiles = () => page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const tile = root.querySelector('.wall-tile');
-      const badge = tile.querySelector('.wall-tile-badge');
-      return {
-        badge: badge && badge.style.display !== 'none' ? badge.dataset.kind : null,
-        dimmed: !!tile.querySelector('.wall-tile-media.on-frame-only'),
-      };
+      const out = {};
+      for (const tile of root.querySelectorAll('.wall-tile')) {
+        const badge = tile.querySelector('.wall-tile-badge');
+        const media = tile.querySelector('.wall-tile-media');
+        out[tile.dataset.entryId] = {
+          badge: badge && badge.style.display !== 'none' ? badge.dataset.kind : null,
+          blank: !media.querySelector('img') && !media.querySelector('.thumb-img, canvas')
+            && media.textContent.trim().length > 0,
+        };
+      }
+      return out;
     });
 
-    // No scene selected: the tile shows the frame's current content,
-    // dimmed + labeled -- not part of any send model.
-    expect(await readTile()).toEqual({ badge: 'onframe', dimmed: true });
+    // VIEWING mode (nothing staged, no scene): every tile shows what's on
+    // its physical frame, labeled.
+    let tiles = await readTiles();
+    expect(tiles.entry_1.badge).toBe('onframe');
+    expect(tiles.entry_2.badge).toBe('onframe');
 
-    // Selecting a scene: its mapped tile shows the scene image at full
-    // strength with a "scene" badge -- the model of what Send will do.
+    // Selecting a scene enters MODELING mode: the mapped tile carries the
+    // scene image ("scene" badge); the unmapped one goes BLANK -- blank
+    // means Send to Frames will not touch it.
     await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       const sel = root.getElementById('wall-scene-select');
       sel.value = 'scene_1';
       sel.dispatchEvent(new Event('change'));
     });
-    expect(await readTile()).toEqual({ badge: 'scene', dimmed: false });
+    tiles = await readTiles();
+    expect(tiles.entry_1.badge).toBe('scene');
+    expect(tiles.entry_2.badge).toBe(null);
+    expect(tiles.entry_2.blank).toBe(true);
 
-    // A pick this session upgrades the badge to "staged".
+    // A pick this session upgrades that tile's badge to "staged".
     await clickTile(page, 'entry_1');
     await pickImageInWallPicker(page, 'image_2');
-    expect(await readTile()).toEqual({ badge: 'staged', dimmed: false });
+    tiles = await readTiles();
+    expect(tiles.entry_1.badge).toBe('staged');
 
-    // Clear All empties the model everywhere; the tile falls back to the
-    // dimmed on-frame view, and nothing was sent anywhere.
+    // Clear All empties the model: every tile blank, nothing sent.
     await page.evaluate(() => {
       document.getElementById('panel').shadowRoot.getElementById('wall-clear-all-btn').click();
     });
-    expect(await readTile()).toEqual({ badge: 'onframe', dimmed: true });
+    tiles = await readTiles();
+    expect(tiles.entry_1.badge).toBe(null);
+    expect(tiles.entry_1.blank).toBe(true);
+    expect(tiles.entry_2.blank).toBe(true);
     expect(await page.evaluate(() => document.getElementById('panel')._wallPendingMappings))
-      .toEqual({ entry_1: '' });
+      .toEqual({ entry_1: '', entry_2: '' });
     expect(mockServer.sends).toEqual([]);
     expect(mockServer.rawSends).toEqual([]);
   });
