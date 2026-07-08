@@ -80,7 +80,7 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     frames.forEach((f, i) => { defaultPlacements[f.entry_id] = { x: i * 160, y: 0 }; });
     wallList.unshift({
       wall_id: 'default', name: 'All Frames', kind: 'default',
-      placements: defaultPlacements, created_at: 0,
+      placements: defaultPlacements, excluded: [], created_at: 0,
     });
   }
   let nextWallId = wallList.length + 1;
@@ -308,7 +308,7 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
       if (req.method === 'GET') return json(res, 200, { walls: wallList });
       if (req.method === 'POST') {
         const parsed = await readJsonBody(req);
-        const wall = { wall_id: `wall_${nextWallId++}`, name: parsed.name, placements: parsed.placements || {}, created_at: 0 };
+        const wall = { wall_id: `wall_${nextWallId++}`, name: parsed.name, placements: parsed.placements || {}, excluded: [], created_at: 0 };
         wallList.push(wall);
         return json(res, 200, { success: true, wall });
       }
@@ -322,6 +322,8 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
         if (!wall) return json(res, 400, { message: 'not found' });
         wall.name = parsed.name;
         wall.placements = parsed.placements || {};
+        // Mirrors WallManager.async_save_wall: absent = keep stored.
+        if (Array.isArray(parsed.excluded)) wall.excluded = parsed.excluded;
         return json(res, 200, { success: true, wall });
       }
       if (req.method === 'DELETE') {

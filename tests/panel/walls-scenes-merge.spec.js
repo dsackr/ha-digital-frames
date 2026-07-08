@@ -58,15 +58,16 @@ test.describe('Scenes tab is the wall canvas', () => {
     expect(state.optionValues).toContain('wall_1');
   });
 
-  test('the default wall places every frame, hides delete/remove, and auto-saves drags', async ({ page }) => {
+  test('the default wall places every frame, hides delete, and auto-saves drags', async ({ page }) => {
     mockServer = createMockServer({ frames: FRAMES });
     baseUrl = await mockServer.start();
 
     await gotoPanel(page, baseUrl, { frames: FRAMES });
     await openScenesTab(page);
 
-    // Every configured frame is already placed -- no palette items, no ✕
-    // remove buttons, no Delete Wall, no Save Layout button at all.
+    // Every configured frame is already placed -- no palette items, no
+    // Delete Wall, no Save Layout button. Tiles keep their ✕ (removal is
+    // tombstoned so the auto-sync doesn't re-add).
     const state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       return {
@@ -79,7 +80,7 @@ test.describe('Scenes tab is the wall canvas', () => {
     });
     expect(state.tiles).toEqual(['entry_1']);
     expect(state.paletteItems).toBe(0);
-    expect(state.removeBtns).toBe(0);
+    expect(state.removeBtns).toBe(1);
     expect(state.deleteBtnHidden).toBe(true);
     expect(state.saveLayoutBtn).toBe(null);
 

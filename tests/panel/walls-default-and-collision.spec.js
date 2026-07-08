@@ -5,7 +5,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { createMockServer } = require('./fixtures/mock-server');
-const { gotoPanel, openScenesTab, dragTileBy, clickTile, getWallTiles } = require('./fixtures/panel-page');
+const { gotoPanel, openScenesTab, dragTileBy, dragFirstPaletteItemTo, clickTile, getWallTiles } = require('./fixtures/panel-page');
 
 // Same aspect (1200x1600 → 105x140 tiles), seeded side by side with one
 // 20px grid column between them.
@@ -143,6 +143,65 @@ test.describe('Default wall collision and keyboard nudge', () => {
     await page.keyboard.press('Escape');
     const selected = await page.evaluate(() => document.getElementById('panel')._wallSelectedEntryId);
     expect(selected).toBe(null);
+  });
+
+  test('✕ removes a tile from the default wall, tombstoned so auto-sync stays away', async ({ page }) => {
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      [...root.querySelectorAll('.wall-tile')]
+        .find((t) => t.dataset.entryId === 'entry_1')
+        .querySelector('.tile-remove-btn').click();
+    });
+
+    // Gone from the canvas, back in the palette.
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.querySelectorAll('.wall-tile').length === 1
+        && root.querySelectorAll('.wall-palette-item').length === 1;
+    });
+
+    // The auto-save records the tombstone alongside the placements.
+    await page.waitForTimeout(1200);
+    const saved = mockServer.walls.find((w) => w.wall_id === 'default');
+    expect(Object.keys(saved.placements)).toEqual(['entry_2']);
+    expect(saved.excluded).toEqual(['entry_1']);
+
+    // Dragging it back on lifts the tombstone.
+    const canvasBox = await page.evaluate(() => {
+      const r = document.getElementById('panel').shadowRoot.getElementById('wall-canvas').getBoundingClientRect();
+      return { x: r.x, y: r.y };
+    });
+    await dragFirstPaletteItemTo(page, canvasBox.x + 60, canvasBox.y + 240);
+    await page.waitForTimeout(1200);
+    const resaved = mockServer.walls.find((w) => w.wall_id === 'default');
+    expect(Object.keys(resaved.placements).sort()).toEqual(['entry_1', 'entry_2']);
+    expect(resaved.excluded).toEqual([]);
+  });
+
+  test('dragging a tile off the canvas removes it from the wall', async ({ page }) => {
+    // Drag entry_1 far above the canvas -- well outside its bounds.
+    const tileBox = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === 'entry_1');
+      const r = tile.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await page.mouse.move(tileBox.x, tileBox.y);
+    await page.mouse.down();
+    await page.mouse.move(tileBox.x + 20, tileBox.y - 30, { steps: 5 });
+    await page.mouse.move(tileBox.x + 40, 5, { steps: 10 });   // above the header, off-canvas
+    await page.mouse.up();
+
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.querySelectorAll('.wall-tile').length === 1
+        && root.querySelectorAll('.wall-palette-item').length === 1;
+    });
+
+    await page.waitForTimeout(1200);
+    const saved = mockServer.walls.find((w) => w.wall_id === 'default');
+    expect(Object.keys(saved.placements)).toEqual(['entry_2']);
+    expect(saved.excluded).toEqual(['entry_1']);
   });
 
   test('Escape clears the selection so arrows stop nudging', async ({ page }) => {

@@ -1157,6 +1157,122 @@
       outline: 2px solid #ef4444;
       background: rgba(239, 68, 68, .25) !important;
     }
+    .wall-drag-ghost.off-canvas {
+      opacity: .4;
+      outline: 2px dashed #ef4444;
+    }
+
+    /* ---- Photo Library shelf: the bookshelf under the gallery wall ---- */
+    .library-shelf {
+      display: block;
+      width: 100%;
+      margin: 22px 0 4px;
+      padding: 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+    }
+    .library-shelf:focus-visible {
+      outline: 3px solid var(--primary-color, #03a9f4);
+      outline-offset: 4px;
+      border-radius: 6px;
+    }
+    .library-shelf .shelf-books {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 62px;
+      padding: 0 26px;
+    }
+    .library-shelf .book {
+      width: 14px;
+      height: 50px;
+      border-radius: 2px 2px 0 0;
+      box-shadow: inset -3px 0 rgba(0, 0, 0, .22), inset 0 6px rgba(255, 255, 255, .08);
+      transition: transform .15s ease;
+    }
+    /* Varied spines: heights/widths first, then a muted gallery palette --
+       ochre, indigo, moss, brick, mustard, slate -- cycling out of phase
+       with the size rules so no two neighbors match. */
+    .library-shelf .book:nth-child(3n)   { height: 57px; width: 11px; }
+    .library-shelf .book:nth-child(4n)   { height: 44px; width: 18px; }
+    .library-shelf .book:nth-child(5n+2) { height: 60px; }
+    .library-shelf .book:nth-child(6n+1) { background: #b08968; }
+    .library-shelf .book:nth-child(6n+2) { background: #4a5d8a; }
+    .library-shelf .book:nth-child(6n+3) { background: #6b7f5e; }
+    .library-shelf .book:nth-child(6n+4) { background: #9d5b4d; }
+    .library-shelf .book:nth-child(6n+5) { background: #c4a24e; }
+    .library-shelf .book:nth-child(6n)   { background: #6e6a8f; }
+    .library-shelf .book.leaning {
+      transform: rotate(8deg);
+      transform-origin: bottom right;
+      margin-right: 10px;
+    }
+    /* Two books lying flat -- every real shelf has them. */
+    .library-shelf .book-stack {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 2px;
+      margin: 0 2px;
+    }
+    .library-shelf .book-stack i {
+      display: block;
+      width: 44px;
+      height: 11px;
+      border-radius: 2px;
+      background: #8a7a5c;
+      box-shadow: inset 0 -3px rgba(0, 0, 0, .2);
+    }
+    .library-shelf .book-stack i:last-child { width: 50px; background: #74576a; }
+    /* A little framed photo leaning against the books -- this is a PHOTO
+       library, not a bookstore. */
+    .library-shelf .shelf-photo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 40px;
+      margin: 0 4px;
+      font-size: 17px;
+      background: #fdfaf3;
+      border: 3px solid #3f3a35;
+      border-radius: 2px;
+      transform: rotate(-4deg);
+      box-shadow: 2px 2px 5px rgba(0, 0, 0, .25);
+    }
+    .library-shelf .shelf-board {
+      height: 13px;
+      border-radius: 3px;
+      background: linear-gradient(#96683c, #6d451f);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, .28);
+    }
+    .library-shelf .shelf-label {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .library-shelf .shelf-label strong {
+      font-size: 14px;
+      color: var(--primary-text-color);
+    }
+    .library-shelf .shelf-label span {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+    }
+    .library-shelf:hover .book:nth-child(odd)  { transform: translateY(-3px); }
+    .library-shelf:hover .book.leaning          { transform: rotate(8deg) translateY(-2px); }
+    .library-shelf:hover .shelf-label strong    { color: var(--primary-color, #03a9f4); }
+    @media (prefers-reduced-motion: reduce) {
+      .library-shelf .book { transition: none; }
+      .library-shelf:hover .book:nth-child(odd),
+      .library-shelf:hover .book.leaning { transform: none; }
+    }
     .wall-tile.selected {
       outline: 3px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
@@ -1310,9 +1426,10 @@
       // The Scenes tab *is* the Walls workflow -- a wall is just a saved
       // layout (frame positions) that the same canvas previews a scene
       // (frame->image mappings) against. See _renderWallsSubview.
-      this._walls          = [];      // [{ wall_id, name, placements: { entry_id: {x, y} } }]
+      this._walls          = [];      // [{ wall_id, name, placements: { entry_id: {x, y} }, excluded }]
       this._activeWallId   = null;    // wall_id currently open in the Walls sub-view
       this._wallPlacements = {};      // working copy of the active wall's placements while editing layout
+      this._wallExcluded   = [];      // working copy of the active wall's removal tombstones (default wall)
       this._wallDrag        = null;   // in-progress palette/tile pointer drag, or null
       this._wallActiveSceneId = null;    // scene_id loaded for preview on this wall, or null
       this._wallPendingMappings = {};    // entry_id -> image_id ('' = explicitly cleared) touched this session,
@@ -1525,6 +1642,7 @@
         const initial = this._defaultWall() || this._walls[0];
         this._activeWallId = initial.wall_id;
         this._wallPlacements = JSON.parse(JSON.stringify(initial.placements || {}));
+        this._wallExcluded = [...(initial.excluded || [])];
       }
       this._renderDashboard();
       // Deep links target wall tiles, so this must wait for the walls
@@ -1629,7 +1747,6 @@
             <button class="btn-ghost" id="wall-new-btn" style="flex:0 0 auto">＋ New Wall</button>
             <button class="btn-ghost" id="wall-delete-btn" style="flex:0 0 auto;display:none">🗑 Delete Wall</button>
             <button class="btn-primary" id="frame-add-btn" style="flex:0 0 auto">＋ Add Frame</button>
-            <button class="btn-ghost" id="library-open-btn" style="flex:0 0 auto">🖼 Manage Library</button>
             <button class="btn-ghost" id="settings-open-btn" style="flex:0 0 auto" title="Photo storage settings">⚙</button>
           </div>
         </div>
@@ -1648,6 +1765,26 @@
             <div class="wall-palette" id="wall-palette"></div>
             <div class="wall-canvas" id="wall-canvas"></div>
           </div>
+
+          <!-- The Photo Library entry point: a bookshelf sitting under the
+               gallery wall, like the console table under real hung frames.
+               Opens the same library modal it always did. -->
+          <button class="library-shelf" id="library-open-btn" title="Open the photo library">
+            <div class="shelf-books">
+              <span class="book"></span><span class="book"></span><span class="book"></span>
+              <span class="book"></span><span class="book leaning"></span>
+              <span class="book-stack"><i></i><i></i></span>
+              <span class="shelf-photo">🖼</span>
+              <span class="book"></span><span class="book"></span><span class="book"></span>
+              <span class="book"></span><span class="book"></span><span class="book"></span>
+              <span class="book"></span><span class="book"></span>
+            </div>
+            <div class="shelf-board"></div>
+            <div class="shelf-label">
+              <strong>📚 Photo Library</strong>
+              <span>Browse albums, upload and organize your photos</span>
+            </div>
+          </button>
 
           <h3 style="margin:22px 0 6px;font-size:14px">Select a Scene</h3>
           <div class="modal-row" style="max-width:320px">
@@ -4769,6 +4906,7 @@
       // Deep-copy so in-progress canvas edits never mutate this._walls
       // directly -- the local record only updates when a save round-trips.
       this._wallPlacements = wall ? JSON.parse(JSON.stringify(wall.placements || {})) : {};
+      this._wallExcluded = wall ? [...(wall.excluded || [])] : [];
       this._wallActiveSceneId = null;
       this._wallPendingMappings = {};
       this._wallPendingPickAlbum = {};
@@ -5035,24 +5173,20 @@
         }
         tile.appendChild(footer);
 
-        // Every frame is permanently placed on the default wall (the
-        // backend re-adds it anyway) -- only custom walls get the ✕.
-        const activeWall = this._activeWall();
-        if (!activeWall || activeWall.kind !== 'default') {
-          const removeBtn = document.createElement('button');
-          removeBtn.className = 'tile-remove-btn';
-          removeBtn.innerHTML = '✕';
-          removeBtn.title = 'Remove frame from wall';
-          removeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-          removeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            delete this._wallPlacements[entryId];
-            if (this._wallSelectedEntryId === entryId) this._wallSelectedEntryId = null;
-            this._renderWallCanvas();
-            this._scheduleWallLayoutSave();
-          });
-          tile.appendChild(removeBtn);
-        }
+        // Removable from every wall -- default included, where the removal
+        // is tombstoned so the auto-sync doesn't re-add it (the frame goes
+        // back to the palette instead). Dragging the tile off the canvas
+        // does the same thing.
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'tile-remove-btn';
+        removeBtn.innerHTML = '✕';
+        removeBtn.title = 'Remove frame from wall';
+        removeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+        removeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._removeTileFromWall(entryId);
+        });
+        tile.appendChild(removeBtn);
 
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
       }
@@ -5281,10 +5415,15 @@
     _applyWallGhost(drag) {
       drag.ghost.style.left = `${drag.lastX - drag.dims.width / 2}px`;
       drag.ghost.style.top  = `${drag.lastY - drag.dims.height / 2}px`;
-      // Live hint: tint the ghost red when the drop it represents would be
-      // rejected for overlapping another tile. Runs at most once per rAF.
+      // Live hints, at most once per rAF: red when the drop would be
+      // rejected for overlapping another tile; faded when a tile drag is
+      // outside the canvas (release there = remove from this wall).
       const { x, y } = this._wallSnapCandidate(drag, drag.lastX, drag.lastY);
       drag.ghost.classList.toggle('colliding', this._wallCollidesAt(drag.entryId, x, y));
+      const canvasRect = this.shadowRoot.getElementById('wall-canvas').getBoundingClientRect();
+      const outside = drag.lastX < canvasRect.left || drag.lastX > canvasRect.right
+        || drag.lastY < canvasRect.top || drag.lastY > canvasRect.bottom;
+      drag.ghost.classList.toggle('off-canvas', drag.kind === 'tile' && outside);
     }
 
     _wallBeginDrag(e, entryId, kind) {
@@ -5358,16 +5497,20 @@
       }
 
       const canvasRect = canvas.getBoundingClientRect();
+      const withinCanvas = e.clientX >= canvasRect.left && e.clientX <= canvasRect.right
+        && e.clientY >= canvasRect.top && e.clientY <= canvasRect.bottom;
 
-      if (drag.kind === 'palette') {
-        const withinCanvas = e.clientX >= canvasRect.left && e.clientX <= canvasRect.right
-          && e.clientY >= canvasRect.top && e.clientY <= canvasRect.bottom;
-        if (!withinCanvas) {
+      if (!withinCanvas) {
+        if (drag.kind === 'palette') {
           // Dropped outside the wall -- treat as a cancel rather than
           // snapping it onto whichever edge happens to be nearest.
           this._renderWallCanvas();
-          return;
+        } else {
+          // Dragging a placed tile off the wall removes it -- the drag
+          // twin of the tile's ✕ button.
+          this._removeTileFromWall(drag.entryId);
         }
+        return;
       }
 
       const { x, y } = this._wallSnapCandidate(drag, e.clientX, e.clientY);
@@ -5385,6 +5528,10 @@
       }
 
       this._wallPlacements[drag.entryId] = { x, y };
+      // Re-placing a frame the user once removed from the default wall
+      // lifts its tombstone, or the backend would keep it off at the next
+      // reconcile.
+      this._wallExcluded = this._wallExcluded.filter(id => id !== drag.entryId);
       if (drag.kind === 'tile' && tileEl) {
         // Repositioning changes nothing structural (same tiles, same
         // palette, same mappings) -- move the one tile in place instead of
@@ -5394,6 +5541,23 @@
       } else {
         this._renderWallCanvas();
       }
+      this._scheduleWallLayoutSave();
+    }
+
+    // Remove a frame's tile from the active wall -- via its ✕ or by
+    // dragging it off the canvas. On the default wall the removal is
+    // recorded as a tombstone (Wall.excluded) so the backend's auto-sync
+    // doesn't put it straight back; the frame returns to the palette and
+    // can be dragged back on at any time.
+    _removeTileFromWall(entryId) {
+      delete this._wallPlacements[entryId];
+      const activeWall = this._activeWall();
+      if (activeWall && activeWall.kind === 'default'
+          && !this._wallExcluded.includes(entryId)) {
+        this._wallExcluded.push(entryId);
+      }
+      if (this._wallSelectedEntryId === entryId) this._wallSelectedEntryId = null;
+      this._renderWallCanvas();
       this._scheduleWallLayoutSave();
     }
 
@@ -5408,19 +5572,20 @@
       const wallId = wall.wall_id;
       const name = wall.name;
       const snapshot = JSON.parse(JSON.stringify(this._wallPlacements));
+      const excluded = [...this._wallExcluded];
       this._wallSaveTimer = setTimeout(() => {
         this._wallSaveTimer = null;
-        this._persistWallLayout(wallId, name, snapshot);
+        this._persistWallLayout(wallId, name, snapshot, excluded);
       }, 800);
     }
 
-    async _persistWallLayout(wallId, name, placements) {
+    async _persistWallLayout(wallId, name, placements, excluded) {
       const fb = this.shadowRoot.getElementById('wall-fb');
       try {
         const resp = await fetch(`/api/fraimic/walls/${wallId}`, {
           method: 'POST',
           headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, placements }),
+          body: JSON.stringify({ name, placements, excluded }),
         });
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {
@@ -5429,7 +5594,10 @@
         // Sync the local record so a wall switch round-trip shows what was
         // just saved, without refetching the whole list.
         const wall = this._walls.find(w => w.wall_id === wallId);
-        if (wall) wall.placements = result.wall.placements;
+        if (wall) {
+          wall.placements = result.wall.placements;
+          wall.excluded = result.wall.excluded || [];
+        }
       } catch (err) {
         fb.className = 'feedback err';
         fb.textContent = `Couldn't save layout: ${err.message}`;
