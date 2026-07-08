@@ -63,13 +63,81 @@ function parseMultipartFields(buf) {
 // albums: [{ name, count, cover_image_id }]
 // walls: [{ wall_id, name, placements }]
 // scenePacks: [{ id, name, categories, ... }]
-function createMockServer({ frames = [], scenes = [], images = [], albums = [], walls = [], scenePacks = [] } = {}) {
+function createMockServer({ frames = [], scenes = [], images = [], albums = [], walls = [], scenePacks = [], discoveredFlows = [] } = {}) {
   let sceneList = scenes.map((s) => ({ created_at: 0, album: null, source: 'user', ...s }));
   let wallList = walls.map((w) => ({ created_at: 0, placements: {}, ...w }));
   let nextWallId = wallList.length + 1;
   let nextSceneId = sceneList.length + 1;
   const requestLog = [];
   const sends = []; // { entity_id, image_id, packer } per /library/send POST
+
+  // --- Embedded config/options flow state machine -----------------------
+  // Mirrors FraimicConfigFlow's real step graph (user → pick_device →
+  // name_device → create_entry, with a cannot_connect error branch) and
+  // FraimicOptionsFlow's single init step carrying one field of each
+  // serialized type the renderer must handle.
+  const flowSubmissions = [];   // { flow_id, body } per step POST
+  const flowDeletes = [];       // flow_id per flow DELETE
+  const entryDeletes = [];      // entry_id per config entry DELETE
+  const activeFlows = {};       // flow_id → current step result
+  let nextFlowId = 1;
+
+  const flowSteps = {
+    user: (flowId) => ({
+      type: 'form', flow_id: flowId, handler: 'fraimic', step_id: 'user',
+      data_schema: [{ name: 'host', type: 'string', optional: true, default: '' }],
+      errors: {}, description_placeholders: null, last_step: false,
+    }),
+    userCannotConnect: (flowId) => ({
+      ...flowSteps.user(flowId), errors: { host: 'cannot_connect' },
+    }),
+    pick_device: (flowId) => ({
+      type: 'form', flow_id: flowId, handler: 'fraimic', step_id: 'pick_device',
+      data_schema: [{
+        name: 'device', type: 'select', required: true,
+        options: [['192.168.1.31', '192.168.1.31 — firmware 1.9.2'], ['192.168.1.35', '192.168.1.35 — firmware 2.0.1']],
+      }],
+      errors: {}, description_placeholders: null, last_step: false,
+    }),
+    name_device: (flowId, host) => ({
+      type: 'form', flow_id: flowId, handler: 'fraimic', step_id: 'name_device',
+      data_schema: [{ name: 'name', type: 'string', required: true }],
+      errors: {}, description_placeholders: { host }, last_step: true,
+    }),
+    optionsInit: (flowId) => ({
+      type: 'form', flow_id: flowId, handler: 'entry_1', step_id: 'init',
+      data_schema: [
+        { name: 'scan_interval', type: 'integer', valueMin: 30, optional: true, default: 300 },
+        { name: 'rotation_edge', type: 'select', optional: true, default: 'left', options: [['left', 'Left edge up (Fraimic default)'], ['right', 'Right edge up']] },
+        { name: 'rotate_portrait_180', type: 'boolean', optional: true, default: false },
+        { name: 'rotate_landscape_180', type: 'boolean', optional: true, default: false },
+      ],
+      errors: {}, description_placeholders: null, last_step: true,
+    }),
+  };
+
+  // Discovered flows (banner tests): pre-seeded pending flows parked on
+  // name_device, resumable via GET like the real API.
+  for (const d of discoveredFlows) {
+    activeFlows[d.flow_id] = flowSteps.name_device(d.flow_id, d.host || '192.168.1.31');
+  }
+
+  function advanceConfigFlow(flowId, body) {
+    const current = activeFlows[flowId];
+    if (!current) return null;
+    if (current.step_id === 'user') {
+      if (body.host === '') return flowSteps.pick_device(flowId);
+      if (body.host === '10.0.0.99') return flowSteps.userCannotConnect(flowId);
+      return flowSteps.name_device(flowId, body.host);
+    }
+    if (current.step_id === 'pick_device') {
+      return flowSteps.name_device(flowId, body.device);
+    }
+    if (current.step_id === 'name_device' || current.step_id === 'init') {
+      return { type: 'create_entry', flow_id: flowId, title: body.name || '', version: 1 };
+    }
+    return null;
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -89,6 +157,47 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
 
     if (p === '/api/fraimic/frames') {
       return json(res, 200, { frames });
+    }
+
+    // --- HA config/options flow API (see state machine above) -----------
+    if (p === '/api/config/config_entries/flow' && req.method === 'POST') {
+      await readJsonBody(req);
+      const flowId = `flow_${nextFlowId++}`;
+      const step = flowSteps.user(flowId);
+      activeFlows[flowId] = step;
+      return json(res, 200, step);
+    }
+    if (p === '/api/config/config_entries/options/flow' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const flowId = `oflow_${nextFlowId++}`;
+      const step = { ...flowSteps.optionsInit(flowId), handler: body.handler };
+      activeFlows[flowId] = step;
+      return json(res, 200, step);
+    }
+    const flowMatch = p.match(/^\/api\/config\/config_entries\/(?:options\/)?flow\/([^/]+)$/);
+    if (flowMatch) {
+      const flowId = flowMatch[1];
+      if (!activeFlows[flowId]) return json(res, 404, { message: 'Invalid flow specified' });
+      if (req.method === 'GET') return json(res, 200, activeFlows[flowId]);
+      if (req.method === 'DELETE') {
+        flowDeletes.push(flowId);
+        delete activeFlows[flowId];
+        return json(res, 200, { success: true });
+      }
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req);
+        flowSubmissions.push({ flow_id: flowId, body });
+        const next = advanceConfigFlow(flowId, body);
+        if (!next) return json(res, 400, { message: 'no next step' });
+        if (next.type === 'create_entry') delete activeFlows[flowId];
+        else activeFlows[flowId] = next;
+        return json(res, 200, next);
+      }
+    }
+    const entryMatch = p.match(/^\/api\/config\/config_entries\/entry\/([^/]+)$/);
+    if (entryMatch && req.method === 'DELETE') {
+      entryDeletes.push(entryMatch[1]);
+      return json(res, 200, { require_restart: false });
     }
 
     if (p === '/api/fraimic/library/list') {
@@ -195,6 +304,9 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     },
     requestLog,
     sends,
+    flowSubmissions,
+    flowDeletes,
+    entryDeletes,
     get scenes() { return sceneList; },
     get walls() { return wallList; },
   };

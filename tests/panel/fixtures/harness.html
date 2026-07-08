@@ -25,10 +25,30 @@
         );
       }
       window.__serviceCalls = [];
+      window.__wsCalls = [];          // every callWS message, for assertions
+      window.__flowSubCallback = null; // config_entries/flow/subscribe sink -- tests push events here
+      window.__mockFlowProgress = window.__mockFlowProgress || [];
       const hass = {
         auth: { data: { access_token: 'test-token' } },
         states,
+        user: { is_admin: true },
+        language: 'en',
+        connection: {
+          subscribeMessage: async (cb, msg) => {
+            if (msg.type === 'config_entries/flow/subscribe') {
+              window.__flowSubCallback = cb;
+              // Mirror real HA: the subscription opens with a burst of the
+              // currently in-progress flows.
+              if (window.__mockFlowProgress.length) {
+                cb(window.__mockFlowProgress.map((flow) => ({ flow_id: flow.flow_id, flow })));
+              }
+              return () => { window.__flowSubCallback = null; };
+            }
+            throw new Error(`unmocked subscription: ${msg.type}`);
+          },
+        },
         callWS: async (msg) => {
+          window.__wsCalls.push(msg);
           if (msg.type === 'config_entries/get') {
             return frames.map((f) => ({ entry_id: f.entry_id, title: f.title }));
           }
@@ -37,6 +57,17 @@
           }
           if (msg.type === 'config/entity_registry/list') {
             return entities;
+          }
+          if (msg.type === 'frontend/get_translations') {
+            // Empty on purpose: specs assert the renderer's raw-name
+            // fallback, which is also what a translation outage produces.
+            return { resources: {} };
+          }
+          if (msg.type === 'config_entries/flow/progress') {
+            return window.__mockFlowProgress;
+          }
+          if (msg.type === 'config_entries/update') {
+            return { require_restart: false };
           }
           return [];
         },
