@@ -106,6 +106,45 @@ test.describe('Default wall collision and keyboard nudge', () => {
     expect(pos2).toEqual({ x: 160, y: 0 }); // neighbor never moved
   });
 
+  test('the realistic path works: click tile, dismiss picker by clicking outside, arrows nudge', async ({ page }) => {
+    await clickTile(page, 'entry_1');
+    // The picker's transparent backdrop covers the viewport -- clicking
+    // anywhere outside its box is how a user dismisses it.
+    await page.mouse.click(600, 500);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+
+    const pos = await tilePos(page, 'entry_1');
+    expect(pos).toEqual({ x: 0, y: 40 });
+  });
+
+  test('Escape closes the picker first (keeping the selection), then clears the selection', async ({ page }) => {
+    await clickTile(page, 'entry_1');
+    await page.waitForFunction(
+      () => document.getElementById('panel').shadowRoot.getElementById('wall-image-picker-overlay').style.display === 'block'
+    );
+
+    await page.keyboard.press('Escape');
+    const afterFirst = await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      return {
+        pickerDisplay: panel.shadowRoot.getElementById('wall-image-picker-overlay').style.display,
+        selected: panel._wallSelectedEntryId,
+      };
+    });
+    expect(afterFirst.pickerDisplay).toBe('none');
+    expect(afterFirst.selected).toBe('entry_1');
+
+    // Arrows still work right after dismissing the picker with Escape --
+    // regression for the trap where Escape killed the selection instead.
+    await page.keyboard.press('ArrowDown');
+    expect(await tilePos(page, 'entry_1')).toEqual({ x: 0, y: 20 });
+
+    await page.keyboard.press('Escape');
+    const selected = await page.evaluate(() => document.getElementById('panel')._wallSelectedEntryId);
+    expect(selected).toBe(null);
+  });
+
   test('Escape clears the selection so arrows stop nudging', async ({ page }) => {
     await selectTileWithoutPicker(page, 'entry_1');
     await page.keyboard.press('Escape');

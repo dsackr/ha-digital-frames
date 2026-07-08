@@ -4759,19 +4759,30 @@
     _onWallKeydown(e) {
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) return;
       if (this._activeTab !== 'scenes') return;
-      const entryId = this._wallSelectedEntryId;
-      if (!entryId || !(entryId in this._wallPlacements)) return;
-      // Never steal keys from form fields or an open modal.
+      // Never steal keys from form fields.
       const target = e.composedPath ? e.composedPath()[0] : e.target;
       const tag = target && target.tagName;
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return;
-      for (const overlay of this.shadowRoot.querySelectorAll('.modal-overlay, .editor-overlay')) {
-        if (overlay.style.display && overlay.style.display !== 'none') return;
-      }
 
       if (e.key === 'Escape') {
+        // Escape dismisses the topmost thing: the image picker first (it
+        // has no key handling of its own -- without this, Escape after a
+        // tile click cleared the selection while the picker stayed open,
+        // and the arrow keys then read as completely dead), then the tile
+        // selection.
+        const picker = this.shadowRoot.getElementById('wall-image-picker-overlay');
+        if (picker && picker.style.display === 'block') {
+          this._closeWallImagePicker();
+          return;
+        }
         this._wallSelectTile(null);
         return;
+      }
+
+      const entryId = this._wallSelectedEntryId;
+      if (!entryId || !(entryId in this._wallPlacements)) return;
+      for (const overlay of this.shadowRoot.querySelectorAll('.modal-overlay, .editor-overlay')) {
+        if (overlay.style.display && overlay.style.display !== 'none') return;
       }
 
       e.preventDefault();
