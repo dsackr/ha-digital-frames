@@ -28,6 +28,7 @@ from .const import (
 )
 from .helpers import (
     device_key_from_info,
+    dimensions_from_info,
     find_frame_by_device_key,
     get_local_ip,
     mac_from_info,
@@ -423,9 +424,9 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # orientation lock (entry.options, see helpers.render_spec_for_entry)
             # is applied at render time and never written back here, so the
             # two can't fight each other.
-            width = data.get("width")
-            height = data.get("height")
-            if isinstance(width, int) and isinstance(height, int):
+            dims = dimensions_from_info(data)
+            if dims is not None:
+                width, height = dims
                 curr_w = self.config_entry.data.get(CONF_WIDTH)
                 curr_h = self.config_entry.data.get(CONF_HEIGHT)
                 if width != curr_w or height != curr_h:

@@ -206,24 +206,49 @@ def mac_from_info(info: dict[str, Any]) -> str:
 _OFFICIAL_MAC_PREFIXES = ("1cdbd4", "3cdc75")
 
 
-def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
-    """Infer the frame type from /api/info's reported pixel dimensions.
+def dimensions_from_info(info: dict[str, Any]) -> tuple[int, int] | None:
+    """Extract the panel's reported pixel dimensions from /api/info.
 
-    Second-line detection behind probe_device_size's /info HTML scrape:
-    clones' community firmware doesn't serve that page in the expected
-    format, but every firmware that reports width/height in /api/info can
-    be matched against the frame-type registry by resolution
-    (orientation-agnostic, like byte_layout_for_resolution).
-
-    Resolutions shared by multiple types (13.3" official vs 13.1" clone,
-    both 1200x1600) are disambiguated by MAC OUI -- functionally either
-    answer renders identically (the registry validates shared resolutions
-    agree on byte layout), so this only affects the display label.
+    Firmware shapes differ (verified against real hardware): official
+    firmware reports no dimensions at all, some payloads carry top-level
+    width/height, and clone firmware nests them as display.width_px /
+    display.height_px. Returns None when neither shape is present.
     """
-    width = info.get("width")
-    height = info.get("height")
-    if not isinstance(width, int) or not isinstance(height, int):
+    display = info.get("display") or {}
+    width = info.get("width", display.get("width_px"))
+    height = info.get("height", display.get("height_px"))
+    if isinstance(width, int) and isinstance(height, int):
+        return width, height
+    return None
+
+
+def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
+    """Infer the frame type from an /api/info payload.
+
+    Second-line detection behind probe_device_size's /info HTML scrape
+    (which clone firmware doesn't serve in the expected format). Two
+    signals, in order:
+
+    1. display.device_type -- newer clone firmware states it outright
+       (e.g. '13.1" E-Ink').
+    2. Reported pixel dimensions matched against the frame-type registry
+       (orientation-agnostic, like byte_layout_for_resolution). Resolutions
+       shared by multiple types (13.3" official vs 13.1" clone, both
+       1200x1600) are disambiguated by MAC OUI -- functionally either
+       answer renders identically (the registry validates shared
+       resolutions agree on byte layout), so that tiebreak only affects
+       the display label.
+    """
+    display = info.get("display") or {}
+    device_type = display.get("device_type") or ""
+    inches = _SIZE_INCHES_RE.search(device_type)
+    if inches and inches.group(1) in FRAME_TYPES:
+        return inches.group(1)
+
+    dims = dimensions_from_info(info)
+    if dims is None:
         return None
+    width, height = dims
 
     candidates = [
         ft for ft in FRAME_TYPES.values()

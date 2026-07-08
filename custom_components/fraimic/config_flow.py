@@ -36,6 +36,7 @@ from .frame_types import FRAME_TYPES
 from .helpers import (
     detect_frame_type_from_info,
     device_key_from_info,
+    dimensions_from_info,
     get_local_ip,
     mac_from_info,
     match_and_update_entry,
@@ -294,9 +295,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         """Ask for a friendly name, then create the entry."""
         errors: dict[str, str] = {}
 
-        api_width: int | None = self._selected_info.get("width")
-        api_height: int | None = self._selected_info.get("height")
-        has_api_dims = isinstance(api_width, int) and isinstance(api_height, int)
+        api_dims = dimensions_from_info(self._selected_info)
 
         # _async_use_device() already scraped this from the frame's own
         # /info admin page. When it succeeds there's no ambiguity to ask the
@@ -309,8 +308,8 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
             name = user_input[CONF_NAME].strip()
 
             size = detected_size or user_input.get(CONF_RESOLUTION, _DEFAULT_RESOLUTION)
-            if has_api_dims:
-                width, height = api_width, api_height
+            if api_dims is not None:
+                width, height = api_dims
             else:
                 width, height = FRAME_TYPES[size].resolution
 
