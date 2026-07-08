@@ -1362,9 +1362,12 @@
     // them under the replacement AbortController.
     _addGlobalListeners() {
       const signal = this._abort.signal;
-      // Arrow-key nudging for the selected wall tile. Window-level (a tile
-      // needs no focus) with its own guards -- see _onWallKeydown.
-      window.addEventListener('keydown', this._onWallKeydown, { signal });
+      // Arrow-key nudging for the selected wall tile. Capture phase on
+      // purpose: it runs on the way DOWN from window to the target, so no
+      // component between us and the focused element (HA's sidebar list
+      // consumes arrow keys for its own navigation) can stopPropagation
+      // it away from us. Guards in _onWallKeydown keep it polite.
+      window.addEventListener('keydown', this._onWallKeydown, { signal, capture: true });
       if (this._sweepUploadInput) {
         window.addEventListener('focus', this._sweepUploadInput, { signal });
         document.addEventListener('visibilitychange', this._onDocVisibility, { signal });
@@ -4752,7 +4755,16 @@
       const canvas = this.shadowRoot.getElementById('wall-canvas');
       if (!canvas) return;
       for (const tile of canvas.querySelectorAll('.wall-tile')) {
-        tile.classList.toggle('selected', tile.dataset.entryId === this._wallSelectedEntryId);
+        const isSelected = tile.dataset.entryId === this._wallSelectedEntryId;
+        tile.classList.toggle('selected', isSelected);
+        if (isSelected) {
+          // Pull keyboard focus onto the tile. Without this, focus stays
+          // wherever it was -- in real HA that's usually the sidebar's
+          // list item (our pointerdown preventDefault blocks the normal
+          // click-focus transfer), and the sidebar's own arrow-key
+          // navigation eats the nudge keys before they reach us.
+          tile.focus({ preventScroll: true });
+        }
       }
     }
 
@@ -4858,6 +4870,9 @@
         tile.style.width  = `${dims.width}px`;
         tile.style.height = `${dims.height}px`;
         tile.title = frame.title;
+        // Focusable so _wallSelectTile can move keyboard focus here (out
+        // of HA's sidebar) -- and for plain keyboard/tab accessibility.
+        tile.tabIndex = 0;
         if (entryId === this._wallSelectedEntryId) tile.classList.add('selected');
         canvas.appendChild(tile);
 
