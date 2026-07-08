@@ -120,7 +120,8 @@
       padding: 20px;
       box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,.1));
     }
-    .card.deep-link-highlight {
+    .card.deep-link-highlight,
+    .wall-tile.deep-link-highlight {
       outline: 3px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
       transition: outline-color 0.3s ease;
@@ -1160,6 +1161,56 @@
       outline: 3px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
     }
+    .wall-tile-media {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-size: 11px;
+      text-align: center;
+      padding: 2px;
+      box-sizing: border-box;
+    }
+    .wall-tile-media img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .wall-tile-footer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 4px;
+      font-size: 10px;
+      line-height: 1.3;
+      background: rgba(15, 23, 42, .68);
+      color: #fff;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .wall-tile-footer .wall-tile-name {
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wall-tile-footer .wall-tile-status { flex: 0 0 auto; white-space: nowrap; }
+    .wall-tile-footer .wall-tile-gear {
+      background: none;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      padding: 0 2px;
+      font-size: 12px;
+      flex: 0 0 auto;
+      pointer-events: auto;
+    }
     .discovery-banner .banner-add-btn {
       padding: 6px 14px;
       border-radius: 8px;
@@ -1188,7 +1239,6 @@
       this._frames   = [];   // [{ title, entityId, deviceId }]
       this._loaded   = false;
       this._stateMap = {};   // entityId → { battery, available }
-      this._cards    = {};   // entityId → { dom refs + state }
 
       this._library      = [];        // [{ image_id, filename, content_type, resolutions, albums }]
       this._backend       = 'local';  // active library storage backend
@@ -1234,7 +1284,7 @@
       this._scenes        = [];       // [{ scene_id, name, mappings: { entry_id: image_id }, source }]
 
       this._scenePacks    = [];       // [{ id, name, description, categories, license, cover, images, installed, scene_created }]
-      this._activeTab     = 'library'; // 'library' | 'frames' | 'scenes' | 'addons'
+      this._activeTab     = 'dashboard'; // 'dashboard' | 'addons'
       this._packCategory  = null;     // null = category-tile view; otherwise the category id being browsed
       this._packPreview   = null;     // { pack, index } while the read-only image gallery is open, else null
 
@@ -1350,10 +1400,9 @@
       // Grid <img>s still point at revoked blob: URLs -- re-render from
       // in-memory state so tiles re-register with the observer and refetch
       // (cheap: server-side disk thumbnail cache + browser HTTP cache).
-      this._renderFrames();
+      this._renderDashboard();
       this._renderLibrary();
       this._renderScenePacks();
-      this._renderWallsSubview();
     }
 
     // The three long-lived window/document listeners the panel needs.
@@ -1422,6 +1471,7 @@
       this._wireAlbumCreate();
       this._wireFlowModal();
       this._wireFrameSettingsMenu();
+      this._wireSettingsModal();
       this._wireWallToolbar();
       this._wireWallImagePicker();
       this._wirePackTest();
@@ -1441,8 +1491,6 @@
       const wallsP   = this._loadWalls();
 
       await framesP;
-      this._renderFrames();
-      this._handleDeepLink();
       await Promise.all([backendP, albumsP]);
       this._renderLibrary();
       await Promise.all([scenesP, wallsP]);
@@ -1453,7 +1501,10 @@
         this._activeWallId = initial.wall_id;
         this._wallPlacements = JSON.parse(JSON.stringify(initial.placements || {}));
       }
-      this._renderWallsSubview();
+      this._renderDashboard();
+      // Deep links target wall tiles, so this must wait for the walls
+      // render above.
+      this._handleDeepLink();
       await packsP;
       this._renderScenePacks();
 
@@ -1462,7 +1513,7 @@
     }
 
     // Coming from a device page's "Visit" link (/fraimic?entry=<entry_id>):
-    // jump straight to that frame's tile and highlight it.
+    // select and scroll to that frame's tile on the dashboard wall.
     _handleDeepLink() {
       let entryId;
       try {
@@ -1472,21 +1523,19 @@
       }
       if (!entryId) return;
 
-      const frame = this._frames.find(f => f.entryId === entryId);
-      if (!frame) return;
-      const card = this._cards[frame.entityId];
-      if (!card) return;
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      const tile = canvas && this._wallTileEl(canvas, entryId);
+      if (!tile) return;
 
-      // Frames is no longer the default tab -- switch to it so the
-      // highlighted card is actually visible.
-      this._setTab('frames');
-      card.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.el.classList.add('deep-link-highlight');
-      setTimeout(() => card.el.classList.remove('deep-link-highlight'), 3000);
+      this._setTab('dashboard');
+      this._wallSelectTile(entryId);
+      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tile.classList.add('deep-link-highlight');
+      setTimeout(() => tile.classList.remove('deep-link-highlight'), 3000);
     }
 
     // -----------------------------------------------------------------------
-    // Tab bar: Library / Frames / Scenes / Add-ons
+    // Tab bar: Dashboard / Add-ons
     // -----------------------------------------------------------------------
 
     // Mirrors HA frontend's own navigate() helper: history.pushState must
@@ -1516,13 +1565,15 @@
         // @require_admin server-side.
         if (!this._isAdmin()) addBtn.style.display = 'none';
       }
-      this._setTab('library');
+      const libraryBtn = this.shadowRoot.getElementById('library-open-btn');
+      if (libraryBtn) libraryBtn.addEventListener('click', () => this._openLibraryModal());
+      this._setTab('dashboard');
     }
 
     _setTab(name) {
       this._activeTab = name;
       const root = this.shadowRoot;
-      ['library', 'frames', 'scenes', 'addons'].forEach(tab => {
+      ['dashboard', 'addons'].forEach(tab => {
         const content = root.getElementById(`tab-${tab}`);
         const btn     = root.querySelector(`.tab-btn[data-tab="${tab}"]`);
         if (content) content.classList.toggle('active', tab === name);
@@ -1535,71 +1586,23 @@
         <style>${CSS}</style>
 
         <div class="tab-bar" id="tab-bar">
-          <button class="tab-btn active" data-tab="library">Library</button>
-          <button class="tab-btn" data-tab="frames">Frames</button>
-          <button class="tab-btn" data-tab="scenes">Scenes</button>
+          <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
           <button class="tab-btn" data-tab="addons">Add-ons</button>
         </div>
 
-        <div class="tab-content active" id="tab-library">
-        <div class="lib-toolbar">
-          <div class="lib-backend">
-            <label for="backend-select">Storage:</label>
-            <select id="backend-select">
-              <option value="local">Local (this Home Assistant)</option>
-              <option value="google_drive">Google Drive</option>
-              <option value="dropbox">Dropbox</option>
-            </select>
-          </div>
-          <div class="lib-toolbar-actions">
-            <button class="btn-primary" id="lib-upload-btn" style="flex:0 0 auto">⬆ Upload to Library</button>
-            <button class="btn-ghost" id="album-create-btn" style="flex:0 0 auto">＋ Create Album</button>
-            <button class="btn-ghost" id="lib-discover-btn" style="display:none;flex:0 0 auto"
-              title="Adopt photos dropped into the Fraimic Library/inbox folder in Dropbox">🔍 Discover</button>
-          </div>
-        </div>
-        <div class="backend-config" id="backend-config"></div>
-        <div class="feedback" id="lib-fb"></div>
-        <div class="lib-breadcrumb" id="lib-breadcrumb">
-          <button id="lib-back-btn">← Albums</button>
-          <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
-          <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
-        </div>
-        <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
-          <span class="lib-select-count" id="lib-select-count">0 selected</span>
-          <button class="btn-primary" id="lib-select-delete" style="flex:0 0 auto">🗑 Delete Selected</button>
-          <button class="btn-ghost" id="lib-select-cancel" style="flex:0 0 auto">Cancel</button>
-        </div>
-        <div class="lib-grid" id="lib-grid">
-          <div class="empty">
-            <div class="empty-icon">⋯</div>
-            <h2>Loading library…</h2>
-          </div>
-        </div>
-        </div><!-- /tab-library -->
-
-        <div class="tab-content" id="tab-frames">
+        <div class="tab-content active" id="tab-dashboard">
         <div class="discovery-banner" id="discovery-banner" style="display:none"></div>
-        <div class="lib-toolbar" style="justify-content:flex-end">
-          <button class="btn-primary" id="frame-add-btn" style="flex:0 0 auto">＋ Add Frame</button>
-        </div>
-        <div class="grid" id="grid">
-          <div class="empty">
-            <div class="empty-icon">⋯</div>
-            <h2>Discovering frames…</h2>
-          </div>
-        </div>
-        </div><!-- /tab-frames -->
-
-        <div class="tab-content" id="tab-scenes">
         <div class="lib-toolbar">
           <div class="lib-backend">
             <label for="wall-select">Wall:</label>
             <select id="wall-select"><option value="">Untitled (unsaved)</option></select>
           </div>
           <div class="lib-toolbar-actions">
-            <button class="btn-primary" id="wall-new-btn" style="flex:0 0 auto">＋ New Wall</button>
+            <button class="btn-ghost" id="wall-new-btn" style="flex:0 0 auto">＋ New Wall</button>
             <button class="btn-ghost" id="wall-delete-btn" style="flex:0 0 auto;display:none">🗑 Delete Wall</button>
+            <button class="btn-primary" id="frame-add-btn" style="flex:0 0 auto">＋ Add Frame</button>
+            <button class="btn-ghost" id="library-open-btn" style="flex:0 0 auto">🖼 Manage Library</button>
+            <button class="btn-ghost" id="settings-open-btn" style="flex:0 0 auto" title="Photo storage settings">⚙</button>
           </div>
         </div>
         <div class="feedback" id="wall-fb"></div>
@@ -1632,7 +1635,7 @@
           </div>
           <div class="feedback" id="wall-scene-fb"></div>
         </div>
-        </div><!-- /tab-scenes -->
+        </div><!-- /tab-dashboard -->
 
         <div class="tab-content" id="tab-addons">
         <div class="feedback" id="pack-fb"></div>
@@ -1715,6 +1718,68 @@
           </div>
         </div>
 
+        <!-- Manage Library: everything from the old Library tab except the
+             backend picker (now in Settings) and per-frame sends (now
+             inline on tile click) -- albums, upload, crop, tagging, bulk
+             delete, Dropbox Discover. Markup relocated verbatim; all
+             handlers find their elements by id and keep working. Sits at a
+             lower z-index than its sub-modals (upload/album/crop) so they
+             stack above it. -->
+        <div class="modal-overlay" id="library-modal-overlay" style="z-index:900">
+          <div class="modal-box" style="max-width:1100px;max-height:90vh;overflow-y:auto">
+            <div class="lib-toolbar">
+              <h3 style="margin:0;flex:1 1 auto">🖼 Library</h3>
+              <div class="lib-toolbar-actions">
+                <button class="btn-primary" id="lib-upload-btn" style="flex:0 0 auto">⬆ Upload to Library</button>
+                <button class="btn-ghost" id="album-create-btn" style="flex:0 0 auto">＋ Create Album</button>
+                <button class="btn-ghost" id="lib-discover-btn" style="display:none;flex:0 0 auto"
+                  title="Adopt photos dropped into the Fraimic Library/inbox folder in Dropbox">🔍 Discover</button>
+                <button class="btn-ghost" id="library-modal-close" style="flex:0 0 auto">✕ Close</button>
+              </div>
+            </div>
+            <div class="feedback" id="lib-fb"></div>
+            <div class="lib-breadcrumb" id="lib-breadcrumb">
+              <button id="lib-back-btn">← Albums</button>
+              <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
+              <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
+            </div>
+            <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
+              <span class="lib-select-count" id="lib-select-count">0 selected</span>
+              <button class="btn-primary" id="lib-select-delete" style="flex:0 0 auto">🗑 Delete Selected</button>
+              <button class="btn-ghost" id="lib-select-cancel" style="flex:0 0 auto">Cancel</button>
+            </div>
+            <div class="lib-grid" id="lib-grid">
+              <div class="empty">
+                <div class="empty-icon">⋯</div>
+                <h2>Loading library…</h2>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings: the library storage-backend picker (Local / Google
+             Drive / Dropbox), relocated from the old Library tab. The
+             #backend-config contents are rendered by _renderBackendConfig,
+             exactly as before -- only the markup's home moved. -->
+        <div class="modal-overlay" id="settings-modal-overlay">
+          <div class="modal-box">
+            <h3>⚙ Settings</h3>
+            <div class="modal-row">
+              <label for="backend-select">Photo storage</label>
+              <select id="backend-select">
+                <option value="local">Local (this Home Assistant)</option>
+                <option value="google_drive">Google Drive</option>
+                <option value="dropbox">Dropbox</option>
+              </select>
+            </div>
+            <div class="backend-config" id="backend-config"></div>
+            <div class="feedback" id="settings-fb"></div>
+            <div class="modal-actions">
+              <button class="btn-ghost" id="settings-modal-close">Close</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Embedded config/options flow: a generic renderer for HA's
              data_entry_flow steps (add frame, reconfigure), so device
              management never has to leave the panel. Body content is
@@ -1747,6 +1812,7 @@
             <div class="modal-actions" style="flex-wrap:wrap">
               <button class="btn-primary" id="frame-settings-rename">Save Name</button>
               <button class="btn-ghost" id="frame-settings-configure">⚙ Configure…</button>
+              <button class="btn-ghost" id="frame-settings-reload" title="Reload this frame's integration">🔄 Reload</button>
               <button class="btn-ghost" id="frame-settings-remove">🗑 Remove</button>
               <button class="btn-ghost" id="frame-settings-close">Close</button>
             </div>
@@ -1816,8 +1882,12 @@
                 <select id="wall-image-picker-album"></select>
               </div>
               <div class="wall-lock-hint" id="wall-image-picker-lock-hint" style="display:none"></div>
-              <div class="modal-row">
-                <button class="btn-ghost" id="wall-image-picker-clear">✕ Remove Image From This Frame</button>
+              <div class="modal-row" style="flex-direction:row;gap:8px">
+                <!-- Single-MIME accept on purpose: companion-app WebView
+                     file choosers are unreliable with multi-MIME lists. -->
+                <button class="btn-primary" id="wall-picker-upload-btn" style="flex:1 1 auto">⬆ Upload a photo…</button>
+                <input type="file" id="wall-picker-upload-input" accept="image/*" style="display:none">
+                <button class="btn-ghost" id="wall-image-picker-clear" style="flex:1 1 auto">✕ Remove Image</button>
               </div>
               <div class="image-picker-grid" id="wall-image-picker-grid"></div>
               <div class="feedback" id="wall-image-picker-fb"></div>
@@ -1957,211 +2027,17 @@
     // Render
     // -----------------------------------------------------------------------
 
+    // Kept as a thin alias: many call sites (send-success refreshes, reload
+    // timers, _revive, _refreshAfterEntryChange) historically refreshed the
+    // Frames tab through this name -- they all now refresh the consolidated
+    // dashboard.
     _renderFrames() {
-      const grid = this.shadowRoot.getElementById('grid');
-
-      if (!this._frames.length) {
-        grid.innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">▦</div>
-            <h2>No frames found</h2>
-            <p>Go to <strong>Settings → Integrations → + Add Integration</strong>
-               and search for <strong>Fraimic</strong> to set up your frames.</p>
-          </div>
-        `;
-        return;
-      }
-
-      // frame.origin comes from /api/fraimic/frames (see FRAME_TYPES in
-      // frame_types.py) and is only known once that fetch resolves; a frame
-      // with no origin yet is grouped with Official rather than dropped, so
-      // it doesn't flicker between sections as data arrives.
-      const officialFrames = this._frames.filter(f => f.origin !== 'clone');
-      const cloneFrames    = this._frames.filter(f => f.origin === 'clone');
-
-      grid.innerHTML = '';
-      this._cards = {};
-
-      grid.appendChild(this._buildSectionHeader('🖼 Official Frames'));
-      if (officialFrames.length) {
-        for (const frame of officialFrames) {
-          const card = this._buildCard(frame);
-          grid.appendChild(card.el);
-          this._cards[frame.entityId] = card;
-        }
-      } else {
-        grid.appendChild(this._buildSectionEmpty('🖼', 'No official frames yet', 'Add a Fraimic Canvas frame to see it here.'));
-      }
-
-      if (cloneFrames.length) {
-        grid.appendChild(this._buildSectionHeader('🧩 Community Frames'));
-        for (const frame of cloneFrames) {
-          const card = this._buildCard(frame);
-          grid.appendChild(card.el);
-          this._cards[frame.entityId] = card;
-        }
-      }
-
-      // Wire reload buttons
-      grid.querySelectorAll('.btn-reload').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const entryId = btn.dataset.entryId;
-          btn.classList.add('loading');
-          btn.disabled = true;
-          try {
-            const resp = await fetch('/api/fraimic/frame/reload', {
-              method: 'POST',
-              headers: {
-                ...this._authHeaders(),
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ entry_id: entryId })
-            });
-            if (resp.ok) {
-              // Reloaded! Give HA a brief moment to re-initialize before
-              // refreshing the view. (This used to call this._loadFrames(),
-              // which doesn't exist -- the refresh silently never happened.)
-              setTimeout(async () => {
-                await this._discoverFrames();
-                this._renderFrames();
-              }, 2000);
-            } else {
-              alert('Failed to reload frame integration.');
-            }
-          } catch (err) {
-            console.error('Error reloading frame:', err);
-          } finally {
-            btn.classList.remove('loading');
-            btn.disabled = false;
-          }
-        });
-      });
-
-      // Wire the Options button: opens the embedded rename/configure/remove
-      // menu -- no trip to HA Settings. Hidden for non-admins since every
-      // action inside is @require_admin server-side.
-      grid.querySelectorAll('.btn-options').forEach(btn => {
-        if (!this._isAdmin()) {
-          btn.style.display = 'none';
-          return;
-        }
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const frame = this._frames.find(f => f.entryId === btn.dataset.entryId);
-          if (frame) this._openFrameSettingsMenu(frame);
-        });
-      });
-
-      // Wire orientation selects
-      grid.querySelectorAll('.frame-orientation-select').forEach(select => {
-        select.addEventListener('click', (e) => e.stopPropagation());
-        select.addEventListener('change', async (e) => {
-          const entityId = select.dataset.entityId;
-          const option = e.target.value;
-          select.disabled = true;
-          try {
-            await this._hass.callService('select', 'select_option', {
-              entity_id: entityId,
-              option,
-            });
-          } catch (err) {
-            console.error('[fraimic-panel] failed to set orientation:', err);
-            alert('Failed to change orientation.');
-          } finally {
-            select.disabled = false;
-          }
-        });
-      });
-
-      this._tickAllStatus();
+      this._renderDashboard();
     }
 
-    _buildCard(frame) {
-      const el = document.createElement('div');
-      el.className = 'card frame-tile';
-      const sid = this._sid(frame.entityId);
-      const sizeLabel = frame.size ? `${this._esc(frame.size)}"` : '';
-      const originLabel = frame.origin === 'clone'
-        ? `Community Clone${frame.platform ? ` · ${this._esc(frame.platform)}` : ''}`
-        : '';
-      const hostLink = frame.host
-        ? `<a class="frame-host-link" href="http://${this._esc(frame.host)}" target="_blank" rel="noopener" title="Open frame's web UI">
-             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-               <path d="M14 3h7v7"/><path d="M10 14 21 3"/>
-               <path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h6"/>
-             </svg>
-           </a>`
-        : '';
-      const reloadBtn = frame.entryId
-        ? `<button class="frame-action-btn btn-reload" data-entry-id="${this._esc(frame.entryId)}" title="Reload Frame Integration">
-             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-               <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-             </svg>
-           </button>`
-        : '';
-      const optionsBtn = frame.entryId
-        ? `<button class="frame-action-btn btn-options" data-entry-id="${this._esc(frame.entryId)}" title="Frame Options">
-             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-               <circle cx="12" cy="12" r="3"/>
-               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-             </svg>
-           </button>`
-        : '';
-
-      // Orientation select: options/labels are read live off the entity's own
-      // state rather than hardcoded, so this stays correct if the labels in
-      // select.py ever change -- see FraimicOrientationSelect.
-      let orientationSelect = '';
-      if (frame.orientationEntityId) {
-        const state = this._hass.states[frame.orientationEntityId];
-        const opts = (state && state.attributes && state.attributes.options) || [];
-        if (opts.length) {
-          orientationSelect = `
-            <select class="frame-orientation-select" data-entity-id="${this._esc(frame.orientationEntityId)}" title="Orientation lock">
-              ${opts.map(o => `<option value="${this._esc(o)}" ${state.state === o ? 'selected' : ''}>${this._esc(o)}</option>`).join('')}
-            </select>`;
-        }
-      }
-
-      // lastImageId (Library/Scene sends) and hasThumbnail (send_image
-      // service / raw upload sends) are mutually exclusive on the backend --
-      // see FraimicCoordinator.last_image_id / last_thumbnail -- so at most
-      // one of these branches applies.
-      let thumbSrc = null;
-      if (frame.lastImageId) {
-        thumbSrc = `/api/fraimic/library/image/${this._esc(frame.lastImageId)}?thumb=480`;
-      } else if (frame.hasThumbnail) {
-        thumbSrc = `/api/fraimic/frame/${this._esc(frame.entryId)}/thumbnail`;
-      }
-      const thumbIcon = thumbSrc
-        ? `<img src="${thumbSrc}" alt="">`
-        : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-             <rect x="3" y="3" width="18" height="18" rx="2"/>
-             <rect x="7" y="7" width="10" height="10" rx="1"/>
-           </svg>`;
-
-      el.innerHTML = `
-        <div class="frame-row">
-          <div class="frame-icon">${thumbIcon}</div>
-          <div class="frame-meta">
-            <div class="frame-name">${this._esc(frame.title)}</div>
-            <div class="frame-status" id="status-${sid}"></div>
-            ${sizeLabel ? `<div class="frame-status">${sizeLabel}</div>` : ''}
-            ${originLabel ? `<div class="frame-origin-clone">${originLabel}</div>` : ''}
-            ${orientationSelect}
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;align-items:center;flex-shrink:0">
-            ${hostLink}
-            ${reloadBtn}
-            ${optionsBtn}
-          </div>
-        </div>
-      `;
-
-      return { el };
+    _renderDashboard() {
+      this._renderDiscoveryBanner();
+      this._renderWallsSubview();
     }
 
     // -----------------------------------------------------------------------
@@ -2175,26 +2051,29 @@
     }
 
     _tickStatus(frame) {
-      const sid = this._sid(frame.entityId);
-      const statusEl = this.shadowRoot.getElementById(`status-${sid}`);
-      if (!statusEl) return;
+      // Attribute-hook based (not id) so one code path serves every place a
+      // frame's status appears -- today that's the wall tile footers.
+      const els = this.shadowRoot.querySelectorAll(`[data-status-entity="${frame.entityId}"]`);
+      if (!els.length) return;
 
       const state = this._hass.states[frame.entityId];
       let html;
       if (!state || state.state === 'unavailable' || state.state === 'unknown') {
-        html = '<span class="dot-off">● Offline</span>';
+        html = '<span class="dot-off">●</span>';
       } else {
         const pct = parseFloat(state.state);
-        const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}%&nbsp; `;
-        html = `${bat}<span class="dot-on">● Online</span>`;
+        const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
+        html = `${bat}<span class="dot-on">●</span>`;
       }
       // hass is re-assigned on every state change of ANY entity in the
       // house -- skip the DOM write when this frame's status text is
       // unchanged, or the constant innerHTML churn janks whatever screen
       // is open.
-      if (statusEl._fraimicLastStatus === html) return;
-      statusEl._fraimicLastStatus = html;
-      statusEl.innerHTML = html;
+      for (const el of els) {
+        if (el._fraimicLastStatus === html) continue;
+        el._fraimicLastStatus = html;
+        el.innerHTML = html;
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -2608,6 +2487,29 @@
           });
         });
 
+      this.shadowRoot.getElementById('frame-settings-reload')
+        .addEventListener('click', async (e) => {
+          const frame = this._frameSettingsTarget;
+          if (!frame) return;
+          e.target.disabled = true;
+          try {
+            const resp = await fetch('/api/fraimic/frame/reload', {
+              method: 'POST',
+              headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ entry_id: frame.entryId }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            close();
+            await this._refreshAfterEntryChange();
+          } catch (err) {
+            fb.className = 'feedback err';
+            fb.textContent = `Reload failed: ${err.message}`;
+            fb.style.display = 'block';
+          } finally {
+            e.target.disabled = false;
+          }
+        });
+
       this.shadowRoot.getElementById('frame-settings-remove')
         .addEventListener('click', async (e) => {
           const frame = this._frameSettingsTarget;
@@ -2628,6 +2530,36 @@
             e.target.disabled = false;
           }
         });
+    }
+
+    _openLibraryModal() {
+      this.shadowRoot.getElementById('library-modal-overlay').style.display = 'flex';
+      // The grid's lazy-thumbnail observers never fired while the modal was
+      // display:none -- nudge a render now that tiles can intersect.
+      this._renderLibrary();
+    }
+
+    _closeLibraryModal() {
+      this.shadowRoot.getElementById('library-modal-overlay').style.display = 'none';
+    }
+
+    _wireSettingsModal() {
+      const overlay = this.shadowRoot.getElementById('settings-modal-overlay');
+      const close = () => { overlay.style.display = 'none'; };
+      this.shadowRoot.getElementById('settings-modal-close').addEventListener('click', close);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      this.shadowRoot.getElementById('backend-select')
+        .addEventListener('change', (e) => this._renderBackendConfig(e.target.value));
+      const openBtn = this.shadowRoot.getElementById('settings-open-btn');
+      if (openBtn) openBtn.addEventListener('click', () => this._openSettingsModal());
+    }
+
+    _openSettingsModal() {
+      const sel = this.shadowRoot.getElementById('backend-select');
+      sel.value = this._backend;
+      this._renderBackendConfig(this._backend);
+      this.shadowRoot.getElementById('settings-fb').style.display = 'none';
+      this.shadowRoot.getElementById('settings-modal-overlay').style.display = 'flex';
     }
 
     _openFrameSettingsMenu(frame) {
@@ -2751,7 +2683,6 @@
 
     _wireLibraryToolbar() {
       const uploadBtn       = this.shadowRoot.getElementById('lib-upload-btn');
-      const backendSelect   = this.shadowRoot.getElementById('backend-select');
       const backBtn         = this.shadowRoot.getElementById('lib-back-btn');
       const albumCreateBtn  = this.shadowRoot.getElementById('album-create-btn');
       const discoverBtn     = this.shadowRoot.getElementById('lib-discover-btn');
@@ -2760,8 +2691,13 @@
       const selectDeleteBtn = this.shadowRoot.getElementById('lib-select-delete');
 
       uploadBtn.addEventListener('click', () => this._openUploadModal());
-      backendSelect.addEventListener('change', e => this._renderBackendConfig(e.target.value));
       backBtn.addEventListener('click', () => this._openAlbumFolders());
+      const libraryOverlay = this.shadowRoot.getElementById('library-modal-overlay');
+      this.shadowRoot.getElementById('library-modal-close')
+        .addEventListener('click', () => this._closeLibraryModal());
+      libraryOverlay.addEventListener('click', (e) => {
+        if (e.target === libraryOverlay) this._closeLibraryModal();
+      });
       albumCreateBtn.addEventListener('click', () => this._openAlbumCreateModal());
       discoverBtn.addEventListener('click', () => this._discoverLibrary());
       selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
@@ -2907,8 +2843,9 @@
       btn.textContent = prevText;
     }
 
-    _renderBackendConfig(selected) {
-      const container = this.shadowRoot.getElementById('backend-config');
+    // container is overridable so the first-run wizard can mount the same
+    // backend picker inline instead of in the Settings modal.
+    _renderBackendConfig(selected, container = this.shadowRoot.getElementById('backend-config')) {
       if (!container) return;
 
       if (selected === 'local') {
@@ -2977,7 +2914,7 @@
     }
 
     async _connectGoogleDrive() {
-      const fb = this.shadowRoot.getElementById('lib-fb');
+      const fb = this.shadowRoot.getElementById('settings-fb');
       const clientId     = this.shadowRoot.getElementById('gdrive-client-id').value.trim();
       const clientSecret = this.shadowRoot.getElementById('gdrive-client-secret').value.trim();
       if (!clientId || !clientSecret) return;
@@ -3006,7 +2943,7 @@
     }
 
     async _switchBackend(settings) {
-      const fb = this.shadowRoot.getElementById('lib-fb');
+      const fb = this.shadowRoot.getElementById('settings-fb');
       try {
         const resp = await fetch('/api/fraimic/library/settings', {
           method: 'POST',
@@ -4770,7 +4707,7 @@
 
     _onWallKeydown(e) {
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) return;
-      if (this._activeTab !== 'scenes') return;
+      if (this._activeTab !== 'dashboard') return;
       // Never steal keys from form fields.
       const target = e.composedPath ? e.composedPath()[0] : e.target;
       const tag = target && target.tagName;
@@ -4878,6 +4815,32 @@
 
         this._renderWallTileContent(tile, entryId, frame);
 
+        // Footer: the frame's name, live status, and (for admins) the
+        // manage gear -- the consolidated dashboard's per-frame surface.
+        const footer = document.createElement('div');
+        footer.className = 'wall-tile-footer';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'wall-tile-name';
+        nameEl.textContent = frame.title;
+        footer.appendChild(nameEl);
+        const statusEl = document.createElement('span');
+        statusEl.className = 'wall-tile-status';
+        statusEl.dataset.statusEntity = frame.entityId;
+        footer.appendChild(statusEl);
+        if (this._isAdmin()) {
+          const gear = document.createElement('button');
+          gear.className = 'wall-tile-gear';
+          gear.textContent = '⚙';
+          gear.title = 'Frame settings';
+          gear.addEventListener('pointerdown', (e) => e.stopPropagation());
+          gear.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._openFrameSettingsMenu(frame);
+          });
+          footer.appendChild(gear);
+        }
+        tile.appendChild(footer);
+
         // Every frame is permanently placed on the default wall (the
         // backend re-adds it anyway) -- only custom walls get the ✕.
         const activeWall = this._activeWall();
@@ -4901,6 +4864,7 @@
       }
 
       this._updateWallSaveToSceneAvailability();
+      if (this._hass) this._tickAllStatus();
     }
 
     // Sends whatever's currently previewed for every known frame (pending
@@ -4911,6 +4875,25 @@
     // yet. Not scoped to placed tiles -- a frame not on this wall's canvas
     // still gets sent if it has an image assigned, since placement and
     // "active" are unrelated (see the note above this section).
+    // One library image → one physical frame, immediately. Shared by the
+    // per-tile picker (send-on-pick) and "Send to Frames" (whole wall).
+    // Returns { queued } on acceptance; throws on a real failure.
+    async _sendLibraryImageToFrame(frame, imageId) {
+      const form = new FormData();
+      form.append('entity_id', frame.entityId);
+      form.append('image_id', imageId);
+      if (this._packerOverride) form.append('packer', this._packerOverride);
+      const resp = await fetch('/api/fraimic/library/send', {
+        method: 'POST', headers: this._authHeaders(), body: form,
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (result.queued) return { queued: true };
+      if (!resp.ok || !result.success) {
+        throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+      }
+      return { queued: false };
+    }
+
     async _sendWallToFrames() {
       const fb  = this.shadowRoot.getElementById('wall-scene-fb');
       const btn = this.shadowRoot.getElementById('wall-send-btn');
@@ -4935,20 +4918,9 @@
       btn.textContent = '⏳ Sending…';
 
       const results = await Promise.all(targets.map(async (t) => {
-        const form = new FormData();
-        form.append('entity_id', t.frame.entityId);
-        form.append('image_id', t.imageId);
         try {
-          const resp = await fetch('/api/fraimic/library/send', {
-            method: 'POST', headers: this._authHeaders(), body: form,
-          });
-          const result = await resp.json().catch(() => ({}));
-          if (result.queued) {
-            return { ...t, success: false, queued: true };
-          }
-          if (!resp.ok || !result.success) {
-            throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
-          }
+          const r = await this._sendLibraryImageToFrame(t.frame, t.imageId);
+          if (r.queued) return { ...t, success: false, queued: true };
           return { ...t, success: true };
         } catch (err) {
           return { ...t, success: false, message: err.message };
@@ -5027,16 +4999,35 @@
     }
 
     _renderWallTileContent(tile, entryId, frame) {
+      // Media lives in its own child so re-rendering an image never wipes
+      // the tile's footer (name/status/gear) or remove button.
+      let media = tile.querySelector('.wall-tile-media');
+      if (!media) {
+        media = document.createElement('div');
+        media.className = 'wall-tile-media';
+        tile.prepend(media);
+      }
       const imageId = this._wallEffectiveMapping(entryId);
       if (!imageId) {
-        tile.innerHTML = `<div>${this._esc(frame.title)}</div>`;
+        // No scene preview on this tile -- show what's actually on the
+        // physical frame right now. lastImageId (library/scene sends) and
+        // hasThumbnail (raw-upload sends) are mutually exclusive on the
+        // backend; the title text is the true-empty fallback.
+        if (frame.lastImageId) {
+          media.innerHTML = '';
+          this._loadThumbnail(frame.lastImageId, media);
+        } else if (frame.hasThumbnail) {
+          media.innerHTML = `<img src="/api/fraimic/frame/${this._esc(frame.entryId)}/thumbnail" alt="">`;
+        } else {
+          media.innerHTML = `<div>${this._esc(frame.title)}</div>`;
+        }
         return;
       }
-      tile.innerHTML = '';
+      media.innerHTML = '';
       // _loadThumbnail paints synchronously on a cache hit and dedupes
       // concurrent fetches, so repeated renders and same-image tiles are
       // cheap.
-      this._loadThumbnail(imageId, tile);
+      this._loadThumbnail(imageId, media);
     }
 
     // NOT a CSS attribute-selector lookup: this file's top-level `CSS` const
@@ -5283,6 +5274,48 @@
       this.shadowRoot.getElementById('wall-image-picker-overlay').addEventListener('click', (e) => {
         if (e.target.id === 'wall-image-picker-overlay') this._closeWallImagePicker();
       });
+
+      // "Upload a photo…": raw file → convert → send to this frame right
+      // now (the send_image endpoint). Deliberately not a library import;
+      // the Manage Library modal is for that.
+      const uploadBtn   = this.shadowRoot.getElementById('wall-picker-upload-btn');
+      const uploadInput = this.shadowRoot.getElementById('wall-picker-upload-input');
+      uploadBtn.addEventListener('click', () => uploadInput.click());
+      uploadInput.addEventListener('change', async () => {
+        const file = uploadInput.files && uploadInput.files[0];
+        const entryId = this._wallImagePickerEntryId;
+        uploadInput.value = '';   // same file can be re-picked next time
+        if (!file || !entryId) return;
+        const frame = this._frames.find(f => f.entryId === entryId);
+        if (!frame || !frame.entityId) return;
+        this._closeWallImagePicker();
+
+        const fb = this.shadowRoot.getElementById('wall-scene-fb');
+        fb.className = 'feedback ok';
+        fb.textContent = `⏳ Sending photo to ${frame.title}…`;
+        fb.style.display = 'block';
+        try {
+          const form = new FormData();
+          form.append('entity_id', frame.entityId);
+          form.append('image', file);
+          const resp = await fetch('/api/fraimic/send_image', {
+            method: 'POST', headers: this._authHeaders(), body: form,
+          });
+          const result = await resp.json().catch(() => ({}));
+          if (result.queued) {
+            fb.textContent = `⏳ ${frame.title} is asleep — photo queued for delivery on wake.`;
+          } else if (!resp.ok || !result.success) {
+            throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+          } else {
+            fb.textContent = `✓ Sent to ${frame.title}.`;
+          }
+        } catch (err) {
+          fb.className = 'feedback err';
+          fb.textContent = `Upload failed: ${err.message}`;
+        }
+        setTimeout(() => { fb.style.display = 'none'; }, 4000);
+      });
+
       this._wireWallImagePickerDrag();
     }
 
@@ -5460,7 +5493,7 @@
 
         this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'));
 
-        cell.addEventListener('click', () => {
+        cell.addEventListener('click', async () => {
           this._wallPendingMappings[entryId] = image.image_id;
           // Recorded at the moment of picking, from whichever album filter
           // was active right now -- not the image's own album tags -- so
@@ -5469,6 +5502,27 @@
           this._wallPendingPickAlbum[entryId] = album;
           this._closeWallImagePicker();
           this._renderWallCanvas();
+
+          // Consolidated-dashboard semantics: picking an image sends it to
+          // the physical frame immediately -- no wall save or scene
+          // required. The pending-mapping write above is unchanged, so
+          // Save Scene's merge behavior stays exactly as before.
+          const frame = this._frames.find(f => f.entryId === entryId);
+          if (!frame || !frame.entityId) return;
+          const fb = this.shadowRoot.getElementById('wall-scene-fb');
+          try {
+            const r = await this._sendLibraryImageToFrame(frame, image.image_id);
+            if (!r.queued) frame.lastImageId = image.image_id;
+            fb.className = 'feedback ok';
+            fb.textContent = r.queued
+              ? `⏳ ${frame.title} is asleep — image queued for delivery on wake.`
+              : `✓ Sent to ${frame.title}.`;
+          } catch (err) {
+            fb.className = 'feedback err';
+            fb.textContent = `Send to ${frame.title} failed: ${err.message}`;
+          }
+          fb.style.display = 'block';
+          setTimeout(() => { fb.style.display = 'none'; }, 4000);
         });
         grid.appendChild(cell);
       }
