@@ -86,6 +86,11 @@ class Wall:
     # KIND_DEFAULT for the auto-synced default wall, KIND_CUSTOM otherwise.
     # Walls stored before this field existed deserialize as custom.
     kind: str = KIND_CUSTOM
+    # Entry_ids the user deliberately removed from the default wall.
+    # Without this tombstone list, the auto-sync would resurrect every
+    # removed frame at the next restart. Meaningless on custom walls
+    # (absence from placements already says everything there).
+    excluded: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,6 +99,7 @@ class Wall:
             "placements": self.placements,
             "created_at": self.created_at,
             "kind": self.kind,
+            "excluded": self.excluded,
         }
 
     @classmethod
@@ -104,6 +110,7 @@ class Wall:
             placements=dict(data.get("placements") or {}),
             created_at=data.get("created_at", 0.0),
             kind=data.get("kind") or KIND_CUSTOM,
+            excluded=list(data.get("excluded") or []),
         )
 
 
@@ -171,8 +178,15 @@ class WallManager:
         for stale_id in [eid for eid in wall.placements if eid not in entry_ids]:
             del wall.placements[stale_id]
             changed = True
+        stale_excluded = [eid for eid in wall.excluded if eid not in entry_ids]
+        if stale_excluded:
+            wall.excluded = [eid for eid in wall.excluded if eid in entry_ids]
+            changed = True
         for entry in entries:
-            if entry.entry_id not in wall.placements:
+            if (
+                entry.entry_id not in wall.placements
+                and entry.entry_id not in wall.excluded
+            ):
                 self._append_placement(wall, entry)
                 changed = True
 
@@ -181,7 +195,8 @@ class WallManager:
             async_dispatcher_send(self.hass, SIGNAL_WALLS_UPDATED)
 
     async def async_ensure_placement(self, entry: "ConfigEntry") -> None:
-        """Guarantee *entry* has a spot on the default wall. Called from
+        """Guarantee *entry* has a spot on the default wall (unless the user
+        deliberately removed it -- see Wall.excluded). Called from
         async_setup_entry, so it covers every way a frame arrives (embedded
         add, discovery flow, HA restart). Idempotent."""
         wall = self._walls.get(DEFAULT_WALL_ID)
@@ -190,7 +205,7 @@ class WallManager:
             # this is belt-and-braces for a reload racing that.
             await self.async_ensure_default_wall()
             return
-        if entry.entry_id in wall.placements:
+        if entry.entry_id in wall.placements or entry.entry_id in wall.excluded:
             return
         self._append_placement(wall, entry)
         await self._async_persist()
@@ -199,11 +214,16 @@ class WallManager:
     async def async_prune_entry(self, entry_id: str) -> None:
         """Drop *entry_id*'s placement from every wall (default and custom)
         when its config entry is removed -- otherwise deleted frames haunt
-        wall layouts forever (CODE_REVIEW #28)."""
+        wall layouts forever (CODE_REVIEW #28). Tombstones die with the
+        entry too: a frame removed and re-added gets a fresh entry_id, so a
+        stale exclusion could never match it anyway."""
         changed = False
         for wall in self._walls.values():
             if entry_id in wall.placements:
                 del wall.placements[entry_id]
+                changed = True
+            if entry_id in wall.excluded:
+                wall.excluded.remove(entry_id)
                 changed = True
         if changed:
             await self._async_persist()
@@ -227,8 +247,10 @@ class WallManager:
         name: str,
         placements: dict[str, dict[str, float]],
         wall_id: str | None = None,
+        excluded: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Create a new wall (wall_id=None) or update an existing one."""
+        """Create a new wall (wall_id=None) or update an existing one.
+        *excluded* of None means "leave the stored tombstones unchanged"."""
         name = (name or "").strip()
         if not name:
             raise WallError("Wall name can't be empty")
@@ -259,6 +281,10 @@ class WallManager:
             else:
                 wall.name = name
                 wall.placements = placements
+            if excluded is not None:
+                wall.excluded = [
+                    e for e in excluded if isinstance(e, str) and e
+                ]
         else:
             wall = Wall(
                 wall_id=uuid.uuid4().hex[:12],

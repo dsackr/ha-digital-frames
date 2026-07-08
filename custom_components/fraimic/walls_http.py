@@ -29,16 +29,21 @@ def _get_wall_manager(hass):
     return manager
 
 
-def _parse_wall_body(body: Any) -> tuple[str | None, dict]:
+def _parse_wall_body(body: Any) -> tuple[str | None, dict, list | None]:
     # body is whatever request.json() decoded -- could be a list, number, or
     # string for a syntactically-valid but wrongly-shaped request.
     if not isinstance(body, dict):
-        return None, {}
+        return None, {}, None
     name = body.get("name")
     placements = body.get("placements")
     if not isinstance(placements, dict):
         placements = {}
-    return name, placements
+    # None (absent) means "leave stored tombstones unchanged"; a list
+    # replaces them -- see WallManager.async_save_wall.
+    excluded = body.get("excluded")
+    if excluded is not None and not isinstance(excluded, list):
+        excluded = None
+    return name, placements, excluded
 
 
 class FraimicWallsView(HomeAssistantView):
@@ -63,12 +68,12 @@ class FraimicWallsView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Invalid JSON body: {err}", status_code=400)
 
-        name, placements = _parse_wall_body(body)
+        name, placements, excluded = _parse_wall_body(body)
 
         from .walls import WallError  # noqa: PLC0415
 
         try:
-            wall = await manager.async_save_wall(name, placements)
+            wall = await manager.async_save_wall(name, placements, excluded=excluded)
         except WallError as err:
             return self.json_message(str(err), status_code=400)
         except Exception as err:  # noqa: BLE001
@@ -94,12 +99,14 @@ class FraimicWallView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Invalid JSON body: {err}", status_code=400)
 
-        name, placements = _parse_wall_body(body)
+        name, placements, excluded = _parse_wall_body(body)
 
         from .walls import WallError  # noqa: PLC0415
 
         try:
-            wall = await manager.async_save_wall(name, placements, wall_id=wall_id)
+            wall = await manager.async_save_wall(
+                name, placements, wall_id=wall_id, excluded=excluded
+            )
         except WallError as err:
             return self.json_message(str(err), status_code=400)
         except Exception as err:  # noqa: BLE001
