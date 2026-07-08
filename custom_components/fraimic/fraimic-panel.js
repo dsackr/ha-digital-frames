@@ -2553,13 +2553,22 @@
           if (!name || name === frame.title) { close(); return; }
           e.target.disabled = true;
           try {
-            // Sets entry.title directly -- propagates to the device name
-            // and everywhere else HA shows it.
+            // Two registries to update: the config entry's title (panel
+            // cards, Settings → Integrations) AND the device registry's
+            // user-facing name (device page, entity names) -- entry title
+            // alone leaves the device showing its creation-time name.
             await this._hass.callWS({
               type: 'config_entries/update',
               entry_id: frame.entryId,
               title: name,
             });
+            if (frame.deviceId) {
+              await this._hass.callWS({
+                type: 'config/device_registry/update',
+                device_id: frame.deviceId,
+                name_by_user: name,
+              });
+            }
             close();
             await this._refreshAfterEntryChange();
           } catch (err) {
@@ -2628,8 +2637,21 @@
         && !['user', 'import', 'reconfigure'].includes(source);
     }
 
+    _requestDiscoveryScan() {
+      // Frames sleep, so the backend's boot-time sweep goes stale --
+      // opening the panel re-runs it, and results land on the banner via
+      // the flow subscription. Fire-and-forget: a failed rescan just means
+      // the banner shows the last sweep's state.
+      if (!this._isAdmin()) return;
+      fetch('/api/fraimic/discovery/scan', {
+        method: 'POST',
+        headers: this._authHeaders(),
+      }).catch(() => {});
+    }
+
     async _subscribeDiscoveredFlows() {
       if (!this._isAdmin()) return;   // flow/progress APIs are admin-only
+      this._requestDiscoveryScan();
       try {
         this._flowSubUnsub = await this._hass.connection.subscribeMessage(
           (events) => {

@@ -53,9 +53,14 @@ test.describe('Frame management and discovery banner', () => {
     });
     await clickPanelButton(page, 'frame-settings-rename');
 
+    // Both registries must be updated: entry title alone leaves the device
+    // page showing the creation-time name.
     await expect.poll(() => page.evaluate(
-      () => window.__wsCalls.filter((c) => c.type === 'config_entries/update')
-    )).toEqual([{ type: 'config_entries/update', entry_id: 'entry_1', title: 'Kitchen Frame' }]);
+      () => window.__wsCalls.filter((c) => c.type === 'config_entries/update' || c.type === 'config/device_registry/update')
+    )).toEqual([
+      { type: 'config_entries/update', entry_id: 'entry_1', title: 'Kitchen Frame' },
+      { type: 'config/device_registry/update', device_id: 'entry_1', name_by_user: 'Kitchen Frame' },
+    ]);
   });
 
   test('gear → remove confirms then DELETEs the config entry', async ({ page }) => {

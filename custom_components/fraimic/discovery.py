@@ -21,6 +21,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import callback
@@ -91,6 +92,32 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
 
     unsubs.append(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop))
     domain_data["_discovery_unsub"] = unsubs
+
+    # Exposed for the on-demand rescan endpoint below: frames sleep, so a
+    # single boot-time sweep goes stale fast -- the panel re-runs the sweep
+    # whenever it opens, keeping its discovery banner current.
+    domain_data["_discovery_scan"] = _async_scan
+    hass.http.register_view(FraimicDiscoveryScanView())
+
+
+class FraimicDiscoveryScanView(HomeAssistantView):
+    """POST /api/fraimic/discovery/scan — run one discovery sweep now."""
+
+    url = "/api/fraimic/discovery/scan"
+    name = "api:fraimic:discovery:scan"
+    requires_auth = True
+
+    async def post(self, request):
+        hass = request.app["hass"]
+        # The sweep starts config flows, an admin-only capability -- mirror
+        # that here rather than letting any authenticated user trigger it.
+        if not request["hass_user"].is_admin:
+            return self.json_message("Admin required", status_code=403)
+        scan = hass.data.get(DOMAIN, {}).get("_discovery_scan")
+        if scan is None:
+            return self.json_message("Discovery not initialised", status_code=500)
+        await scan()
+        return self.json({"success": True})
 
 
 async def _async_scan_once(hass: "HomeAssistant") -> None:

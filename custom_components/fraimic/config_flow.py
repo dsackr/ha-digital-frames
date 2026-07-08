@@ -51,6 +51,10 @@ _LOGGER = logging.getLogger(__name__)
 CONF_RESOLUTION = "resolution"
 CONF_SCAN_INTERVAL = "scan_interval"
 _DEFAULT_RESOLUTION = "13.3"
+# Sentinel option in the pick_device list: frames on another subnet/VLAN
+# never appear in the scan, and a successful scan used to make the manual
+# host field unreachable entirely.
+_MANUAL_DEVICE = "__manual__"
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +235,8 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             selected_ip = user_input["device"]
+            if selected_ip == _MANUAL_DEVICE:
+                return await self.async_step_manual()
             match = next(
                 (d for d in self._discovered if d["ip"] == selected_ip), None
             )
@@ -246,10 +252,35 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             for d in self._discovered
         }
+        device_options[_MANUAL_DEVICE] = "Enter an IP address manually…"
 
         schema = vol.Schema({vol.Required("device"): vol.In(device_options)})
         return self.async_show_form(
             step_id="pick_device", data_schema=schema, errors=errors
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2b — manual IP entry (escape hatch from the picker, for frames
+    # the subnet scan can't see)
+    # ------------------------------------------------------------------
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a frame by IP address."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            info = await probe_frame(async_get_clientsession(self.hass), host)
+            if info is None:
+                errors[CONF_HOST] = "cannot_connect"
+            else:
+                return await self._async_use_device(host, info)
+
+        schema = vol.Schema({vol.Required(CONF_HOST): str})
+        return self.async_show_form(
+            step_id="manual", data_schema=schema, errors=errors
         )
 
     # ------------------------------------------------------------------

@@ -83,7 +83,7 @@ test.describe('Embedded flow renderer', () => {
     state = await flowModalState(page);
     expect(state.fields[0]).toEqual(expect.objectContaining({
       name: 'device', type: 'select', tag: 'select',
-      options: ['192.168.1.31', '192.168.1.35'],
+      options: ['192.168.1.31', '192.168.1.35', '__manual__'],
     }));
 
     await setFlowField(page, 'device', '192.168.1.35');
@@ -99,6 +99,23 @@ test.describe('Embedded flow renderer', () => {
     // create_entry closes the modal without DELETEing the finished flow.
     expect(mockServer.flowDeletes).toEqual([]);
     expect(pageErrors).toEqual([]);
+  });
+
+  test('the picker offers a manual-IP escape hatch that leads to naming', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+
+    await clickPanelButton(page, 'frame-add-btn');
+    await waitForStep(page, 'user');
+    await clickPanelButton(page, 'flow-modal-submit');   // empty host → picker
+    await waitForStep(page, 'pick_device');
+
+    await setFlowField(page, 'device', '__manual__');
+    await clickPanelButton(page, 'flow-modal-submit');
+    await waitForStep(page, 'manual');
+
+    await setFlowField(page, 'host', '10.9.8.7');
+    await clickPanelButton(page, 'flow-modal-submit');
+    await waitForStep(page, 'name_device');
   });
 
   test('a failing host shows the per-field error and keeps the form usable', async ({ page }) => {

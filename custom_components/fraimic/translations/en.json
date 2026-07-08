@@ -22,6 +22,16 @@
           "device": "Select the frame you want to add"
         }
       },
+      "manual": {
+        "title": "Add Frame by IP Address",
+        "description": "For frames the network scan can't see (another subnet or VLAN). Make sure the frame is awake first (tap it).",
+        "data": {
+          "host": "IP Address"
+        },
+        "data_description": {
+          "host": "Your frame's local IP address"
+        }
+      },
       "name_device": {
         "title": "Name Your Frame",
         "description": "Give a friendly name to the frame at {host}.",

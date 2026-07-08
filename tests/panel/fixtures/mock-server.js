@@ -95,8 +95,17 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
       type: 'form', flow_id: flowId, handler: 'fraimic', step_id: 'pick_device',
       data_schema: [{
         name: 'device', type: 'select', required: true,
-        options: [['192.168.1.31', '192.168.1.31 — firmware 1.9.2'], ['192.168.1.35', '192.168.1.35 — firmware 2.0.1']],
+        options: [
+          ['192.168.1.31', '192.168.1.31 — firmware 1.9.2'],
+          ['192.168.1.35', '192.168.1.35 — firmware 2.0.1'],
+          ['__manual__', 'Enter an IP address manually…'],
+        ],
       }],
+      errors: {}, description_placeholders: null, last_step: false,
+    }),
+    manual: (flowId) => ({
+      type: 'form', flow_id: flowId, handler: 'fraimic', step_id: 'manual',
+      data_schema: [{ name: 'host', type: 'string', required: true }],
       errors: {}, description_placeholders: null, last_step: false,
     }),
     name_device: (flowId, host) => ({
@@ -131,7 +140,14 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
       return flowSteps.name_device(flowId, body.host);
     }
     if (current.step_id === 'pick_device') {
+      if (body.device === '__manual__') return flowSteps.manual(flowId);
       return flowSteps.name_device(flowId, body.device);
+    }
+    if (current.step_id === 'manual') {
+      if (body.host === '10.0.0.99') {
+        return { ...flowSteps.manual(flowId), errors: { host: 'cannot_connect' } };
+      }
+      return flowSteps.name_device(flowId, body.host);
     }
     if (current.step_id === 'name_device' || current.step_id === 'init') {
       return { type: 'create_entry', flow_id: flowId, title: body.name || '', version: 1 };
@@ -157,6 +173,9 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
 
     if (p === '/api/fraimic/frames') {
       return json(res, 200, { frames });
+    }
+    if (p === '/api/fraimic/discovery/scan' && req.method === 'POST') {
+      return json(res, 200, { success: true });
     }
 
     // --- HA config/options flow API (see state machine above) -----------
