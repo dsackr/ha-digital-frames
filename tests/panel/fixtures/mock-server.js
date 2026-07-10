@@ -97,6 +97,7 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
   const requestLog = [];
   const sends = []; // { entity_id, image_id, packer } per /library/send POST
   const rawSends = []; // { entity_id, has_image } per /send_image POST
+  const installCalls = []; // { pack_id, config } per /scene_packs/:id/install POST
 
   // --- Embedded config/options flow state machine -----------------------
   // Mirrors FraimicConfigFlow's real step graph (user → pick_device →
@@ -285,6 +286,12 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     }
     if (p === '/api/fraimic/library/albums') return json(res, 200, { albums });
     if (p === '/api/fraimic/scene_packs') return json(res, 200, { packs: scenePacks });
+    const installMatch = p.match(/^\/api\/fraimic\/scene_packs\/([^/]+)\/install$/);
+    if (installMatch && req.method === 'POST') {
+      const parsed = await readJsonBody(req);
+      installCalls.push({ pack_id: installMatch[1], config: parsed.config || {} });
+      return json(res, 200, { success: true, pack_id: installMatch[1], type: 'widget' });
+    }
 
     if (p.startsWith('/api/fraimic/library/image/')) {
       res.writeHead(200, { 'Content-Type': 'image/png' });
@@ -446,6 +453,7 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     requestLog,
     sends,
     rawSends,
+    installCalls,
     flowSubmissions,
     flowDeletes,
     entryDeletes,

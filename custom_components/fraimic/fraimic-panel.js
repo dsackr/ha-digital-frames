@@ -7705,6 +7705,58 @@
       return el;
     }
 
+    // Renders one add-on config_schema field to HTML. This is the entire
+    // contract between a pack manifest (frame-addons/scene_packs/index.json)
+    // and the install modal -- add a field type here once, and every add-on
+    // manifest can use it without another fraimic-homeassistant release.
+    // Supported field shape:
+    //   name       (required) -- maps to script_config[name] and DOM id widget-field-<name>
+    //   type       'string' (default) | 'select' | 'entity'
+    //   label, placeholder, help (help supports **bold**)
+    //   default    initial value for a fresh install
+    //   required   enforced only while the field is visible (see show_if)
+    //   options    [{value, label}] -- for type 'select'
+    //   domain     entity domain to offer, e.g. 'calendar' -- for type 'entity'
+    //   show_if    {field, equals} -- row hidden unless that other field has this value
+    //   group      'weather' places the field in the optional Location/Weather section
+    _renderConfigField(field) {
+      const fieldId = `widget-field-${field.name}`;
+      const label = this._esc(field.label || field.name);
+      const placeholder = this._esc(field.placeholder || '');
+      let inputHtml;
+
+      if (field.type === 'select') {
+        const options = (field.options || []).map(opt =>
+          `<option value="${this._esc(opt.value)}">${this._esc(opt.label)}</option>`
+        ).join('');
+        inputHtml = `<select id="${fieldId}">${options}</select>`;
+      } else if (field.type === 'entity') {
+        const domainPrefix = `${field.domain}.`;
+        const entities = Object.keys(this._hass.states || {})
+          .filter(eid => eid.startsWith(domainPrefix))
+          .map(eid => ({ id: eid, name: (this._hass.states[eid].attributes || {}).friendly_name || eid }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const options = entities.map(e => `<option value="${this._esc(e.id)}">${this._esc(e.name)}</option>`).join('');
+        inputHtml = entities.length
+          ? `<select id="${fieldId}">${options}</select>`
+          : `<select id="${fieldId}" disabled><option value="">No ${this._esc(field.domain)} entities found</option></select>`;
+      } else {
+        inputHtml = `<input type="text" id="${fieldId}" placeholder="${placeholder}">`;
+      }
+
+      const helpHtml = field.help
+        ? `<div style="font-size:11px;color:var(--secondary-text-color);margin-top:4px;line-height:1.4">${this._escHelp(field.help)}</div>`
+        : '';
+
+      return `
+        <div class="modal-row" id="widget-row-${field.name}">
+          <label for="${fieldId}">${label}</label>
+          ${inputHtml}
+          ${helpHtml}
+        </div>
+      `;
+    }
+
     _openWidgetConfigModal(pack, cardEl, sid) {
       const overlay = this.shadowRoot.getElementById('widget-config-overlay');
       const title = this.shadowRoot.getElementById('widget-config-title');
@@ -7734,81 +7786,16 @@
       
       let basicFieldsHtml = '';
       let weatherFieldsHtml = '';
-      
+
       for (const field of (pack.config_schema || [])) {
-        const fieldId = `widget-field-${field.name}`;
-        const label = field.label || field.name;
-        const required = field.required ? 'required' : '';
-        const placeholder = field.placeholder || '';
-        
-        if (field.name === 'quote_feed') {
-          let fieldHtml = `
-            <div class="modal-row">
-              <label for="${fieldId}">${this._esc(label)}</label>
-              <select id="${fieldId}">
-                <option value="zenquotes">ZenQuotes (Inspirational)</option>
-                <option value="favqs">FavQs (General)</option>
-                <option value="custom">Custom API URL...</option>
-              </select>
-            </div>
-          `;
-          basicFieldsHtml += fieldHtml;
-        } else if (field.name === 'bible_translation') {
-          let fieldHtml = `
-            <div class="modal-row">
-              <label for="${fieldId}">${this._esc(label)}</label>
-              <select id="${fieldId}">
-                <option value="niv">NIV (New International Version)</option>
-                <option value="kjv">KJV (King James Version)</option>
-                <option value="web">WEB (World English Bible)</option>
-                <option value="bbe">BBE (Bible in Basic English)</option>
-                <option value="oeb">OEB (Open English Bible)</option>
-                <option value="rvr1960">RVR1960 (Spanish Reina Valera)</option>
-                <option value="almeida">Almeida (Portuguese João Ferreira)</option>
-              </select>
-            </div>
-          `;
-          basicFieldsHtml += fieldHtml;
-        } else if (field.name === 'scripture_source') {
-          let fieldHtml = `
-            <div class="modal-row">
-              <label for="${fieldId}">${this._esc(label)}</label>
-              <select id="${fieldId}">
-                <option value="daily_api">Daily Verse of the Day</option>
-                <option value="custom_list">Custom list configured in JSON</option>
-              </select>
-            </div>
-          `;
-          basicFieldsHtml += fieldHtml;
-        } else if (field.name === 'quote_api_url') {
-          let fieldHtml = `
-            <div class="modal-row" id="widget-quote-custom-row" style="display:none">
-              <label for="${fieldId}">${this._esc(label)}</label>
-              <input type="text" id="${fieldId}" placeholder="${this._esc(placeholder)}">
-            </div>
-          `;
-          basicFieldsHtml += fieldHtml;
+        const fieldHtml = this._renderConfigField(field);
+        if (field.group === 'weather') {
+          weatherFieldsHtml += fieldHtml;
         } else {
-          let fieldHtml = `
-            <div class="modal-row">
-              <label for="${fieldId}">${this._esc(label)}</label>
-              <input type="text" id="${fieldId}" placeholder="${this._esc(placeholder)}" ${required}>
-          `;
-          
-          if (field.name === 'calendar_url') {
-            fieldHtml += `<div style="font-size:11px;color:var(--secondary-text-color);margin-top:4px;line-height:1.4">To get this: Open Google Calendar on desktop, go to <strong>Settings</strong> > click your calendar name in the left panel > scroll down to <strong>Integrate calendar</strong> > copy the <strong>Secret address in iCal format</strong>.</div>`;
-          }
-          
-          fieldHtml += `</div>`;
-          
-          if (field.name === 'zip_code') {
-            weatherFieldsHtml += fieldHtml;
-          } else {
-            basicFieldsHtml += fieldHtml;
-          }
+          basicFieldsHtml += fieldHtml;
         }
       }
-      
+
       html += basicFieldsHtml;
       
       if (weatherFieldsHtml) {
@@ -7847,33 +7834,46 @@
         schedTimeRow.style.display = schedTypeSel.value === 'daily' ? 'block' : 'none';
       });
       
-      const quoteFeedSel = this.shadowRoot.getElementById('widget-field-quote_feed');
-      const quoteCustomRow = this.shadowRoot.getElementById('widget-quote-custom-row');
-      if (quoteFeedSel && quoteCustomRow) {
-        const updateQuoteRow = () => {
-          quoteCustomRow.style.display = quoteFeedSel.value === 'custom' ? 'block' : 'none';
-        };
-        quoteFeedSel.addEventListener('change', updateQuoteRow);
-        updateQuoteRow();
+      // Generic show_if engine: any field can gate another field's row by
+      // name/value, e.g. quote_api_url only shows while quote_feed=custom,
+      // ha_calendar_entity/calendar_url only show for their matching
+      // calendar_source. This is the piece that replaced a wall of
+      // per-field-name branches -- adding a new conditional field to a pack
+      // manifest just works, no panel change needed.
+      const fieldEls = {};
+      for (const field of (pack.config_schema || [])) {
+        const el = this.shadowRoot.getElementById(`widget-field-${field.name}`);
+        if (el) fieldEls[field.name] = el;
       }
-      
+
+      const updateConditionalRows = () => {
+        const values = {};
+        for (const [name, el] of Object.entries(fieldEls)) values[name] = el.value;
+        for (const field of (pack.config_schema || [])) {
+          if (!field.show_if) continue;
+          const row = this.shadowRoot.getElementById(`widget-row-${field.name}`);
+          if (row) row.style.display = values[field.show_if.field] === field.show_if.equals ? 'block' : 'none';
+        }
+      };
+
+      for (const field of (pack.config_schema || [])) {
+        if (field.default !== undefined && fieldEls[field.name]) {
+          fieldEls[field.name].value = field.default;
+        }
+      }
+      for (const el of Object.values(fieldEls)) {
+        el.addEventListener('change', updateConditionalRows);
+      }
+
       if (pack.installed && pack.config) {
         const config = pack.config;
         const frameSel = this.shadowRoot.getElementById('widget-config-frame');
         if (config.frame_id) frameSel.value = config.frame_id;
-        
-        for (const field of (pack.config_schema || [])) {
-          const val = config[field.name];
-          if (val !== undefined) {
-            const el = this.shadowRoot.getElementById(`widget-field-${field.name}`);
-            if (el) el.value = val;
-          }
+
+        for (const [name, el] of Object.entries(fieldEls)) {
+          if (config[name] !== undefined) el.value = config[name];
         }
-        
-        if (quoteFeedSel && quoteCustomRow) {
-          quoteCustomRow.style.display = quoteFeedSel.value === 'custom' ? 'block' : 'none';
-        }
-        
+
         if (config.schedule) {
           schedTypeSel.value = config.schedule.type || 'hourly';
           if (schedTypeSel.value === 'daily') {
@@ -7882,7 +7882,9 @@
           }
         }
       }
-      
+
+      updateConditionalRows();
+
       const submitHandler = async () => {
         const frameId = this.shadowRoot.getElementById('widget-config-frame').value;
         if (!frameId) {
@@ -7900,28 +7902,21 @@
           }
         };
         
+        const values = {};
+        for (const [name, el] of Object.entries(fieldEls)) values[name] = el.value.trim();
+
         for (const field of (pack.config_schema || [])) {
-          const el = this.shadowRoot.getElementById(`widget-field-${field.name}`);
-          if (!el) continue;
-          const val = el.value.trim();
-          
-          if (field.name === 'quote_api_url') {
-            const isCustomFeed = quoteFeedSel && quoteFeedSel.value === 'custom';
-            if (isCustomFeed && !val) {
-              fb.textContent = 'Custom API URL is required.';
-              fb.className = 'feedback err';
-              fb.style.display = 'block';
-              return;
-            }
-          } else if (field.required && !val) {
-            fb.textContent = `Field "${field.label || field.name}" is required.`;
+          if (!(field.name in values)) continue;
+          const visible = !field.show_if || values[field.show_if.field] === field.show_if.equals;
+          if (field.required && visible && !values[field.name]) {
+            fb.textContent = `${field.label || field.name} is required.`;
             fb.className = 'feedback err';
             fb.style.display = 'block';
             return;
           }
-          payload[field.name] = val;
+          payload[field.name] = values[field.name];
         }
-        
+
         newSubmitBtn.disabled = true;
         newSubmitBtn.textContent = 'Saving…';
         
@@ -8869,6 +8864,14 @@
       return (str || '')
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
         .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // Escapes like _esc, then turns **word** into <strong>word</strong> --
+    // just enough markup for add-on config help text (e.g. "click your
+    // calendar's **Settings**") without letting a pack manifest inject
+    // arbitrary HTML.
+    _escHelp(str) {
+      return this._esc(str).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     }
 
     // -----------------------------------------------------------------------

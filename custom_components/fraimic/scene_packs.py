@@ -52,6 +52,12 @@ _INDEX_CACHE_TTL = 60  # seconds -- avoid re-fetching the catalog on every panel
 _FETCH_TIMEOUT = aiohttp.ClientTimeout(total=15)
 _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
+# A pack's config_schema may expose this trio (a select plus its two
+# alternate-mode fields) to let the user pick between an HA calendar entity
+# and a plain iCal URL; see _async_install_widget for how they're folded
+# into the "calendar" block a widget script actually reads.
+_CALENDAR_COMPOSITE_FIELDS = {"calendar_source", "ha_calendar_entity", "calendar_url"}
+
 
 class ScenePackError(Exception):
     """Raised for invalid scene pack operations (unknown pack, fetch
@@ -516,26 +522,41 @@ class ScenePackManager:
                 "enabled": False
             }
             
+        # config_schema fields map straight onto script_config by name, with
+        # two exceptions handled elsewhere: "weather"-group fields (zip_code)
+        # already folded into the weather block above, and the calendar
+        # composite fields (a pack's own choice to expose a calendar_source
+        # selector) assembled into a nested "calendar" block below. Neither
+        # is keyed off a hardcoded pack id, so any future pack manifest that
+        # reuses either pattern gets the same handling for free.
+        schema_field_names = {f["name"] for f in pack.get("config_schema", [])}
+
         for field in pack.get("config_schema", []):
             name = field["name"]
-            val = config_data.get(name)
-            if name == "calendar_url":
-                if val:
-                    script_config["calendar"] = {
-                        "source_type": "ical",
-                        "ical_url": val
-                    }
-                else:
+            if field.get("group") == "weather" or name in _CALENDAR_COMPOSITE_FIELDS:
+                continue
+            script_config[name] = config_data.get(name)
+
+        if _CALENDAR_COMPOSITE_FIELDS & schema_field_names:
+            calendar_source = config_data.get("calendar_source")
+            if calendar_source is None:
+                # Pre-picker configs only ever had a bare calendar_url.
+                calendar_source = "ical" if config_data.get("calendar_url") else "ha"
+
+            if calendar_source == "ha":
+                entity = config_data.get("ha_calendar_entity")
+                if not entity:
                     calendar_entities = self.hass.states.async_entity_ids("calendar")
-                    default_entity = calendar_entities[0] if calendar_entities else None
-                    script_config["calendar"] = {
-                        "source_type": "ha",
-                        "ha_calendar_entity": default_entity
-                    }
-            elif name == "zip_code":
-                pass
+                    entity = calendar_entities[0] if calendar_entities else None
+                script_config["calendar"] = {
+                    "source_type": "ha",
+                    "ha_calendar_entity": entity
+                }
             else:
-                script_config[name] = val
+                script_config["calendar"] = {
+                    "source_type": "ical",
+                    "ical_url": config_data.get("calendar_url")
+                }
                 
         config_path = os.path.join(addon_dir, "config.json")
         
