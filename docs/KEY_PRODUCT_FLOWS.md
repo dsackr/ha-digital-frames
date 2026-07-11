@@ -198,7 +198,9 @@ assigned image at once; exposed as `scene.*` entities for voice control.
   success).
 - **Test status**: Panel-tested (`walls-scenes-merge.spec.js`,
   `walls-flow.spec.js` — scene CRUD outside the Walls UI isn't directly
-  covered). Backend: **Gap** — planned for Phase 4.
+  covered). **Backend-tested** — `tests/python/managers/test_scenes.py`
+  (CRUD, duplicate-name rejection, send_mappings partial-failure fan-out,
+  schedule-disarm on delete).
 
 ## 17. Scene packs (curated art bundles, install/sync/uninstall)
 One-click install of a public-domain image bundle that auto-builds a
@@ -209,7 +211,10 @@ matching scene, orientation-aware; sync repairs partial installs.
   untracked, blocking reinstall; uninstall can leave stray images if some
   deletes fail.
 - **Test status**: Panel-tested indirectly (`addons-categories.spec.js`).
-  Backend: **Gap** — planned for Phase 4.
+  **Backend-tested** — `tests/python/managers/test_scene_packs.py`
+  (install success/partial-failure/all-fail, already-installed guard,
+  uninstall scene+image cleanup and untag-vs-delete, sync recovery by
+  filename, orientation-aware image-to-frame assignment).
 
 ## 18. Scene-pack "widgets" (agenda, quotes, scripture add-ons)
 A pack type that downloads a Python renderer script + JSON config,
@@ -222,7 +227,9 @@ image to one target frame.
 - **Test status**: Panel-tested for config forms only
   (`addon-config-schema.spec.js`, `addon-schema-gaps.spec.js`,
   `agenda-calendar-source.spec.js`). Backend scheduling/execution: **Gap**
-  — planned for Phase 4.
+  — deliberately out of scope for Phase 4 (subprocess execution and the
+  daily/hourly scheduler need heavier mocking than the rest of this phase;
+  tracked as a follow-up in TESTING_STRATEGY.md rather than folded in here).
 
 ## 19. Walls: virtual multi-frame layout (panel-local state)
 User arranges a subset of frames on a free-form canvas mirroring how
@@ -238,7 +245,9 @@ configured frames.
   `walls-send-and-offwall.spec.js`, `walls-image-picker.spec.js`,
   `walls-addon-album-lock.spec.js`) — but these exercise the frontend
   canvas/DOM logic against a mock server, not `WallManager` itself.
-  Backend: **Gap** — planned for Phase 4.
+  **Backend-tested** — `tests/python/managers/test_walls.py` (custom wall
+  CRUD, default-wall auto-sync, tombstone survival across resync, entry
+  removal pruning, auto-layout collision math).
 
 ## 20. Schedules: send a scene or image at a future/recurring time
 User schedules a one-shot or daily/weekly/monthly recurring send; missed
@@ -250,8 +259,11 @@ schedule to "broken" instead of erroring at fire time.
 - **If it silently breaks**: missed schedules never fire after an outage,
   or a schedule keeps trying to fire against a deleted target forever.
 - **Test status**: Panel-tested (`schedules.spec.js` — create/edit/toggle/
-  delete, weekly validation). Backend recurrence math (`next_fire_at`,
-  monthly clamping, missed-fire-on-restart): **Gap** — planned for Phase 4.
+  delete, weekly validation). **Backend-tested** —
+  `tests/python/managers/test_schedules.py` (trigger/action validation,
+  missed-once fires late, recurring fire re-resolves the scene at fire
+  time, target-deleted → target_missing + disabled, edit repairs a broken
+  schedule, `next_fire_at` math including monthly day-of-month clamping).
 
 ## 21. HA entities: sensors + Orientation select
 Read-only device telemetry (battery/wifi/charging/firmware/IP/queued) plus
@@ -321,8 +333,9 @@ scenes-hub entry, and tears down cleanly when the last frame is removed.
 | 1 | Image conversion, render spec, frame-type registry (KPFs 7, 22, 23) | Done |
 | 2 | Coordinator: polling, IP healing, queue-on-sleep, concurrency (KPFs 3, 4) | Done |
 | 3 | Config flow, setup lifecycle, services, intent, entities, onboarding backend (KPFs 1, 2, 5, 6, 21, 24, 25) | Done |
-| 4 | Scenes, scene packs + widgets, walls, schedules managers (KPFs 16–20) | Planned |
+| 4 | Scenes, scene packs, walls, schedules managers (KPFs 16, 17, 19, 20) | Done (KPF 18's widget scheduling/subprocess execution still a gap) |
 | 5 | Library backends, backfill, crop, albums, HTTP views (KPFs 8–15) | Planned |
 
-Phases 4-5 are scoped here but not yet implemented — see
-[TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the checkpoint tracker.
+Phase 5 (plus KPF 18's widget scheduling) is scoped here but not yet
+implemented — see [TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the
+checkpoint tracker.

@@ -1,0 +1,203 @@
+"""Scenes: named multi-frame image assignments, CRUD + send (KPF 16).
+
+If this silently breaks: partial-failure semantics could be wrong (one
+dead frame blocking the whole scene, or a fully-failed scene reporting
+success); duplicate-name collisions not caught.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from custom_components.fraimic.const import DOMAIN
+from custom_components.fraimic.scenes import SceneError, SceneManager
+
+
+@pytest.fixture
+def scene_manager(hass):
+    return SceneManager(hass)
+
+
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
+
+
+async def test_create_scene(scene_manager):
+    result = await scene_manager.async_save_scene("Movie Night", {"entry-1": "img-1"})
+    assert result["name"] == "Movie Night"
+    assert result["mappings"] == {"entry-1": "img-1"}
+    assert result["source"] == "user"
+
+
+async def test_update_existing_scene(scene_manager):
+    created = await scene_manager.async_save_scene("Original", {"entry-1": "img-1"})
+    updated = await scene_manager.async_save_scene(
+        "Renamed", {"entry-1": "img-2"}, scene_id=created["scene_id"]
+    )
+    assert updated["scene_id"] == created["scene_id"]
+    assert updated["name"] == "Renamed"
+    assert updated["mappings"] == {"entry-1": "img-2"}
+    assert len(await scene_manager.async_list_scenes()) == 1
+
+
+async def test_delete_scene(scene_manager):
+    created = await scene_manager.async_save_scene("Gone Soon", {"entry-1": "img-1"})
+    await scene_manager.async_delete_scene(created["scene_id"])
+    assert await scene_manager.async_get_scene(created["scene_id"]) is None
+
+
+async def test_duplicate_name_rejected(scene_manager):
+    await scene_manager.async_save_scene("Movie Night", {"entry-1": "img-1"})
+    with pytest.raises(SceneError, match="already exists"):
+        await scene_manager.async_save_scene("Movie Night", {"entry-2": "img-2"})
+
+
+async def test_renaming_scene_to_its_own_name_allowed(scene_manager):
+    created = await scene_manager.async_save_scene("Movie Night", {"entry-1": "img-1"})
+    # Saving with the same name and same scene_id must not collide with itself.
+    result = await scene_manager.async_save_scene(
+        "Movie Night", {"entry-1": "img-2"}, scene_id=created["scene_id"]
+    )
+    assert result["mappings"] == {"entry-1": "img-2"}
+
+
+async def test_empty_mappings_rejected(scene_manager):
+    with pytest.raises(SceneError, match="at least one frame"):
+        await scene_manager.async_save_scene("Empty", {})
+
+
+async def test_empty_name_rejected(scene_manager):
+    with pytest.raises(SceneError, match="can't be empty"):
+        await scene_manager.async_save_scene("   ", {"entry-1": "img-1"})
+
+
+async def test_update_of_deleted_scene_fails_cleanly(scene_manager):
+    created = await scene_manager.async_save_scene("Temp", {"entry-1": "img-1"})
+    await scene_manager.async_delete_scene(created["scene_id"])
+
+    with pytest.raises(SceneError, match="not found"):
+        await scene_manager.async_save_scene(
+            "Temp Renamed", {"entry-1": "img-2"}, scene_id=created["scene_id"]
+        )
+
+
+async def test_deleting_scene_disarms_referencing_schedules(hass, scene_manager):
+    created = await scene_manager.async_save_scene("Referenced", {"entry-1": "img-1"})
+
+    calls = []
+
+    class _FakeScheduleManager:
+        async def async_handle_scene_deleted(self, scene_id):
+            calls.append(scene_id)
+
+    hass.data.setdefault(DOMAIN, {})["_schedules"] = _FakeScheduleManager()
+
+    await scene_manager.async_delete_scene(created["scene_id"])
+
+    assert calls == [created["scene_id"]]
+
+
+# ---------------------------------------------------------------------------
+# async_send_mappings: fan-out + partial-failure semantics
+# ---------------------------------------------------------------------------
+
+
+class _FakeLibrary:
+    """Returns fixed bin bytes for known image_ids, raises for unknown ones
+    (simulating a deleted/missing image) -- avoids pulling in the real
+    LibraryManager just to test the fan-out/aggregation logic here."""
+
+    async def async_get_bin_for_send(self, image_id, spec):
+        if image_id == "missing-image":
+            raise FileNotFoundError(f"no such image: {image_id}")
+        return f"bin-for-{image_id}".encode()
+
+
+@pytest.fixture
+def library_and_coordinators(hass, make_coordinator, make_frame_entry):
+    hass.data.setdefault(DOMAIN, {})["_library"] = _FakeLibrary()
+
+    def _setup(*, count=1, host_prefix="192.168.1."):
+        entries = []
+        for i in range(count):
+            entry = make_frame_entry(host=f"{host_prefix}{50+i}", entry_id=f"entry-{i}")
+            coordinator = make_coordinator(entry)
+            hass.data[DOMAIN][entry.entry_id] = coordinator
+            entries.append(entry)
+        return entries
+
+    return _setup
+
+
+async def test_send_mappings_all_succeed(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    entries = library_and_coordinators(count=2)
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        return {"success": True, "queued": False}
+
+    from custom_components.fraimic.coordinator import FraimicCoordinator
+
+    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {e.entry_id: f"img-{i}" for i, e in enumerate(entries)}
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    assert len(result["results"]) == 2
+    assert all(r["success"] for r in result["results"])
+
+
+async def test_send_mappings_partial_failure_does_not_block_others(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    entries = library_and_coordinators(count=2)
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        return {"success": True, "queued": False}
+
+    from custom_components.fraimic.coordinator import FraimicCoordinator
+
+    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {entries[0].entry_id: "missing-image", entries[1].entry_id: "img-ok"}
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    results_by_entry = {r["entry_id"]: r for r in result["results"]}
+    assert results_by_entry[entries[0].entry_id]["success"] is False
+    assert results_by_entry[entries[1].entry_id]["success"] is True
+
+
+async def test_send_mappings_removed_frame_reports_failure_not_crash(
+    hass, scene_manager, library_and_coordinators
+):
+    result = await scene_manager.async_send_mappings(hass, {"never-configured": "img-1"})
+    assert result["results"] == [
+        {
+            "entry_id": "never-configured",
+            "success": False,
+            "message": "Frame is no longer configured",
+        }
+    ]
+
+
+async def test_send_mappings_queued_reported_not_as_failure_shape(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    entries = library_and_coordinators(count=1)
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        return {"success": False, "queued": True}
+
+    from custom_components.fraimic.coordinator import FraimicCoordinator
+
+    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+
+    result = await scene_manager.async_send_mappings(hass, {entries[0].entry_id: "img-1"})
+    assert result["results"] == [{"entry_id": entries[0].entry_id, "success": False, "queued": True}]
+
+
+async def test_send_scene_not_found_raises(hass, scene_manager):
+    with pytest.raises(SceneError, match="not found"):
+        await scene_manager.async_send_scene(hass, "nonexistent-scene-id")

@@ -99,7 +99,7 @@ scanning platform provisioned for it. Rather than skip these entirely:
 
 Declared, not aspirational-on-day-one: **ratchet upward per phase** (see
 §7) rather than picking one number up front. Today's baseline after
-Phases 0-3:
+Phases 0-4:
 
 | Module | Coverage |
 |---|---|
@@ -107,18 +107,21 @@ Phases 0-3:
 | `intent.py` | 100% |
 | `const.py` | 100% |
 | `sensor.py` | 98% |
+| `scenes.py` | 91% |
 | `coordinator.py` | 89% |
+| `walls.py` | 88% |
 | `image_converter.py` | 88% |
-| `frame_types.py` | 96% |
 | `config_flow.py` | 84% |
+| `frame_types.py` | 96% |
+| `schedules.py` | 72% |
 | `helpers.py` | 77% |
 | `__init__.py` | 76% |
-| Overall (`custom_components.fraimic`) | ~46% (Phases 4-5 — the Store-backed managers and library backends — still open) |
+| `scene_packs.py` | 50% (widget install/scheduling/subprocess execution untested) |
+| Overall (`custom_components.fraimic`) | ~55% (Phase 5 — library backends and the `*_http.py` view layer — still open) |
 
-Once Phase 4-5 land, target **65% overall**, enforced via
+Once Phase 5 lands, target **65% overall**, enforced via
 `pytest-cov --cov-fail-under=65` in CI. Not set as a hard gate yet since
-enforcing it before the remaining phases exist would just fail every
-build.
+enforcing it before that phase exists would just fail every build.
 
 ## 7. Phase checkpoint tracker
 
@@ -131,8 +134,15 @@ flows.
 | 1 | Pure-logic, highest silent-failure risk: image conversion byte pipeline, render-spec rotation math, frame-type registry | 7, 22, 23 | **Done** |
 | 2 | Coordinator: polling, IP self-healing, queue-on-sleep send/flush, concurrency | 3, 4 | **Done** |
 | 3 | Config flow + setup lifecycle: discovery wizard, options flow, services, voice intent, entities, onboarding backend, `async_setup_entry`/`async_unload_entry` | 1, 2, 5, 6, 21, 24, 25 | **Done** |
-| 4 | Store-backed managers: scenes, scene packs + widget scheduling, walls, schedules recurrence math | 16, 17, 18, 19, 20 | Planned |
+| 4 | Store-backed managers: scenes, scene packs (install/sync/uninstall), walls, schedules recurrence math | 16, 17, 19, 20 | **Done** (widget scheduling/subprocess execution, part of KPF 18, deferred -- see below) |
 | 5 | Library: local/cloud backends, OAuth, backfill, crop, albums, HTTP views | 8, 9, 10, 11, 12, 13, 14, 15 | Planned |
+
+**Deferred from Phase 4**: scene-pack "widget" install/scheduling/subprocess
+execution (`_async_install_widget`, `_schedule_widget`, `async_run_widget`
+in `scene_packs.py`) needs heavier mocking (`asyncio.create_subprocess_exec`,
+filesystem writes under `fraimic_addons/`) than the rest of the phase and
+was left out to land the higher-value core pack CRUD first. Pick up
+alongside a future Phase 5 pass or as its own small follow-up.
 
 Each phase is independently landable — a future session can pick up any
 one without redoing the others. Fixtures added for a later phase (OAuth
