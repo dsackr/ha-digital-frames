@@ -56,7 +56,7 @@ _DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 # alternate-mode fields) to let the user pick between an HA calendar entity
 # and a plain iCal URL; see _async_install_widget for how they're folded
 # into the "calendar" block a widget script actually reads.
-_CALENDAR_COMPOSITE_FIELDS = {"calendar_source", "ha_calendar_entity", "calendar_url"}
+_CALENDAR_COMPOSITE_FIELDS = {"calendar_source", "ha_calendar_entities", "calendar_url"}
 
 
 class ScenePackError(Exception):
@@ -561,13 +561,25 @@ class ScenePackManager:
                 calendar_source = "ical" if config_data.get("calendar_url") else "ha"
 
             if calendar_source == "ha":
-                entity = config_data.get("ha_calendar_entity")
-                if not entity:
-                    calendar_entities = self.hass.states.async_entity_ids("calendar")
-                    entity = calendar_entities[0] if calendar_entities else None
+                # ha_calendar_entities (plural) is a comma-joined list from the
+                # "Configured Calendars" checkbox group -- one or more
+                # calendar.* entities from any calendar integration (Google
+                # Calendar, Local Calendar, CalDAV, etc.), not just Google.
+                entities_raw = config_data.get("ha_calendar_entities")
+                if entities_raw:
+                    entities = [e.strip() for e in entities_raw.split(",") if e.strip()]
+                else:
+                    # Legacy singular field from before multi-select existed,
+                    # or nothing explicitly checked -- fall back to the first
+                    # available entity so a zero-config install still works.
+                    legacy_entity = config_data.get("ha_calendar_entity")
+                    entities = [legacy_entity] if legacy_entity else []
+                    if not entities:
+                        calendar_entities = self.hass.states.async_entity_ids("calendar")
+                        entities = calendar_entities[:1] if calendar_entities else []
                 script_config["calendar"] = {
                     "source_type": "ha",
-                    "ha_calendar_entity": entity
+                    "ha_calendar_entities": entities
                 }
             else:
                 script_config["calendar"] = {
@@ -665,12 +677,16 @@ class ScenePackManager:
                     widget_config = json.load(f)
                 cal_conf = widget_config.get("calendar", {})
                 if cal_conf.get("source_type") == "ha":
-                    entity_id = cal_conf.get("ha_calendar_entity")
-                    if not entity_id:
+                    entity_ids = cal_conf.get("ha_calendar_entities")
+                    if not entity_ids:
+                        # Legacy singular field from before multi-select existed.
+                        legacy_entity = cal_conf.get("ha_calendar_entity")
+                        entity_ids = [legacy_entity] if legacy_entity else []
+                    if not entity_ids:
                         calendar_entities = self.hass.states.async_entity_ids("calendar")
-                        entity_id = calendar_entities[0] if calendar_entities else None
-                        
-                    if entity_id:
+                        entity_ids = calendar_entities[:1] if calendar_entities else []
+
+                    if entity_ids:
                         import pytz
                         import datetime
                         from homeassistant.util import dt as dt_util
@@ -679,25 +695,28 @@ class ScenePackManager:
                             target_tz = pytz.timezone(tz_name)
                         except Exception:
                             target_tz = pytz.UTC
-                            
+
                         now = dt_util.now().astimezone(target_tz)
                         start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
                         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
-                        
-                        _LOGGER.info("Pre-fetching HA calendar events for entity %s...", entity_id)
+
+                        _LOGGER.info("Pre-fetching HA calendar events for entities %s...", entity_ids)
                         response = await self.hass.services.async_call(
                             "calendar",
                             "get_events",
                             {
-                                "entity_id": entity_id,
+                                "entity_id": entity_ids,
                                 "start_date_time": start_dt.isoformat(),
                                 "end_date_time": end_dt.isoformat()
                             },
                             blocking=True,
                             return_response=True
                         )
-                        events = response.get(entity_id, {}).get("events", [])
-                        
+                        events = []
+                        for entity_id in entity_ids:
+                            events.extend(response.get(entity_id, {}).get("events", []))
+                        events.sort(key=lambda e: e.get("start", {}).get("dateTime") or e.get("start", {}).get("date") or "")
+
                         ha_events_path = os.path.join(addon_dir, "ha_events.json")
                         with open(ha_events_path, "w") as ef:
                             json.dump(events, ef, indent=2)

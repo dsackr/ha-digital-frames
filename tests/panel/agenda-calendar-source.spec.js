@@ -5,8 +5,11 @@ const { gotoPanel } = require('./fixtures/panel-page');
 // The Daily Agenda add-on's install form used to force a Google/iCal URL as
 // a required field, with no way to pick one of the calendars Home Assistant
 // already knows about. Regression coverage for the fix: the calendar_url
-// field is now optional, and defaults to a "Home Assistant Calendar" picker
-// backed by hass.states, with the iCal URL as an alternate mode.
+// field is now optional, and defaults to a "Configured Calendars" picker
+// backed by hass.states (any calendar.* entity -- Google Calendar, Local
+// Calendar, CalDAV, etc., not specifically Google), with the iCal URL as an
+// alternate mode. The picker allows selecting more than one calendar --
+// ha_calendar_entities is a comma-joined list of the checked entity ids.
 const DAILY_AGENDA_PACK = {
   id: 'daily_agenda',
   name: 'Daily Agenda',
@@ -19,12 +22,12 @@ const DAILY_AGENDA_PACK = {
     {
       name: 'calendar_source', type: 'select', label: 'Calendar Source', default: 'ha',
       options: [
-        { value: 'ha', label: 'Home Assistant Calendar' },
+        { value: 'ha', label: 'Configured Calendars' },
         { value: 'ical', label: 'Google Calendar / iCal URL' },
       ],
     },
     {
-      name: 'ha_calendar_entity', type: 'entity', domain: 'calendar', label: 'Home Assistant Calendar',
+      name: 'ha_calendar_entities', type: 'entity', domain: 'calendar', multiple: true, label: 'Configured Calendars',
       required: false, show_if: { field: 'calendar_source', equals: 'ha' },
     },
     {
@@ -70,8 +73,26 @@ async function setFieldValue(page, id, value) {
   }, { elId: id, val: value });
 }
 
+// Checkbox ids in the "Configured Calendars" group, in rendered order.
+function checkboxEntityIds(page, containerId) {
+  return page.evaluate((id) =>
+    [...document.getElementById('panel').shadowRoot.getElementById(id).querySelectorAll('input[type="checkbox"]')]
+      .map((cb) => cb.value), containerId);
+}
+
+// A real .click() (not a synthetic dispatchEvent) so the native bubbling
+// 'change' event reaches the container div's listener, same as a user click.
+async function checkCalendarEntity(page, containerId, entityId) {
+  await page.evaluate(({ id, eid }) => {
+    const root = document.getElementById('panel').shadowRoot;
+    const cb = [...root.getElementById(id).querySelectorAll('input[type="checkbox"]')]
+      .find((el) => el.value === eid);
+    cb.click();
+  }, { id: containerId, eid: entityId });
+}
+
 test.describe('Daily Agenda add-on: calendar source picker', () => {
-  test('defaults to the Home Assistant calendar picker and installs without an iCal URL', async ({ page }) => {
+  test('defaults to the Configured Calendars picker and installs without an iCal URL', async ({ page }) => {
     const mock = createMockServer({
       frames: [{ entry_id: 'entry_1', title: 'Living Room Frame' }],
       scenePacks: [DAILY_AGENDA_PACK],
@@ -92,13 +113,16 @@ test.describe('Daily Agenda add-on: calendar source picker', () => {
       await openDailyAgendaModal(page);
 
       expect(await fieldValue(page, 'widget-field-calendar_source')).toBe('ha');
-      expect(await fieldDisplay(page, 'widget-row-ha_calendar_entity')).toBe('block');
+      expect(await fieldDisplay(page, 'widget-row-ha_calendar_entities')).toBe('block');
       expect(await fieldDisplay(page, 'widget-row-calendar_url')).toBe('none');
 
-      const entityOptions = await page.evaluate(() => [
-        ...document.getElementById('panel').shadowRoot.getElementById('widget-field-ha_calendar_entity').options,
-      ].map((o) => o.value));
-      expect(entityOptions).toEqual(['calendar.home', 'calendar.work']);
+      expect(await checkboxEntityIds(page, 'widget-field-ha_calendar_entities'))
+        .toEqual(['calendar.home', 'calendar.work']);
+
+      // Select both calendars -- the whole point of the checklist over a
+      // single <select> is picking more than one.
+      await checkCalendarEntity(page, 'widget-field-ha_calendar_entities', 'calendar.home');
+      await checkCalendarEntity(page, 'widget-field-ha_calendar_entities', 'calendar.work');
 
       await setFieldValue(page, 'widget-config-frame', 'entry_1');
       await page.evaluate(() => {
@@ -107,8 +131,35 @@ test.describe('Daily Agenda add-on: calendar source picker', () => {
 
       await expect.poll(() => mock.installCalls.length).toBe(1);
       expect(mock.installCalls[0].config.calendar_source).toBe('ha');
-      expect(mock.installCalls[0].config.ha_calendar_entity).toBe('calendar.home');
+      expect(mock.installCalls[0].config.ha_calendar_entities).toBe('calendar.home,calendar.work');
       expect(mock.installCalls[0].config.calendar_url).toBe('');
+    } finally {
+      await mock.stop();
+    }
+  });
+
+  test('leaving every calendar unchecked still installs (backend falls back to the first available entity)', async ({ page }) => {
+    const mock = createMockServer({
+      frames: [{ entry_id: 'entry_1', title: 'Living Room Frame' }],
+      scenePacks: [DAILY_AGENDA_PACK],
+    });
+    const baseUrl = await mock.start();
+    try {
+      await gotoPanel(page, baseUrl, { frames: [{ entry_id: 'entry_1', title: 'Living Room Frame' }] });
+      await page.evaluate(() => {
+        document.getElementById('panel')._hass.states['calendar.home'] = { state: 'off', attributes: { friendly_name: 'Home' } };
+      });
+
+      await openAddons(page);
+      await openDailyAgendaModal(page);
+      await setFieldValue(page, 'widget-config-frame', 'entry_1');
+      await page.evaluate(() => {
+        document.getElementById('panel').shadowRoot.getElementById('widget-config-submit').click();
+      });
+
+      await expect.poll(() => mock.installCalls.length).toBe(1);
+      expect(mock.installCalls[0].config.calendar_source).toBe('ha');
+      expect(mock.installCalls[0].config.ha_calendar_entities).toBe('');
     } finally {
       await mock.stop();
     }
@@ -130,7 +181,7 @@ test.describe('Daily Agenda add-on: calendar source picker', () => {
       await openDailyAgendaModal(page);
 
       await setFieldValue(page, 'widget-field-calendar_source', 'ical');
-      expect(await fieldDisplay(page, 'widget-row-ha_calendar_entity')).toBe('none');
+      expect(await fieldDisplay(page, 'widget-row-ha_calendar_entities')).toBe('none');
       expect(await fieldDisplay(page, 'widget-row-calendar_url')).toBe('block');
 
       await setFieldValue(page, 'widget-config-frame', 'entry_1');
@@ -154,9 +205,55 @@ test.describe('Daily Agenda add-on: calendar source picker', () => {
       await expect.poll(() => mock.installCalls.length).toBe(1);
       expect(mock.installCalls[0].config.calendar_source).toBe('ical');
       expect(mock.installCalls[0].config.calendar_url).toBe('https://calendar.google.com/private-abc/basic.ics');
-      // The (hidden) entity picker still rides along in the payload -- the
-      // backend only reads it when calendar_source is 'ha', so its presence
-      // here is harmless, not a bug.
+      // The (hidden) checklist still rides along in the payload as an empty
+      // string -- the backend only reads it when calendar_source is 'ha', so
+      // its presence here is harmless, not a bug.
+    } finally {
+      await mock.stop();
+    }
+  });
+
+  test('re-editing an installed config restores the previously checked calendars', async ({ page }) => {
+    // Shaped like what scene_packs.py's async_list_available actually
+    // returns for an installed widget: installed: true plus the raw
+    // config_data dict it was installed with (see its "installed"/"config"
+    // fields, scene_packs.py).
+    const installedPack = {
+      ...DAILY_AGENDA_PACK,
+      installed: true,
+      config: {
+        frame_id: 'entry_1',
+        calendar_source: 'ha',
+        ha_calendar_entities: 'calendar.work',
+        calendar_url: '',
+        zip_code: '',
+        schedule: { type: 'hourly' },
+      },
+    };
+    const mock = createMockServer({
+      frames: [{ entry_id: 'entry_1', title: 'Living Room Frame' }],
+      scenePacks: [installedPack],
+    });
+    const baseUrl = await mock.start();
+    try {
+      await gotoPanel(page, baseUrl, { frames: [{ entry_id: 'entry_1', title: 'Living Room Frame' }] });
+      await page.evaluate(() => {
+        const states = document.getElementById('panel')._hass.states;
+        states['calendar.home'] = { state: 'off', attributes: { friendly_name: 'Home' } };
+        states['calendar.work'] = { state: 'off', attributes: { friendly_name: 'Work Calendar' } };
+      });
+
+      await openAddons(page);
+      await openDailyAgendaModal(page);
+
+      const checkedState = await page.evaluate(() =>
+        [...document.getElementById('panel').shadowRoot
+          .getElementById('widget-field-ha_calendar_entities').querySelectorAll('input[type="checkbox"]')]
+          .map((cb) => ({ id: cb.value, checked: cb.checked })));
+      expect(checkedState).toEqual([
+        { id: 'calendar.home', checked: false },
+        { id: 'calendar.work', checked: true },
+      ]);
     } finally {
       await mock.stop();
     }

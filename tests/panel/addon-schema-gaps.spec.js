@@ -56,11 +56,11 @@ const DAILY_AGENDA_PACK = {
     {
       name: 'calendar_source', type: 'select', label: 'Calendar Source', default: 'ha',
       options: [
-        { value: 'ha', label: 'Home Assistant Calendar' },
+        { value: 'ha', label: 'Configured Calendars' },
         { value: 'ical', label: 'Google Calendar / iCal URL' },
       ],
     },
-    { name: 'ha_calendar_entity', type: 'entity', domain: 'calendar', label: 'Home Assistant Calendar', required: false, show_if: { field: 'calendar_source', equals: 'ha' } },
+    { name: 'ha_calendar_entities', type: 'entity', domain: 'calendar', multiple: true, label: 'Configured Calendars', required: false, show_if: { field: 'calendar_source', equals: 'ha' } },
     { name: 'calendar_url', type: 'string', label: 'Calendar iCal URL', required: true, show_if: { field: 'calendar_source', equals: 'ical' } },
     { name: 'zip_code', type: 'string', label: 'ZIP Code or City Name', required: false, group: 'weather' },
     {

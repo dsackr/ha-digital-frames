@@ -7744,6 +7744,9 @@
     //   required   enforced only while the field is visible (see show_if)
     //   options    [{value, label}] -- for type 'select'
     //   domain     entity domain to offer, e.g. 'calendar' -- for type 'entity'
+    //   multiple   for type 'entity': render a checkbox group instead of a
+    //              single <select>; value is a comma-joined list of entity
+    //              ids (see _getFieldValue/_setFieldValue)
     //   show_if    {field, equals} -- row hidden unless that other field has this value
     //   group      'weather' places the field in the optional Location/Weather section
     //
@@ -7762,6 +7765,22 @@
           `<option value="${this._esc(opt.value)}">${this._esc(opt.label)}</option>`
         ).join('');
         inputHtml = `<select id="${fieldId}">${options}</select>`;
+      } else if (field.type === 'entity' && field.multiple) {
+        const domainPrefix = `${field.domain}.`;
+        const entities = Object.keys(this._hass.states || {})
+          .filter(eid => eid.startsWith(domainPrefix))
+          .map(eid => ({ id: eid, name: (this._hass.states[eid].attributes || {}).friendly_name || eid }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        inputHtml = entities.length
+          ? `<div id="${fieldId}" style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;border:1px solid var(--divider-color, #444);border-radius:6px;padding:8px 10px">
+              ${entities.map(e => `
+                <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:13.5px;cursor:pointer">
+                  <input type="checkbox" value="${this._esc(e.id)}" style="width:auto;margin:0">
+                  <span>${this._esc(e.name)}</span>
+                </label>
+              `).join('')}
+            </div>`
+          : `<div id="${fieldId}" style="font-size:13px;color:var(--secondary-text-color)">No ${this._esc(field.domain)} entities found</div>`;
       } else if (field.type === 'entity') {
         const domainPrefix = `${field.domain}.`;
         const entities = Object.keys(this._hass.states || {})
@@ -7789,6 +7808,27 @@
           ${helpHtml}
         </div>
       `;
+    }
+
+    // Field-type-aware value get/set -- the generic engine (show_if,
+    // defaults, restore-on-edit, submit) reads/writes through these instead
+    // of a bare el.value, since a multi-select 'entity' field's element is a
+    // checkbox-group container div, not a single value-bearing input. Value
+    // is a comma-joined list of entity ids either way.
+    _getFieldValue(field, el) {
+      if (field.type === 'entity' && field.multiple) {
+        return [...el.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value).join(',');
+      }
+      return el.value;
+    }
+
+    _setFieldValue(field, el, value) {
+      if (field.type === 'entity' && field.multiple) {
+        const selected = new Set(String(value || '').split(',').map(s => s.trim()).filter(Boolean));
+        el.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = selected.has(cb.value); });
+        return;
+      }
+      el.value = value;
     }
 
     _openWidgetConfigModal(pack, cardEl, sid) {
@@ -7875,14 +7915,16 @@
       // per-field-name branches -- adding a new conditional field to a pack
       // manifest just works, no panel change needed.
       const fieldEls = {};
+      const fieldsByName = {};
       for (const field of (pack.config_schema || [])) {
+        fieldsByName[field.name] = field;
         const el = this.shadowRoot.getElementById(`widget-field-${field.name}`);
         if (el) fieldEls[field.name] = el;
       }
 
       const updateConditionalRows = () => {
         const values = {};
-        for (const [name, el] of Object.entries(fieldEls)) values[name] = el.value;
+        for (const [name, el] of Object.entries(fieldEls)) values[name] = this._getFieldValue(fieldsByName[name], el);
         for (const field of (pack.config_schema || [])) {
           if (!field.show_if) continue;
           const row = this.shadowRoot.getElementById(`widget-row-${field.name}`);
@@ -7892,7 +7934,7 @@
 
       for (const field of (pack.config_schema || [])) {
         if (field.default !== undefined && fieldEls[field.name]) {
-          fieldEls[field.name].value = field.default;
+          this._setFieldValue(field, fieldEls[field.name], field.default);
         }
       }
       for (const el of Object.values(fieldEls)) {
@@ -7905,7 +7947,7 @@
         if (config.frame_id) frameSel.value = config.frame_id;
 
         for (const [name, el] of Object.entries(fieldEls)) {
-          if (config[name] !== undefined) el.value = config[name];
+          if (config[name] !== undefined) this._setFieldValue(fieldsByName[name], el, config[name]);
         }
 
         if (config.schedule) {
@@ -7937,7 +7979,7 @@
         };
         
         const values = {};
-        for (const [name, el] of Object.entries(fieldEls)) values[name] = el.value.trim();
+        for (const [name, el] of Object.entries(fieldEls)) values[name] = this._getFieldValue(fieldsByName[name], el).trim();
 
         for (const field of (pack.config_schema || [])) {
           if (!(field.name in values)) continue;
