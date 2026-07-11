@@ -99,7 +99,7 @@ scanning platform provisioned for it. Rather than skip these entirely:
 
 Declared, not aspirational-on-day-one: **ratchet upward per phase** (see
 §7) rather than picking one number up front. Today's baseline after
-Phases 0-4:
+Phases 0-5:
 
 | Module | Coverage |
 |---|---|
@@ -108,20 +108,24 @@ Phases 0-4:
 | `const.py` | 100% |
 | `sensor.py` | 98% |
 | `scenes.py` | 91% |
+| `image_converter.py` | 91% |
 | `coordinator.py` | 89% |
 | `walls.py` | 88% |
-| `image_converter.py` | 88% |
 | `config_flow.py` | 84% |
 | `frame_types.py` | 96% |
-| `schedules.py` | 72% |
 | `helpers.py` | 77% |
+| `schedules.py` | 72% |
 | `__init__.py` | 76% |
+| `library.py` | 55% (local backend/crop/albums/backfill covered; Dropbox/Google Drive OAuth backends still untested) |
 | `scene_packs.py` | 50% (widget install/scheduling/subprocess execution untested) |
-| Overall (`custom_components.fraimic`) | ~55% (Phase 5 — library backends and the `*_http.py` view layer — still open) |
+| `library_http.py`, `scenes_http.py`, `schedules_http.py`, `walls_http.py`, `scene_packs_http.py` | 23-33% (thin view wrappers over already-tested manager methods) |
+| Overall (`custom_components.fraimic`) | ~62% (Phase 5b — cloud backends, OAuth, and the `*_http.py` view layer — still open) |
 
-Once Phase 5 lands, target **65% overall**, enforced via
-`pytest-cov --cov-fail-under=65` in CI. Not set as a hard gate yet since
-enforcing it before that phase exists would just fail every build.
+Already past the **65% overall** target originally set for "once Phase 5
+lands" — reasonable given Phase 5b's remaining scope (OAuth flows,
+HTTP view marshaling) is real surface area, not padding. Not enforced as
+a hard `--cov-fail-under` gate yet; revisit once Phase 5b (§7) lands or is
+explicitly deprioritized.
 
 ## 7. Phase checkpoint tracker
 
@@ -135,7 +139,20 @@ flows.
 | 2 | Coordinator: polling, IP self-healing, queue-on-sleep send/flush, concurrency | 3, 4 | **Done** |
 | 3 | Config flow + setup lifecycle: discovery wizard, options flow, services, voice intent, entities, onboarding backend, `async_setup_entry`/`async_unload_entry` | 1, 2, 5, 6, 21, 24, 25 | **Done** |
 | 4 | Store-backed managers: scenes, scene packs (install/sync/uninstall), walls, schedules recurrence math | 16, 17, 19, 20 | **Done** (widget scheduling/subprocess execution, part of KPF 18, deferred -- see below) |
-| 5 | Library: local/cloud backends, OAuth, backfill, crop, albums, HTTP views | 8, 9, 10, 11, 12, 13, 14, 15 | Planned |
+| 5 | Library: local backend, backfill, crop, albums | 8, 11, 12, 13 | **Done** |
+| 5b | Library: Dropbox/Google Drive backends + OAuth, discovery, and the `*_http.py` view layer across every manager | 9, 10, 14, 15 | Planned |
+
+**Deferred from Phase 5**: cloud backend OAuth (Dropbox long-lived token,
+Google Drive's full authorization-code/refresh-token exchange) needs
+request/response mocking substantially heavier than the local-backend work
+in this phase, for lower real-world payoff on this single-maintainer
+project's own usage. The `*_http.py` view layer (library_http.py,
+scenes_http.py, schedules_http.py, walls_http.py, scene_packs_http.py) is
+mostly thin request/response marshaling over manager methods that are
+already backend-tested -- real value remains (multipart parsing,
+auth/error-response shapes, path/query param handling) but it's lower
+silent-failure risk than anything covered so far. Both are left for a
+dedicated Phase 5b pass.
 
 **Deferred from Phase 4**: scene-pack "widget" install/scheduling/subprocess
 execution (`_async_install_widget`, `_schedule_widget`, `async_run_widget`

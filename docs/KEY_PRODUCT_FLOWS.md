@@ -111,7 +111,10 @@ the panel's grids with on-the-fly cached thumbnails.
 - **If it silently breaks**: uploads silently fail per-file in a batch, or
   thumbnails go stale/broken.
 - **Test status**: Panel-tested (`dashboard.spec.js`, `lazy-thumbs.spec.js`).
-  Backend: **Gap** — planned for Phase 5.
+  **Backend-tested** (local backend) —
+  `tests/python/library/test_library_local_backend.py` (single/multi
+  upload, undecodable-bytes tolerance, thumbnail cache generation/reuse,
+  delete purges original + thumbnails).
 
 ## 9. Library storage backend switching (Local / Dropbox / Google Drive)
 User can point the whole library at Dropbox or Google Drive instead of
@@ -123,7 +126,9 @@ failure.
 - **If it silently breaks**: switching backends fails and silently reverts
   to local without the user noticing, stranding photos on the wrong
   storage.
-- **Test status**: **Gap** — planned for Phase 5.
+- **Test status**: **Gap** — Dropbox/Google Drive backends and their OAuth
+  flows are the remaining, highest-effort slice of Phase 5 (heavy
+  request/response mocking for token exchange and refresh); not yet done.
 
 ## 10. Library discovery (adopt externally-added files)
 Dropbox-only: photos dropped directly into the user's Dropbox get adopted
@@ -132,7 +137,8 @@ into the manifest and queued for `.bin` generation.
   `LibraryManager.async_discover`), `library_http.py`.
 - **If it silently breaks**: dropped photos never appear in the panel, or
   get re-discovered forever if inbox removal fails.
-- **Test status**: **Gap** — planned for Phase 5.
+- **Test status**: **Gap** — depends on the Dropbox backend above; same
+  remaining slice of Phase 5.
 
 ## 11. Library `.bin` cache & background backfill
 Every image gets a per-resolution `.bin` pre-generated in the background
@@ -142,7 +148,11 @@ backfill finishes still works via on-demand conversion+cache.
   `_async_backfill_worker`, `async_get_bin_for_send`).
 - **If it silently breaks**: sends are slow, or a send uses stale bytes
   after a crop change if cache invalidation is missed.
-- **Test status**: **Gap** — planned for Phase 5.
+- **Test status**: **Backend-tested** —
+  `tests/python/library/test_library_crop_albums_backfill.py` (backfill
+  generates bins for configured frame resolutions, on-the-fly generation
+  + caching when uncached, cache-hit skips reconversion, `pack_method`
+  override bypasses the cache without polluting it).
 
 ## 12. Manual crop editing per image/resolution
 User can save a manual crop rectangle for one image at one frame
@@ -152,8 +162,11 @@ resolution (or fallback per-orientation), invalidating cached renders.
 - **If it silently breaks**: a saved crop doesn't apply on next send, or
   clearing a crop leaves stale cached renders for the same orientation.
 - **Test status**: Panel-tested indirectly (`walls-image-picker.spec.js`
-  covers the picker UI, not the crop-save round trip itself). Backend:
-  **Gap** — planned for Phase 5.
+  covers the picker UI, not the crop-save round trip itself).
+  **Backend-tested** — `tests/python/library/test_library_crop_albums_backfill.py`
+  (exact-resolution save invalidates that bin, fallback-orientation save
+  invalidates every matching resolution, clear reverts + invalidates,
+  unknown image raises).
 
 ## 13. Album management (tag, rename, delete, batch-add)
 Photos can be tagged into any number of albums; albums are emergent from
@@ -165,7 +178,9 @@ tags, with rename/delete affecting every tagged image in one bulk write.
   "Images" album gets renamed/deleted, breaking the "always at least one
   album" invariant.
 - **Test status**: Panel-tested indirectly (`walls-addon-album-lock.spec.js`).
-  Backend: **Gap** — planned for Phase 5.
+  **Backend-tested** — `tests/python/library/test_library_crop_albums_backfill.py`
+  (create via tagging, rename/delete across multiple images, default-album
+  protections, empty-name/empty-selection rejection).
 
 ## 14. Send library image to a frame
 The panel's "Send to Canvas" — reuses/generates the cached `.bin` for that
@@ -175,7 +190,10 @@ frame's resolution and delivers or queues it.
 - **If it silently breaks**: sends the wrong crop/orientation, or the
   packer A/B override leaks into the normal cache.
 - **Test status**: Panel-tested (`packtest.spec.js`, `dashboard.spec.js`).
-  Backend: **Gap** — planned for Phase 5.
+  The underlying `async_get_bin_for_send` (KPF 11) and
+  `async_send_image_or_queue` (KPF 4) are both backend-tested; the HTTP
+  view wrapper itself (`FraimicLibrarySendView`'s request/response
+  marshaling) is still a **Gap**.
 
 ## 15. Direct upload-and-send (no library)
 Card/API path: upload an image directly to a specific frame via multipart,
@@ -184,8 +202,8 @@ bypassing the library entirely (the Lovelace card's path).
   `resolve_frame_by_entity`).
 - **If it silently breaks**: card sends silently fail, or the wrong frame
   receives the image.
-- **Test status**: **Gap** — planned for Phase 5 (outside the panel test
-  suite's stated scope).
+- **Test status**: **Gap** — along with the rest of the `*_http.py` view
+  layer (see the coverage summary below), not yet covered.
 
 ## 16. Scenes: named multi-frame image assignments (CRUD + send)
 User builds a named "scene" (frame→image mapping) and sends every frame's
@@ -334,8 +352,9 @@ scenes-hub entry, and tears down cleanly when the last frame is removed.
 | 2 | Coordinator: polling, IP healing, queue-on-sleep, concurrency (KPFs 3, 4) | Done |
 | 3 | Config flow, setup lifecycle, services, intent, entities, onboarding backend (KPFs 1, 2, 5, 6, 21, 24, 25) | Done |
 | 4 | Scenes, scene packs, walls, schedules managers (KPFs 16, 17, 19, 20) | Done (KPF 18's widget scheduling/subprocess execution still a gap) |
-| 5 | Library backends, backfill, crop, albums, HTTP views (KPFs 8–15) | Planned |
+| 5 | Library: local backend, crop, albums, backfill (KPFs 8, 11, 12, 13) | Done |
+| 5b | Library: Dropbox/Google Drive cloud backends + OAuth, discovery (KPFs 9, 10), and the `*_http.py` view layer (KPFs 14, 15 + the rest) | Planned |
 
-Phase 5 (plus KPF 18's widget scheduling) is scoped here but not yet
+Phase 5b (plus KPF 18's widget scheduling) is scoped here but not yet
 implemented — see [TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the
 checkpoint tracker.

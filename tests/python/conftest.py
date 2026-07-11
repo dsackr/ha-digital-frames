@@ -45,6 +45,19 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_dir(hass, tmp_path):
+    """PHACC's hass fixture points hass.config.config_dir at a FIXED shared
+    directory inside the installed package (pytest_homeassistant_custom_
+    component/testing_config/), not a per-test tmp dir -- HA's own Store
+    helper is separately mocked to stay in-memory, but LocalLibraryBackend
+    (library.py) does raw file I/O straight through hass.config.path(...),
+    bypassing that mock entirely. Without this override, every test run
+    accumulates real files in that shared package directory and tests leak
+    state into each other (and across whole pytest invocations)."""
+    hass.config.config_dir = str(tmp_path)
+
+
 @pytest.fixture
 def make_frame_entry():
     """Factory for a frame config entry using this integration's real data/
