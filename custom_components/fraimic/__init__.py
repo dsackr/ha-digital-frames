@@ -288,12 +288,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})["_xotd"] = xotd_manager
 
     from .xotd_http import (  # noqa: PLC0415
+        FraimicXotdEnabledView,
         FraimicXotdInstancesView,
         FraimicXotdInstanceView,
+        FraimicXotdRunView,
     )
 
     hass.http.register_view(FraimicXotdInstancesView())
     hass.http.register_view(FraimicXotdInstanceView())
+    hass.http.register_view(FraimicXotdRunView())
+    hass.http.register_view(FraimicXotdEnabledView())
 
     # Auto-create the device-less "scenes hub" entry (hosts scene.* entities
     # for voice control) if it doesn't exist yet -- self-heals on upgrade,

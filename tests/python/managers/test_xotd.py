@@ -169,6 +169,80 @@ async def test_delete_unknown_instance_raises(hass, xotd_manager):
 
 
 # ---------------------------------------------------------------------------
+# Install / uninstall the add-on itself
+# ---------------------------------------------------------------------------
+
+
+async def test_disabled_by_default(xotd_manager):
+    assert await xotd_manager.async_is_enabled() is False
+
+
+async def test_enable_then_disable_round_trips(xotd_manager):
+    await xotd_manager.async_set_enabled(True)
+    assert await xotd_manager.async_is_enabled() is True
+
+    await xotd_manager.async_set_enabled(False)
+    assert await xotd_manager.async_is_enabled() is False
+
+
+async def test_disabling_cascades_to_delete_every_instance(hass, xotd_manager, make_frame_entry):
+    entry_a = make_frame_entry(entry_id="e1")
+    entry_a.add_to_hass(hass)
+    entry_b = make_frame_entry(entry_id="e2")
+    entry_b.add_to_hass(hass)
+
+    await xotd_manager.async_set_enabled(True)
+    await xotd_manager.async_create_instance("joke", "e1", {"type": "hourly"}, {})
+    await xotd_manager.async_create_instance("scripture", "e2", {"type": "hourly"}, {})
+    assert len(await xotd_manager.async_list_instances()) == 2
+
+    await xotd_manager.async_set_enabled(False)
+
+    assert await xotd_manager.async_list_instances() == []
+    assert xotd_manager._schedulers == {}
+
+
+async def test_enabled_state_persists_across_reload(hass, fake_library):
+    from custom_components.fraimic.xotd import XotdManager
+
+    first = XotdManager(hass, fake_library, scene_packs=None)
+    await first.async_load()
+    await first.async_set_enabled(True)
+
+    second = XotdManager(hass, fake_library, scene_packs=None)
+    await second.async_load()
+    assert await second.async_is_enabled() is True
+
+
+# ---------------------------------------------------------------------------
+# Manual "Send Now"
+# ---------------------------------------------------------------------------
+
+
+async def test_run_now_fires_without_touching_the_schedule(
+    hass, xotd_manager, fake_library, fake_scene_manager, make_frame_entry
+):
+    entry = make_frame_entry(entry_id="e1")
+    entry.add_to_hass(hass)
+    fake_library.images = [{"image_id": "img1", "albums": ["Vacation"]}]
+
+    instance = await xotd_manager.async_create_instance(
+        "image", "e1", {"type": "daily", "time": "07:00:00"}, {"sub_mode": "image_album", "album": "Vacation"}
+    )
+
+    await xotd_manager.async_run_now(instance["instance_id"])
+
+    assert fake_scene_manager.sent == [{"e1": "img1"}]
+    unchanged = await xotd_manager.async_get_instance(instance["instance_id"])
+    assert unchanged["schedule"] == {"type": "daily", "time": "07:00:00"}
+
+
+async def test_run_now_unknown_instance_raises(xotd_manager):
+    with pytest.raises(XotdError, match="not found"):
+        await xotd_manager.async_run_now("does-not-exist")
+
+
+# ---------------------------------------------------------------------------
 # Image mode: fully in-process firing (no subprocess)
 # ---------------------------------------------------------------------------
 

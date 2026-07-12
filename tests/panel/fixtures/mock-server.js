@@ -73,7 +73,11 @@ function parseMultipartFields(buf) {
 // onboardingComplete: the server-side first-run-wizard flag. Defaults to
 // true so every non-onboarding suite loads straight to the dashboard;
 // onboarding tests opt in with false.
-function createMockServer({ frames = [], scenes = [], images = [], albums = [], walls = [], scenePacks = [], schedules = [], xotdInstances = [], discoveredFlows = [], onboardingComplete = true, failing = false, onboardingBroken = false } = {}) {
+function createMockServer({
+  frames = [], scenes = [], images = [], albums = [], walls = [], scenePacks = [], schedules = [],
+  xotdInstances = [], xotdEnabled = xotdInstances.length > 0, discoveredFlows = [],
+  onboardingComplete = true, failing = false, onboardingBroken = false,
+} = {}) {
   let sceneList = scenes.map((s) => ({ created_at: 0, album: null, source: 'user', ...s }));
   let scheduleList = schedules.map((s) => ({
     enabled: true, status: 'pending', fired_late: false,
@@ -84,6 +88,8 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     enabled: true, mode_config: {}, created_at: '2026-01-01T00:00:00', last_run_at: null, ...x,
   }));
   let nextXotdId = xotdInstanceList.length + 1;
+  let xotdEnabledState = xotdEnabled;
+  const xotdRunCalls = []; // instance_id per /xotd/:id/run POST
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -411,9 +417,23 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
       }
     }
 
+    if (p === '/api/fraimic/xotd/enabled' && req.method === 'POST') {
+      const parsed = await readJsonBody(req);
+      xotdEnabledState = !!parsed.enabled;
+      if (!xotdEnabledState) xotdInstanceList = [];
+      return json(res, 200, { success: true, enabled: xotdEnabledState });
+    }
+    const xotdRunMatch = p.match(/^\/api\/fraimic\/xotd\/([^/]+)\/run$/);
+    if (xotdRunMatch && req.method === 'POST') {
+      const instanceId = xotdRunMatch[1];
+      const instance = xotdInstanceList.find((i) => i.instance_id === instanceId);
+      if (!instance) return json(res, 404, { message: `Instance '${instanceId}' not found` });
+      xotdRunCalls.push(instanceId);
+      return json(res, 200, { success: true });
+    }
     if (p === '/api/fraimic/xotd') {
       if (req.method === 'GET') {
-        return json(res, 200, { instances: xotdInstanceList });
+        return json(res, 200, { enabled: xotdEnabledState, instances: xotdInstanceList });
       }
       if (req.method === 'POST') {
         const parsed = await readJsonBody(req);
@@ -514,6 +534,8 @@ function createMockServer({ frames = [], scenes = [], images = [], albums = [], 
     get scenes() { return sceneList; },
     get schedules() { return scheduleList; },
     get xotdInstances() { return xotdInstanceList; },
+    get xotdEnabled() { return xotdEnabledState; },
+    xotdRunCalls,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },

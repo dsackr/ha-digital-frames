@@ -168,6 +168,13 @@ class XotdManager:
         self._scene_packs = scene_packs
         self._store: Store = Store(hass, _STORAGE_VERSION, _STORAGE_KEY)
         self._instances: dict[str, XotdInstance] = {}
+        # Whether the xOTD add-on itself is "installed" -- a binary switch
+        # separate from any instance, shown as a normal Install/Remove pack
+        # card in the Add-ons tab. The "Daily Content" tab (where instances
+        # actually get created) only appears once this is true; disabling
+        # cascades to disarm+delete every instance, same as uninstalling
+        # any other widget wipes its config.
+        self._enabled: bool = False
         # instance_id -> timer unsubscribe. Same lifecycle discipline as
         # ScenePackManager._schedulers / ScheduleManager._schedulers: cancel
         # per-instance on edit/delete, all-at-once in unload().
@@ -175,6 +182,7 @@ class XotdManager:
 
     async def async_load(self) -> None:
         stored = await self._store.async_load()
+        self._enabled = bool((stored or {}).get("enabled", False))
         for data in (stored or {}).get("instances", []):
             try:
                 instance = XotdInstance(data)
@@ -188,8 +196,35 @@ class XotdManager:
 
     async def _async_persist(self) -> None:
         await self._store.async_save(
-            {"instances": [i.to_dict() for i in self._instances.values()]}
+            {
+                "enabled": self._enabled,
+                "instances": [i.to_dict() for i in self._instances.values()],
+            }
         )
+
+    # ------------------------------------------------------------------
+    # Install / uninstall (the add-on as a whole, distinct from any
+    # individual instance)
+    # ------------------------------------------------------------------
+
+    async def async_is_enabled(self) -> bool:
+        return self._enabled
+
+    async def async_set_enabled(self, enabled: bool) -> None:
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        if not enabled:
+            # Uninstalling wipes every instance -- same as removing any
+            # other widget deletes its config/schedule, rather than
+            # leaving orphaned timers a user can no longer see or manage.
+            for instance_id in list(self._instances):
+                self._disarm(instance_id)
+                addon_dir = self.hass.config.path("fraimic_addons", f"xotd_{instance_id}")
+                if os.path.exists(addon_dir):
+                    await self.hass.async_add_executor_job(shutil.rmtree, addon_dir)
+                del self._instances[instance_id]
+        await self._async_persist()
 
     # ------------------------------------------------------------------
     # CRUD
@@ -317,6 +352,15 @@ class XotdManager:
         """Cancel every armed timer."""
         for instance_id in list(self._schedulers):
             self._disarm(instance_id)
+
+    async def async_run_now(self, instance_id: str) -> None:
+        """Fire one instance immediately, on demand -- the "Send Now"
+        button on its card, same idea as a widget's manual Refresh. Does
+        not touch its schedule/timer."""
+        instance = self._instances.get(instance_id)
+        if instance is None:
+            raise XotdError(f"Instance '{instance_id}' not found")
+        await self._async_fire(instance)
 
     async def _async_fire(self, instance: XotdInstance) -> None:
         instance.last_run_at = dt_util.now().isoformat()

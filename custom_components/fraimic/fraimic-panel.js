@@ -30,12 +30,12 @@
     productivity: { label: 'Productivity' }
   };
   const PRODUCTIVITY_CATEGORY = 'productivity';
-  // Packs managed exclusively through their own dedicated tab instead of
-  // the generic single-instance Add-ons install flow -- "xotd" moved to
-  // the multi-instance "Daily Content" tab (many independent content_mode
-  // + frame + schedule instances), so it must never also appear as an
-  // installable widget card here, which would let a user create a second,
-  // incompatible single-instance install alongside their xOTD instances.
+  // Packs whose Add-ons card is a plain Install/Remove on/off switch
+  // (XotdManager.async_set_enabled) rather than the generic single-
+  // instance config modal -- "xotd"'s actual instances (each its own
+  // content_mode + frame + schedule) are created separately, in the
+  // "Daily Content" tab that installing this reveals. See
+  // _buildAnyPackCard/_buildXotdPackCard.
   const MULTI_INSTANCE_PACK_IDS = ['xotd'];
   const PACK_CATEGORY_ORDER = [
     'famous_artists',
@@ -914,6 +914,37 @@
       font-size: 12px;
       opacity: .9;
       margin-top: 2px;
+    }
+
+    /* ---- xOTD "Daily Content" tab: one tile per content type ---- */
+    .xotd-mode-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 14px;
+    }
+    .xotd-mode-tile {
+      cursor: pointer;
+      text-align: center;
+      padding: 20px 14px;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .xotd-mode-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    }
+    .xotd-mode-tile-icon {
+      font-size: 30px;
+      margin-bottom: 8px;
+    }
+    .xotd-mode-tile-title {
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+    .xotd-mode-tile-desc {
+      font-size: 11.5px;
+      color: var(--secondary-text-color);
+      margin-top: 4px;
+      line-height: 1.4;
     }
 
     /* ---- scene pack preview (read-only image gallery) ---- */
@@ -1864,7 +1895,8 @@
 
       this._scenePacks    = [];       // [{ id, name, description, categories, license, cover, images, installed, scene_created }]
       this._scenePacksLoadedAt = 0;   // Date.now() of the last successful catalog fetch -- see _refreshScenePacksIfStale
-      this._xotdInstances = [];       // [{ instance_id, content_mode, frame_id, schedule, mode_config, enabled }] -- loaded lazily on tab activation, see _setTab
+      this._xotdInstances = [];       // [{ instance_id, content_mode, frame_id, schedule, mode_config, enabled }] -- loaded at boot and refreshed on tab activation, see _setTab
+      this._xotdEnabled = false;      // whether the xOTD add-on itself is installed -- gates the "Daily Content" tab's visibility
       this._activeTab     = 'dashboard'; // 'dashboard' | 'addons' | 'xotd'
       this._packCategory  = null;     // null = category-tile view; otherwise the category id being browsed
       this._packPreview   = null;     // { pack, index } while the read-only image gallery is open, else null
@@ -2092,6 +2124,10 @@
       const albumsP  = this._withInitRetry('albums',  () => this._loadAlbums());
       const scenesP  = this._withInitRetry('scenes',  () => this._loadScenes());
       const wallsP   = this._withInitRetry('walls',   () => this._loadWalls());
+      // Must resolve before first paint decides whether the "Daily
+      // Content" tab button is even shown -- a hidden-by-default button
+      // that only reveals itself after a delay would flash into existence.
+      const xotdP    = this._withInitRetry('xotd',    () => this._loadXotdInstances());
 
       await framesP;
       await Promise.all([backendP, albumsP]);
@@ -2113,6 +2149,8 @@
       // completes or skips it) or, at zero frames, a pointer to an admin
       // (everyone else) -- on top of the rendered dashboard.
       this._maybeOpenOnboarding();
+      await xotdP;
+      this._updateXotdTabVisibility();
       await packsP;
       this._renderScenePacks();
 
@@ -2175,8 +2213,7 @@
       }
       const libraryBtn = this.shadowRoot.getElementById('library-open-btn');
       if (libraryBtn) libraryBtn.addEventListener('click', () => this._openLibraryModal());
-      const xotdNewBtn = this.shadowRoot.getElementById('xotd-new-btn');
-      if (xotdNewBtn) xotdNewBtn.addEventListener('click', () => this._openXotdModal(null));
+      this._renderXotdModeTiles();
       this._setTab('dashboard');
     }
 
@@ -2192,7 +2229,24 @@
       // Fire-and-forget: keeps the tab switch itself synchronous/instant,
       // re-rendering once the (throttled) refetch resolves.
       if (name === 'addons') this._refreshScenePacksIfStale();
-      if (name === 'xotd') this._loadXotdInstances().then(() => this._renderXotdInstances());
+      if (name === 'xotd') {
+        this._loadXotdInstances().then(() => {
+          this._renderXotdInstances();
+          this._updateXotdTabVisibility();
+        });
+      }
+    }
+
+    // Hides the "Daily Content" tab button entirely until xOTD is
+    // installed (this._xotdEnabled, set by _loadXotdInstances) -- it's not
+    // just an empty/CTA state inside the tab, the tab shouldn't be
+    // reachable at all until the user opts in via the Add-ons card. If
+    // it's disabled while the user is looking at it, bounce to Dashboard
+    // rather than leaving them on a tab whose button just vanished.
+    _updateXotdTabVisibility() {
+      const btn = this.shadowRoot.querySelector('.tab-btn[data-tab="xotd"]');
+      if (btn) btn.style.display = this._xotdEnabled ? '' : 'none';
+      if (!this._xotdEnabled && this._activeTab === 'xotd') this._setTab('dashboard');
     }
 
     _buildShell() {
@@ -2202,7 +2256,7 @@
         <div class="tab-bar" id="tab-bar">
           <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
           <button class="tab-btn" data-tab="addons">Add-ons</button>
-          <button class="tab-btn" data-tab="xotd">Daily Content</button>
+          <button class="tab-btn" data-tab="xotd" style="display:none">Daily Content</button>
         </div>
 
         <div class="tab-content active" id="tab-dashboard">
@@ -2312,15 +2366,16 @@
 
         <div class="tab-content" id="tab-xotd">
         <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-          Create as many instances as you like -- each pairs one content type
-          (Joke, Quote, Scripture, Word, or Image) with one target frame and
-          its own schedule, so e.g. a Joke can run hourly on one frame while
-          a Scripture runs daily on another, independently.
+          Pick a content type below to create an instance -- each pairs one
+          content type with one target frame and its own schedule, so e.g. a
+          Joke can run hourly on one frame while a Scripture runs daily on
+          another, independently. Create as many as you like, including more
+          than one of the same type.
         </p>
         <div class="feedback" id="xotd-fb"></div>
-        <div class="btns" style="margin-bottom:14px">
-          <button class="btn-primary" id="xotd-new-btn">＋ New Instance</button>
-        </div>
+        <h3 style="margin:0 0 10px;font-size:14px">Add a New Instance</h3>
+        <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
+        <h3 style="margin:24px 0 10px;font-size:14px">Your Instances</h3>
         <div class="lib-grid" id="xotd-grid">
           <div class="empty">
             <div class="empty-icon">⋯</div>
@@ -7558,10 +7613,21 @@
     // Packs are browsed through a category tile view first (this._packCategory
     // === null) and only fan out into a flat pack grid once a tile is clicked --
     // avoids dumping every pack (art + seasonal) into one undifferentiated grid.
+    // xotd shows a normal-looking pack card (Install/Remove), it just
+    // isn't backed by ScenePackManager's per-pack config/frame/schedule --
+    // installing it is a simple on/off switch (XotdManager.async_set_
+    // enabled) that reveals the "Daily Content" tab, where instances (each
+    // with their own frame/schedule) get created separately.
+    _buildAnyPackCard(pack) {
+      return MULTI_INSTANCE_PACK_IDS.includes(pack.id)
+        ? this._buildXotdPackCard(pack)
+        : this._buildPackCard(pack);
+    }
+
     _renderScenePacks() {
       const grid = this.shadowRoot.getElementById('pack-grid');
       const crumb = this.shadowRoot.getElementById('addons-crumb');
-      const visiblePacks = this._scenePacks.filter(p => !MULTI_INSTANCE_PACK_IDS.includes(p.id));
+      const visiblePacks = this._scenePacks;
 
       if (!visiblePacks.length) {
         crumb.style.display = 'none';
@@ -7604,7 +7670,7 @@
 
         const prodPacks = visiblePacks.filter(p => this._isProductivityPack(p));
         for (const pack of prodPacks) {
-          prodGrid.appendChild(this._buildPackCard(pack));
+          prodGrid.appendChild(this._buildAnyPackCard(pack));
         }
         return;
       }
@@ -7625,7 +7691,7 @@
       for (const pack of visiblePacks.filter(p => {
         return !this._isProductivityPack(p) && this._packCategoryTags(p).includes(this._packCategory);
       })) {
-        grid.appendChild(this._buildPackCard(pack));
+        grid.appendChild(this._buildAnyPackCard(pack));
       }
     }
 
@@ -7694,6 +7760,79 @@
         this._renderScenePacks();
       });
       return el;
+    }
+
+    // xotd's card: a plain Install/Remove switch (this._xotdEnabled),
+    // never the generic config modal -- ScenePackManager doesn't even
+    // know this pack is installed (that state lives entirely in
+    // XotdManager), so this branch can't reuse pack.installed/pack.config
+    // the way _buildPackCard does for every other widget.
+    _buildXotdPackCard(pack) {
+      const el = document.createElement('div');
+      el.className = 'card pack-card';
+      const coverUrl = `${SCENE_PACK_RAW_BASE}/${pack.cover}`;
+      const enabled = !!this._xotdEnabled;
+
+      const statusHtml = enabled
+        ? `<button class="btn-ghost" id="xotd-pack-remove">🗑 Remove</button>`
+        : `<button class="btn-primary" id="xotd-pack-install">⬇ Install</button>`;
+      const badgeHtml = enabled
+        ? `<div style="margin-top:10px"><span class="badge-installed">✓ Installed -- see the Daily Content tab</span></div>`
+        : '';
+
+      el.innerHTML = `
+        <img class="pack-cover" src="${this._esc(coverUrl)}" alt="${this._esc(pack.name)}" loading="lazy">
+        <div class="scene-card-title">${this._esc(pack.name)}</div>
+        <div class="pack-desc">${this._esc(pack.description || '')}</div>
+        <div class="scene-card-summary">Create Joke/Quote/Scripture/Word/Image instances, each with its own frame and schedule, from the Daily Content tab</div>
+        <div class="btns" style="margin-top:10px">${statusHtml}</div>
+        ${badgeHtml}
+        <div class="feedback" id="xotd-pack-fb"></div>
+      `;
+
+      if (enabled) {
+        el.querySelector('#xotd-pack-remove').addEventListener('click', () => this._setXotdEnabled(false, el));
+      } else {
+        el.querySelector('#xotd-pack-install').addEventListener('click', () => this._setXotdEnabled(true, el));
+      }
+
+      return el;
+    }
+
+    async _setXotdEnabled(enabled, el) {
+      if (!enabled) {
+        const count = (this._xotdInstances || []).length;
+        const msg = count
+          ? `Remove xOTD? This deletes all ${count} Daily Content instance${count === 1 ? '' : 's'} you've created.`
+          : 'Remove xOTD?';
+        if (!window.confirm(msg)) return;
+      }
+
+      const fb = el.querySelector('#xotd-pack-fb');
+      const btn = el.querySelector(enabled ? '#xotd-pack-install' : '#xotd-pack-remove');
+      if (btn) btn.disabled = true;
+
+      try {
+        const resp = await fetch('/api/fraimic/xotd/enabled', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+
+        await this._loadXotdInstances();
+        this._updateXotdTabVisibility();
+        this._renderScenePacks();
+        if (enabled) this._setTab('xotd');
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `${enabled ? 'Install' : 'Remove'} failed: ${err.message}`;
+        fb.style.display = 'block';
+        if (btn) btn.disabled = false;
+      }
     }
 
     _buildPackCard(pack) {
@@ -8162,9 +8301,11 @@
     }
 
     // -----------------------------------------------------------------------
-    // xOTD (Day-of-the-Day) instances -- the "Daily Content" tab. Unlike
-    // every other pack, xotd is never installed via the Add-ons flow above
-    // (see MULTI_INSTANCE_PACK_IDS): a user instead creates any number of
+    // xOTD (Day-of-the-Day) instances -- the "Daily Content" tab. Installed
+    // like any other pack (a plain Install/Remove switch, _buildXotdPackCard),
+    // but that switch just flips XotdManager's enabled flag -- it doesn't
+    // configure a frame/schedule itself. Once installed, this tab appears
+    // (see _updateXotdTabVisibility) and a user creates any number of
     // independent instances here, each pairing one content_mode with one
     // frame and its own schedule. Joke/Quote/Scripture/Word instances use
     // the xotd catalog pack's own config_schema (rendered generically, same
@@ -8182,6 +8323,42 @@
         word: 'Word of the Day',
         image: 'Image of the Day',
       }[mode] || mode;
+    }
+
+    // One tile per content type -- clicking a tile opens the New Instance
+    // modal with that type pre-selected. This is the entry point for
+    // creating an instance now (there's no bare "+ New Instance" button);
+    // the tile grid itself never changes with existing instances, so it's
+    // rendered once at panel boot, not on every _renderXotdInstances().
+    _xotdModeTileDefs() {
+      return [
+        { mode: 'joke', icon: '😂', desc: 'A daily dad joke, setup + punchline.' },
+        { mode: 'quote', icon: '💬', desc: 'An inspirational quote, with author.' },
+        { mode: 'scripture', icon: '📖', desc: 'A daily Bible verse and reference.' },
+        { mode: 'word', icon: '🔤', desc: 'A word, definition, and example.' },
+        { mode: 'image', icon: '🖼', desc: 'A web feed photo, or a random pick from an album.' },
+      ];
+    }
+
+    _renderXotdModeTiles() {
+      const grid = this.shadowRoot.getElementById('xotd-mode-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      for (const def of this._xotdModeTileDefs()) {
+        grid.appendChild(this._buildXotdModeTile(def));
+      }
+    }
+
+    _buildXotdModeTile(def) {
+      const el = document.createElement('div');
+      el.className = 'card xotd-mode-tile';
+      el.innerHTML = `
+        <div class="xotd-mode-tile-icon">${def.icon}</div>
+        <div class="xotd-mode-tile-title">${this._esc(this._xotdContentModeLabel(def.mode))}</div>
+        <div class="xotd-mode-tile-desc">${this._esc(def.desc)}</div>
+      `;
+      el.addEventListener('click', () => this._openXotdModal(null, def.mode));
+      return el;
     }
 
     _xotdScheduleSummary(schedule) {
@@ -8204,9 +8381,11 @@
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
         this._xotdInstances = result.instances || [];
+        this._xotdEnabled = !!result.enabled;
       } catch (err) {
         console.error('[fraimic-panel] xotd instances load failed:', err);
         this._xotdInstances = this._xotdInstances || [];
+        this._xotdEnabled = !!this._xotdEnabled;
         if (fb) {
           fb.className = 'feedback err';
           fb.textContent = `Couldn't load Daily Content instances: ${err.message}`;
@@ -8225,8 +8404,8 @@
           <div class="empty">
             <div class="empty-icon">◈</div>
             <h2>No instances yet</h2>
-            <p>Click "＋ New Instance" to send a Joke, Quote, Scripture, Word,
-               or Image of the Day to one of your frames.</p>
+            <p>Pick a content type above to send a Joke, Quote, Scripture,
+               Word, or Image of the Day to one of your frames.</p>
           </div>
         `;
         return;
@@ -8260,16 +8439,47 @@
         <div class="scene-card-title">${modeLabel} → ${frameTitle}</div>
         <div class="scene-card-summary">${scheduleLabel}${subLabel ? ' · ' + subLabel : ''}${pausedLabel}</div>
         <div class="btns" style="margin-top:10px">
+          <button class="btn-primary" id="xotd-run-${sid}">▶ Send Now</button>
           <button class="btn-ghost" id="xotd-edit-${sid}">✎ Edit</button>
           <button class="btn-ghost" id="xotd-delete-${sid}">🗑 Delete</button>
         </div>
         <div class="feedback" id="xotd-card-fb-${sid}"></div>
       `;
 
+      el.querySelector(`#xotd-run-${sid}`).addEventListener('click', () => this._runXotdInstanceNow(instance, el, sid));
       el.querySelector(`#xotd-edit-${sid}`).addEventListener('click', () => this._openXotdModal(instance));
       el.querySelector(`#xotd-delete-${sid}`).addEventListener('click', () => this._deleteXotdInstance(instance, el, sid));
 
       return el;
+    }
+
+    async _runXotdInstanceNow(instance, el, sid) {
+      const btn = el.querySelector(`#xotd-run-${sid}`);
+      const fb = el.querySelector(`#xotd-card-fb-${sid}`);
+      btn.disabled = true;
+      const prevText = btn.textContent;
+      btn.textContent = '⏳ Sending…';
+
+      try {
+        const resp = await fetch(`/api/fraimic/xotd/${instance.instance_id}/run`, {
+          method: 'POST', headers: this._authHeaders(),
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+        fb.className = 'feedback ok';
+        fb.textContent = 'Sent!';
+        fb.style.display = 'block';
+        setTimeout(() => { fb.style.display = 'none'; }, 3000);
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Send failed: ${err.message}`;
+        fb.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevText;
+      }
     }
 
     async _deleteXotdInstance(instance, el, sid) {
@@ -8350,7 +8560,7 @@
       ];
     }
 
-    _openXotdModal(instance) {
+    _openXotdModal(instance, presetMode) {
       const overlay = this.shadowRoot.getElementById('xotd-modal-overlay');
       const title = this.shadowRoot.getElementById('xotd-modal-title');
       const fieldsContainer = this.shadowRoot.getElementById('xotd-modal-fields');
@@ -8358,13 +8568,16 @@
       const fb = this.shadowRoot.getElementById('xotd-modal-fb');
 
       fb.style.display = 'none';
-      title.textContent = instance ? 'Edit Instance' : 'New Instance';
+      title.textContent = instance
+        ? `Edit ${this._xotdContentModeLabel(instance.content_mode)}`
+        : `New ${this._xotdContentModeLabel(presetMode || 'quote')} Instance`;
       submitBtn.disabled = false;
       submitBtn.textContent = instance ? 'Save Changes' : 'Create';
 
       const xotdPack = (this._scenePacks || []).find(p => p.id === 'xotd');
       const catalogSchema = (xotdPack && xotdPack.config_schema || []).filter(f => f.name !== 'content_mode');
       const contentModeField = this._xotdContentModeField();
+      if (!instance && presetMode) contentModeField.default = presetMode;
       const imageFields = this._xotdImageFields();
       const allFields = [contentModeField, ...catalogSchema, ...imageFields];
 
@@ -8382,8 +8595,20 @@
       `;
 
       html += this._renderConfigField(contentModeField, 'xotd');
+
+      // Wrapped in their own containers (rather than relying on each
+      // field's own show_if) since NONE of these fields apply when
+      // content_mode is 'image' -- the catalog schema's own content_mode
+      // field never includes 'image' as an option (that mode has no
+      // script/catalog backing at all), so fields like theme/drop_cap that
+      // intentionally have no per-field show_if (they apply to all 4 text
+      // modes) would otherwise render for Image mode too.
+      html += `<div id="xotd-text-fields-wrap">`;
       for (const field of catalogSchema) html += this._renderConfigField(field, 'xotd');
+      html += `</div>`;
+      html += `<div id="xotd-image-fields-wrap">`;
       for (const field of imageFields) html += this._renderConfigField(field, 'xotd');
+      html += `</div>`;
 
       html += `
         <div class="modal-row">
@@ -8429,9 +8654,15 @@
         if (el) fieldEls[field.name] = el;
       }
 
+      const textFieldsWrap = this.shadowRoot.getElementById('xotd-text-fields-wrap');
+      const imageFieldsWrap = this.shadowRoot.getElementById('xotd-image-fields-wrap');
+
       const updateConditionalRows = () => {
         const values = {};
         for (const [name, el] of Object.entries(fieldEls)) values[name] = this._getFieldValue(fieldsByName[name], el);
+        const isImage = values.content_mode === 'image';
+        textFieldsWrap.style.display = isImage ? 'none' : 'block';
+        imageFieldsWrap.style.display = isImage ? 'block' : 'none';
         for (const field of allFields) {
           if (!field.show_if) continue;
           const row = this.shadowRoot.getElementById(`xotd-row-${field.name}`);

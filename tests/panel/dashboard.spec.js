@@ -33,19 +33,24 @@ test.describe('Consolidated dashboard', () => {
     await mockServer.stop();
   });
 
-  test('Dashboard is the default content tab, alongside Add-ons and Daily Content', async ({ page }) => {
+  test('Dashboard is the default content tab, alongside Add-ons and (hidden until installed) Daily Content', async ({ page }) => {
     const state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
+      const xotdBtn = root.querySelector('.tab-btn[data-tab="xotd"]');
       return {
         tabs: [...root.querySelectorAll('.tab-btn')].map((b) => b.dataset.tab),
         activeContent: root.getElementById('tab-dashboard').classList.contains('active'),
         headerButtons: ['frame-add-btn', 'library-open-btn', 'settings-open-btn']
           .map((id) => !!root.getElementById(id)),
+        // The button exists in the DOM either way -- xOTD only reveals it
+        // once installed (see _updateXotdTabVisibility), it's not removed.
+        xotdTabHidden: xotdBtn.style.display === 'none',
       };
     });
     expect(state.tabs).toEqual(['dashboard', 'addons', 'xotd']);
     expect(state.activeContent).toBe(true);
     expect(state.headerButtons).toEqual([true, true, true]);
+    expect(state.xotdTabHidden).toBe(true);
   });
 
   test('tiles carry a footer with the frame name and live status', async ({ page }) => {

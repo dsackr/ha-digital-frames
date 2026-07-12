@@ -1,10 +1,13 @@
 """HTTP API views for xOTD content instances.
 
 Endpoints:
-    GET    /api/fraimic/xotd                  list instances
-    POST   /api/fraimic/xotd                  create ({content_mode, frame_id, schedule, mode_config[, enabled]})
-    POST   /api/fraimic/xotd/{instance_id}    update (any of content_mode/frame_id/schedule/mode_config/enabled)
-    DELETE /api/fraimic/xotd/{instance_id}    delete + disarm
+    GET    /api/fraimic/xotd                  {"enabled": bool, "instances": [...]}
+    POST   /api/fraimic/xotd                  create instance ({content_mode, frame_id, schedule, mode_config[, enabled]})
+    POST   /api/fraimic/xotd/{instance_id}    update instance (any of content_mode/frame_id/schedule/mode_config/enabled)
+    DELETE /api/fraimic/xotd/{instance_id}    delete instance + disarm
+    POST   /api/fraimic/xotd/{instance_id}/run  fire this instance immediately, independent of its schedule
+    POST   /api/fraimic/xotd/enabled          install/uninstall the add-on itself ({"enabled": bool}) --
+                                               uninstalling (enabled: false) cascades to delete every instance
 """
 
 from __future__ import annotations
@@ -39,7 +42,8 @@ class FraimicXotdInstancesView(HomeAssistantView):
         hass = request.app["hass"]
         manager = _get_xotd_manager(hass)
         instances = await manager.async_list_instances()
-        return self.json({"instances": instances})
+        enabled = await manager.async_is_enabled()
+        return self.json({"enabled": enabled, "instances": instances})
 
     async def post(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
@@ -125,3 +129,57 @@ class FraimicXotdInstanceView(HomeAssistantView):
             _LOGGER.error("Failed to delete xOTD instance '%s': %s", instance_id, err)
             return self.json_message(f"Delete failed: {err}", status_code=500)
         return self.json({"success": True})
+
+
+class FraimicXotdRunView(HomeAssistantView):
+    """Fire one instance immediately ("Send Now" on its card), independent
+    of its schedule."""
+
+    url = "/api/fraimic/xotd/{instance_id}/run"
+    name = "api:fraimic:xotd:run"
+    requires_auth = True
+
+    async def post(self, request: web.Request, instance_id: str) -> web.Response:
+        hass = request.app["hass"]
+        manager = _get_xotd_manager(hass)
+
+        from .xotd import XotdError  # noqa: PLC0415
+
+        try:
+            await manager.async_run_now(instance_id)
+        except XotdError as err:
+            return self.json_message(str(err), status_code=404)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to run xOTD instance '%s': %s", instance_id, err)
+            return self.json_message(f"Run failed: {err}", status_code=500)
+        return self.json({"success": True})
+
+
+class FraimicXotdEnabledView(HomeAssistantView):
+    """Install (enabled: true) or uninstall (enabled: false) the xOTD
+    add-on itself -- the binary switch shown as a normal pack card in the
+    Add-ons tab, independent of any instance. Uninstalling cascades to
+    delete every instance (see XotdManager.async_set_enabled)."""
+
+    url = "/api/fraimic/xotd/enabled"
+    name = "api:fraimic:xotd:enabled"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        manager = _get_xotd_manager(hass)
+
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON body: {err}", status_code=400)
+        if not isinstance(body, dict):
+            return self.json_message("Request body must be an object", status_code=400)
+
+        try:
+            await manager.async_set_enabled(bool(body.get("enabled")))
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to set xOTD enabled state: %s", err)
+            return self.json_message(f"Failed: {err}", status_code=500)
+
+        return self.json({"success": True, "enabled": await manager.async_is_enabled()})
