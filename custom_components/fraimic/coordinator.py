@@ -235,12 +235,20 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         thumbnail: bytes | None = None,
     ) -> dict[str, Any]:
         """Send *image_bytes* to the frame, or queue it for delivery once the
-        frame wakes if it's currently unreachable.
+        frame wakes if it's genuinely unreachable.
 
         This is the entry point every send path (the send_image service, the
         raw-upload view, the library send view, and scene sends) should call
         instead of async_send_image directly, so queueing behaviour is
         applied uniformly regardless of where the image came from.
+
+        A send that times out is verified with a follow-up /api/info poll
+        before queuing -- a frame that answers that poll is awake, so the
+        timeout almost certainly means it already received the image (see
+        the comment in the except block below). Returns
+        {"success": True, "queued": False, "unconfirmed": True} for that
+        case, distinct from a normal confirmed success, so callers/logs can
+        tell the two apart if it matters later.
         """
         token = uuid.uuid4().hex
         payload: dict[str, Any] = {
@@ -263,9 +271,30 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_send_image(image_bytes)
             await self._clear_pending_if_current(token)
         except (aiohttp.ClientConnectionError, TimeoutError):
-            # Same failure pair _async_update_data treats as "frame is
-            # unreachable, may be sleeping" -- leave it queued, the poll loop
-            # will retry once the frame answers again.
+            # A client-side timeout on some clone firmwares does NOT mean the
+            # frame never got the image -- see async_send_image's docstring:
+            # it writes the body to flash and blocks its HTTP response on the
+            # ~30s e-ink redraw before answering, so our 120s budget can still
+            # expire after the frame already displayed it. Blindly queuing
+            # here would guarantee a real duplicate redraw once the next poll
+            # flushes it -- so poll /api/info right now instead: if the frame
+            # answers, it's awake, and the timed-out send almost certainly
+            # already landed. Leaving _flushing True across this poll stops
+            # _async_update_data's own "something's queued" check from also
+            # scheduling a flush task while we're still resolving this one.
+            await self.async_refresh()
+            if self.last_update_success:
+                _LOGGER.info(
+                    "Send to %s timed out but the frame answered a poll "
+                    "immediately after -- treating as already delivered "
+                    "instead of queuing a guaranteed duplicate redraw",
+                    self.host,
+                )
+                await self._clear_pending_if_current(token)
+                await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+                return {"success": True, "queued": False, "unconfirmed": True}
+            # Genuinely unreachable -- leave it queued, the poll loop will
+            # deliver it once the frame answers again.
             return {"success": False, "queued": True}
         finally:
             self._flushing = False

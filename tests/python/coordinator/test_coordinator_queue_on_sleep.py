@@ -31,7 +31,9 @@ async def test_immediate_success_returns_success_not_queued(coordinator, aioclie
 
 
 async def test_connection_error_queues_the_send(coordinator, aioclient_mock):
+    # Genuinely unreachable: the post-timeout /api/info probe fails too.
     aioclient_mock.post(f"http://{coordinator.host}/api/image", exc=aiohttp.ClientConnectionError())
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", exc=aiohttp.ClientConnectionError())
 
     result = await coordinator.async_send_image_or_queue(b"binary-image-data", image_id="img1")
 
@@ -47,15 +49,38 @@ async def test_connection_error_queues_the_send(coordinator, aioclient_mock):
 
 
 async def test_timeout_also_queues_the_send(coordinator, aioclient_mock):
+    # Genuinely unreachable: the post-timeout /api/info probe fails too.
     aioclient_mock.post(f"http://{coordinator.host}/api/image", exc=TimeoutError())
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", exc=TimeoutError())
 
     result = await coordinator.async_send_image_or_queue(b"data")
 
     assert result == {"success": False, "queued": True}
 
 
+async def test_timeout_but_frame_answers_probe_is_not_queued(coordinator, aioclient_mock):
+    # The 7.3in clone firmware blocks its HTTP response on the ~30s e-ink
+    # redraw before answering, so a client-side timeout doesn't mean the
+    # frame never got the image -- it may already be displaying it. If the
+    # frame answers a follow-up /api/info right away, it's awake, so this
+    # must NOT queue the same bytes for a later flush -- that would
+    # guarantee a real duplicate redraw once the next poll delivers it.
+    aioclient_mock.post(f"http://{coordinator.host}/api/image", exc=TimeoutError())
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", json={})
+
+    result = await coordinator.async_send_image_or_queue(b"data", image_id="img1")
+
+    assert result == {"success": True, "queued": False, "unconfirmed": True}
+    assert coordinator.pending_send is None
+    assert coordinator.last_image_id == "img1"
+    from custom_components.fraimic.coordinator import _FAST_POLL_INTERVAL
+
+    assert coordinator.update_interval != _FAST_POLL_INTERVAL
+
+
 async def test_successful_poll_flushes_a_queued_send(coordinator, aioclient_mock):
     aioclient_mock.post(f"http://{coordinator.host}/api/image", exc=aiohttp.ClientConnectionError())
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", exc=aiohttp.ClientConnectionError())
     await coordinator.async_send_image_or_queue(b"data", image_id="img1")
     assert coordinator.pending_send is not None
 

@@ -21,3 +21,6 @@ tests/panel/playwright/.cache/
 # Local network captures (contain auth tokens) — never commit
 scratchpad-capture/
 *.har
+
+# HA long-lived access token(s) — never commit
+ha.cred
