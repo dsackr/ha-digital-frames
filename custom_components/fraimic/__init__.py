@@ -121,9 +121,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     # Register the image-upload HTTP endpoint and the first-run wizard's
     # server-side completion flag.
-    from .http_api import FraimicOnboardingView, FraimicSendImageView  # noqa: PLC0415
+    from .http_api import (  # noqa: PLC0415
+        FraimicFrameStatusView,
+        FraimicOnboardingView,
+        FraimicSendImageView,
+    )
     hass.http.register_view(FraimicSendImageView())
     hass.http.register_view(FraimicOnboardingView())
+    hass.http.register_view(FraimicFrameStatusView())
 
     # Set up the shared image library (storage-backend agnostic) and its
     # HTTP endpoints. This is domain-level state, not per-frame, since the

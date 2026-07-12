@@ -96,6 +96,41 @@ def resolve_frame_by_entity(hass, entity_id: str):
     return coordinator, entry
 
 
+class FraimicFrameStatusView(HomeAssistantView):
+    """GET /api/fraimic/frame_status?entity_id=... — resolve any Fraimic
+    entity to its frame's on-frame preview info, for the standalone Lovelace
+    card (fraimic-card.js). The sidebar panel resolves this itself via
+    admin-only config_entries/device_registry websocket calls, which a card
+    on a non-admin's dashboard can't use -- this endpoint does the same
+    resolve_frame_by_entity lookup server-side so any authenticated user's
+    card can show the current on-frame thumbnail.
+    """
+
+    url = "/api/fraimic/frame_status"
+    name = "api:fraimic:frame_status"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        entity_id = request.query.get("entity_id")
+        if not entity_id:
+            return self.json_message("entity_id is required", status_code=400)
+
+        try:
+            coordinator, entry = resolve_frame_by_entity(hass, entity_id)
+        except ValueError as err:
+            return self.json_message(str(err), status_code=404)
+
+        return self.json(
+            {
+                "entry_id": entry.entry_id,
+                "last_image_id": coordinator.last_image_id,
+                "has_thumbnail": coordinator.last_thumbnail is not None,
+                "queued": coordinator.pending_send is not None,
+            }
+        )
+
+
 class FraimicSendImageView(HomeAssistantView):
     """Handle POST /api/fraimic/send_image.
 

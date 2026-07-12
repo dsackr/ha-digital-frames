@@ -1,6 +1,7 @@
 /**
  * Fraimic Frame Card
- * Custom Lovelace card for sending images to a Fraimic e-ink frame.
+ * Custom Lovelace card showing a frame's current image, with full
+ * upload/select-a-new-photo functionality.
  *
  * Config:
  *   type: custom:fraimic-card
@@ -11,7 +12,7 @@
 (function () {
   'use strict';
 
-  const CARD_VERSION = '0.1.4';
+  const CARD_VERSION = '0.2.0';
 
   class FraimicCard extends HTMLElement {
     constructor() {
@@ -19,6 +20,19 @@
       this.attachShadow({ mode: 'open' });
       this._selectedFile = null;
       this._previewUrl = null;
+
+      // On-frame preview state, resolved from /api/fraimic/frame_status.
+      this._entryId = null;
+      this._lastImageId = null;
+      this._hasThumbnail = false;
+      this._queued = false;
+      this._lastEntityState = null;
+      this._statusInFlight = false;
+
+      // object: URL currently painted into the media <img>, plus the
+      // backend URL it was loaded from (so repeat renders skip a refetch).
+      this._mediaBlobUrl = null;
+      this._mediaSourceUrl = null;
     }
 
     // ------------------------------------------------------------------ //
@@ -43,6 +57,15 @@
     set hass(hass) {
       this._hass = hass;
       this._refreshStatus();
+
+      const entity = hass.states[this._config.entity];
+      if (entity && entity !== this._lastEntityState) {
+        this._lastEntityState = entity;
+        this._fetchFrameStatus();
+      } else if (!this._entryId && !this._statusInFlight) {
+        // First render, or a previous lookup failed -- keep trying.
+        this._fetchFrameStatus();
+      }
     }
 
     // ------------------------------------------------------------------ //
@@ -54,29 +77,78 @@
         <style>
           *, *::before, *::after { box-sizing: border-box; }
 
-          ha-card {
-            padding: 16px 16px 12px;
+          ha-card { overflow: hidden; }
+
+          /* ---- media (on-frame image) ---- */
+          .media {
+            position: relative;
+            height: 220px;
+            background: var(--secondary-background-color, #f5f5f5);
+            cursor: pointer;
             overflow: hidden;
           }
+          .media img {
+            display: none;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+          .media .placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--secondary-text-color);
+            text-align: center;
+            padding: 0 16px;
+          }
+          .media .placeholder .icon { font-size: 32px; opacity: .6; }
 
-          /* ---- header ---- */
-          .header {
+          .media .hint {
+            position: absolute;
+            inset: auto 0 0 0;
+            padding: 6px 10px;
+            font-size: 11px;
+            color: #fff;
+            background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
+            opacity: 0;
+            transition: opacity .15s;
+            pointer-events: none;
+          }
+          .media:hover .hint { opacity: 1; }
+
+          .badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .04em;
+            color: #fff;
+            background: rgba(0,0,0,.6);
+            display: none;
+          }
+          .badge.queued {
+            background: rgba(3,169,244,.85);
+          }
+
+          /* ---- footer ---- */
+          .footer {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 14px;
+            gap: 8px;
+            padding: 10px 12px;
           }
-          .icon {
-            width: 42px; height: 42px;
-            border-radius: 10px;
-            background: var(--primary-color, #03a9f4);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 22px;
-            flex-shrink: 0;
-          }
-          .meta { flex: 1; min-width: 0; }
           .frame-name {
-            font-size: 15px;
+            flex: 1;
+            min-width: 0;
+            font-size: 14px;
             font-weight: 600;
             color: var(--primary-text-color);
             white-space: nowrap;
@@ -84,42 +156,37 @@
             text-overflow: ellipsis;
           }
           .frame-status {
+            flex: 0 0 auto;
             font-size: 12px;
             color: var(--secondary-text-color);
-            margin-top: 2px;
+            white-space: nowrap;
           }
           .dot-online  { color: var(--success-color,  #43a047); }
           .dot-offline { color: var(--error-color,    #e53935); }
 
-          /* ---- preview ---- */
-          .preview {
-            display: none;
-            margin-bottom: 12px;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid var(--divider-color, rgba(0,0,0,.12));
-            background: var(--secondary-background-color, #f5f5f5);
-            text-align: center;
-          }
-          .preview img {
-            display: block;
-            width: 100%;
-            max-height: 220px;
-            object-fit: contain;
-          }
-          .preview-caption {
-            padding: 4px 8px;
-            font-size: 11px;
+          .gear {
+            flex: 0 0 auto;
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
             color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            font-size: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
           }
+          .gear:hover { background: var(--secondary-background-color, rgba(0,0,0,.06)); }
 
-          /* ---- buttons ---- */
-          .actions { display: flex; gap: 8px; }
-
-          button {
+          /* ---- staged (picked-but-not-sent) actions ---- */
+          .actions {
+            display: none;
+            gap: 8px;
+            padding: 0 12px 12px;
+          }
+          button.act {
             flex: 1;
             padding: 9px 12px;
             border: none;
@@ -130,22 +197,16 @@
             transition: opacity .15s, transform .1s;
             line-height: 1.2;
           }
-          button:active:not(:disabled) { transform: scale(.97); }
-          button:disabled { opacity: .45; cursor: default; }
+          button.act:active:not(:disabled) { transform: scale(.97); }
+          button.act:disabled { opacity: .45; cursor: default; }
 
-          .btn-pick {
-            background: var(--primary-color, #03a9f4);
-            color: var(--text-primary-color, #fff);
-          }
           .btn-send {
             background: var(--primary-color, #03a9f4);
             color: var(--text-primary-color, #fff);
-            display: none;
           }
           .btn-cancel {
             background: var(--secondary-background-color, #eee);
             color: var(--primary-text-color);
-            display: none;
             flex: 0 0 auto;
             padding-left: 14px;
             padding-right: 14px;
@@ -154,7 +215,7 @@
           /* ---- feedback ---- */
           .feedback {
             display: none;
-            margin-top: 8px;
+            margin: 0 12px 12px;
             padding: 7px 10px;
             border-radius: 6px;
             font-size: 12px;
@@ -173,37 +234,37 @@
         </style>
 
         <ha-card>
-          <div class="card-content">
-
-            <div class="header">
+          <div class="media" id="media" title="Click to send a new photo to this frame">
+            <img id="mediaImg" alt="" />
+            <div class="placeholder" id="placeholder">
               <div class="icon">🖼</div>
-              <div class="meta">
-                <div class="frame-name" id="frameName">Fraimic Frame</div>
-                <div class="frame-status" id="frameStatus"></div>
-              </div>
+              <div>No photo sent yet</div>
             </div>
-
-            <div class="preview" id="preview">
-              <img id="previewImg" alt="Preview" />
-              <div class="preview-caption" id="previewCaption"></div>
-            </div>
-
-            <div class="actions">
-              <button class="btn-pick" id="btnPick">📷 Send Image</button>
-              <button class="btn-send" id="btnSend">⬆ Send to Frame</button>
-              <button class="btn-cancel" id="btnCancel">✕</button>
-            </div>
-
-            <div class="feedback" id="feedback"></div>
-
-            <input type="file" id="fileInput"
-              accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/*">
+            <div class="badge" id="badge">ON FRAME</div>
+            <div class="hint">📷 Click to send a new photo</div>
           </div>
+
+          <div class="footer">
+            <span class="frame-name" id="frameName">Fraimic Frame</span>
+            <span class="frame-status" id="frameStatus"></span>
+            <button class="gear" id="gearBtn" title="Open Fraimic">⚙</button>
+          </div>
+
+          <div class="actions" id="actions">
+            <button class="act btn-send" id="btnSend">⬆ Send to Frame</button>
+            <button class="act btn-cancel" id="btnCancel">✕</button>
+          </div>
+
+          <div class="feedback" id="feedback"></div>
+
+          <input type="file" id="fileInput"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/*">
         </ha-card>
       `;
 
       // Wire up events.
-      this._q('btnPick').addEventListener('click', () => {
+      this._q('media').addEventListener('click', () => {
+        if (this._selectedFile) return; // already staged -- use Send/Cancel
         this._q('fileInput').click();
       });
 
@@ -215,8 +276,16 @@
       this._q('btnSend').addEventListener('click', () => this._sendImage());
       this._q('btnCancel').addEventListener('click', () => this._reset());
 
+      this._q('gearBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openFraimicPanel();
+      });
+
       // Populate status immediately if hass is already set.
-      if (this._hass) this._refreshStatus();
+      if (this._hass) {
+        this._refreshStatus();
+        this._fetchFrameStatus();
+      }
     }
 
     // ------------------------------------------------------------------ //
@@ -225,6 +294,16 @@
 
     _q(id) {
       return this.shadowRoot.getElementById(id);
+    }
+
+    _authHeaders() {
+      let token;
+      try {
+        token = this._hass.auth.data.access_token;
+      } catch (_) {
+        token = null;
+      }
+      return token ? { Authorization: `Bearer ${token}` } : {};
     }
 
     _refreshStatus() {
@@ -250,7 +329,7 @@
       }
 
       const pct = parseFloat(entity.state);
-      const battText = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}% `;
+      const battText = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}% `;
       this._setStatusHtml(statusEl, `${battText}<span class="dot-online">● Online</span>`);
     }
 
@@ -260,6 +339,104 @@
       if (statusEl._fraimicLastStatus === html) return;
       statusEl._fraimicLastStatus = html;
       statusEl.innerHTML = html;
+    }
+
+    _openFraimicPanel() {
+      history.pushState(null, '', '/fraimic');
+      window.dispatchEvent(new CustomEvent('location-changed', { bubbles: true, composed: true }));
+    }
+
+    // ------------------------------------------------------------------ //
+    // On-frame image preview
+    // ------------------------------------------------------------------ //
+
+    async _fetchFrameStatus() {
+      if (!this._hass || !this._config || this._statusInFlight) return;
+      this._statusInFlight = true;
+      try {
+        const resp = await fetch(
+          `/api/fraimic/frame_status?entity_id=${encodeURIComponent(this._config.entity)}`,
+          { headers: this._authHeaders() }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          this._entryId = data.entry_id;
+          this._lastImageId = data.last_image_id;
+          this._hasThumbnail = data.has_thumbnail;
+          this._queued = data.queued;
+        }
+      } catch (_) {
+        // Transient network error -- next hass update retries.
+      } finally {
+        this._statusInFlight = false;
+      }
+      this._renderOnFrameImage();
+    }
+
+    // Paints the confirmed on-frame image (never called while a local pick
+    // is staged -- that shows its own preview via _onFileSelected instead).
+    async _renderOnFrameImage() {
+      if (!this._q('media') || this._selectedFile) return;
+
+      let url = null;
+      if (this._lastImageId) {
+        url = `/api/fraimic/library/image/${this._lastImageId}?thumb=480`;
+      } else if (this._hasThumbnail && this._entryId) {
+        url = `/api/fraimic/frame/${this._entryId}/thumbnail`;
+      }
+
+      if (!url) {
+        this._showPlaceholder();
+      } else if (url !== this._mediaSourceUrl) {
+        try {
+          const resp = await fetch(url, { headers: this._authHeaders() });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const objUrl = URL.createObjectURL(blob);
+
+          if (this._mediaBlobUrl) URL.revokeObjectURL(this._mediaBlobUrl);
+          this._mediaBlobUrl = objUrl;
+          this._mediaSourceUrl = url;
+
+          const img = this._q('mediaImg');
+          img.src = objUrl;
+          img.style.display = 'block';
+          this._q('placeholder').style.display = 'none';
+        } catch (_) {
+          this._showPlaceholder();
+        }
+      }
+
+      // Badge: a queued send (frame asleep) takes priority over the plain
+      // "on frame" label -- it means what's showing is about to change,
+      // not that it's the final state.
+      if (this._queued) {
+        this._setBadge('⏳ QUEUED', true);
+      } else if (this._mediaSourceUrl) {
+        this._setBadge('ON FRAME', false);
+      } else {
+        this._setBadge('', false);
+      }
+    }
+
+    _showPlaceholder() {
+      this._mediaSourceUrl = null;
+      const img = this._q('mediaImg');
+      img.style.display = 'none';
+      img.src = '';
+      this._q('placeholder').style.display = 'flex';
+    }
+
+    _setBadge(text, queued) {
+      const badge = this._q('badge');
+      if (!badge) return;
+      if (!text) {
+        badge.style.display = 'none';
+        return;
+      }
+      badge.textContent = text;
+      badge.classList.toggle('queued', !!queued);
+      badge.style.display = 'block';
     }
 
     // ------------------------------------------------------------------ //
@@ -273,13 +450,13 @@
       if (this._previewUrl) URL.revokeObjectURL(this._previewUrl);
       this._previewUrl = URL.createObjectURL(file);
 
-      this._q('previewImg').src = this._previewUrl;
-      this._q('previewCaption').textContent = file.name;
-      this._q('preview').style.display = 'block';
+      const img = this._q('mediaImg');
+      img.src = this._previewUrl;
+      img.style.display = 'block';
+      this._q('placeholder').style.display = 'none';
+      this._setBadge('', false);
 
-      this._q('btnPick').style.display = 'none';
-      this._q('btnSend').style.display = '';
-      this._q('btnCancel').style.display = '';
+      this._q('actions').style.display = 'flex';
       this._hideFeedback();
     }
 
@@ -301,21 +478,10 @@
       form.append('entity_id', this._config.entity);
       form.append('image', this._selectedFile);
 
-      let token;
-      try {
-        // The HA JS auth object exposes access_token.
-        token = this._hass.auth.data.access_token;
-      } catch (_) {
-        token = null;
-      }
-
-      const headers = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       try {
         const resp = await fetch('/api/fraimic/send_image', {
           method: 'POST',
-          headers,
+          headers: this._authHeaders(),
           body: form,
         });
 
@@ -324,7 +490,16 @@
 
         if (resp.ok && result.success) {
           this._showFeedback('success', '✓ Image sent to frame!');
-          setTimeout(() => this._reset(), 3000);
+          setTimeout(() => {
+            this._reset();
+            this._fetchFrameStatus();
+          }, 1500);
+        } else if (result.queued) {
+          this._showFeedback('success', '⏳ Frame is asleep — image queued, will send on wake.');
+          setTimeout(() => {
+            this._reset();
+            this._fetchFrameStatus();
+          }, 1500);
         } else {
           const msg = result.message || resp.statusText || `HTTP ${resp.status}`;
           this._showFeedback('error', `Failed: ${msg}`);
@@ -356,13 +531,7 @@
       const fi = this._q('fileInput');
       if (fi) fi.value = '';
 
-      const img = this._q('previewImg');
-      if (img) img.src = '';
-
-      this._q('preview').style.display   = 'none';
-      this._q('btnPick').style.display   = '';
-      this._q('btnSend').style.display   = 'none';
-      this._q('btnCancel').style.display = 'none';
+      this._q('actions').style.display = 'none';
 
       const btnSend = this._q('btnSend');
       btnSend.textContent = '⬆ Send to Frame';
@@ -370,6 +539,11 @@
       this._q('btnCancel').disabled = false;
 
       this._hideFeedback();
+
+      // Force the on-frame image to repaint even if the URL hasn't changed
+      // yet (e.g. a failed send left the placeholder showing).
+      this._mediaSourceUrl = null;
+      this._renderOnFrameImage();
     }
 
     _showFeedback(type, msg) {
@@ -393,7 +567,7 @@
   window.customCards.push({
     type:             'fraimic-card',
     name:             'Fraimic Frame Card',
-    description:      'Send images to a Fraimic e-ink frame from your dashboard.',
+    description:      'Show what\'s on a Fraimic e-ink frame and send it a new photo from your dashboard.',
     preview:          false,
     documentationURL: 'https://github.com/dsackr/fraimic-homeassistant',
   });
