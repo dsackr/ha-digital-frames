@@ -242,7 +242,7 @@ class SceneManager:
 
         from .helpers import render_spec_for_entry  # noqa: PLC0415
 
-        prepared: dict[str, tuple[Any, bytes, str | None]] = {}
+        prepared: dict[str, tuple[Any, bytes, str | None, bytes | None]] = {}
         results: list[dict[str, Any]] = []
 
         async def _prepare_one(
@@ -290,8 +290,15 @@ class SceneManager:
                 if render_result["kind"] == "bin":
                     # Freshly generated, not stored -- no image_id to pass
                     # (and nothing to cache), same as generate_ai_image's
-                    # pre-upload bytes.
-                    prepared[entry_id] = (coordinator, render_result["bytes"], None)
+                    # pre-upload bytes. The renderer's preview PNG rides
+                    # along so the frame's last-image thumbnail survives a
+                    # text-skill send instead of being wiped.
+                    prepared[entry_id] = (
+                        coordinator,
+                        render_result["bytes"],
+                        None,
+                        render_result.get("preview"),
+                    )
                     return None
                 image_id = render_result["image_id"]
             else:
@@ -303,7 +310,7 @@ class SceneManager:
                 )
             except Exception as err:  # noqa: BLE001
                 return {"entry_id": entry_id, "success": False, "message": str(err)}
-            prepared[entry_id] = (coordinator, bin_bytes, image_id)
+            prepared[entry_id] = (coordinator, bin_bytes, image_id, None)
             return None
 
         failures = await asyncio.gather(
@@ -314,16 +321,23 @@ class SceneManager:
         )
         results.extend(failure for failure in failures if failure is not None)
 
-        async def _send_one(coordinator: Any, bin_bytes: bytes, image_id: str | None) -> dict[str, Any]:
+        async def _send_one(
+            coordinator: Any,
+            bin_bytes: bytes,
+            image_id: str | None,
+            thumbnail: bytes | None,
+        ) -> dict[str, Any]:
             # async_send_image_or_queue queues (rather than raising) if the
             # frame is asleep/unreachable, and already updates last_image_id
             # on immediate success -- see FraimicCoordinator.
-            return await coordinator.async_send_image_or_queue(bin_bytes, image_id=image_id)
+            return await coordinator.async_send_image_or_queue(
+                bin_bytes, image_id=image_id, thumbnail=thumbnail
+            )
 
         sent = await asyncio.gather(
             *(
-                _send_one(coordinator, bin_bytes, image_id)
-                for coordinator, bin_bytes, image_id in prepared.values()
+                _send_one(coordinator, bin_bytes, image_id, thumbnail)
+                for coordinator, bin_bytes, image_id, thumbnail in prepared.values()
             ),
             return_exceptions=True,
         )

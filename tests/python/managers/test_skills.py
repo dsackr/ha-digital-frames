@@ -323,8 +323,36 @@ async def test_text_render_returns_bin_bytes_and_cleans_up_run_dir(
     monkeypatch.setattr("custom_components.fraimic.skills.asyncio.create_subprocess_exec", _fake_exec)
 
     result = await skill_manager.async_render_for_entry(created["skill_id"], entry)
-    assert result == {"kind": "bin", "bytes": b"fake-bin-bytes"}
+    # preview is None here because the fake bin isn't a valid packed length --
+    # preview generation is best-effort and must not fail the render.
+    assert result == {"kind": "bin", "bytes": b"fake-bin-bytes", "preview": None}
     assert not os.path.exists(captured_run_dir["path"])  # cleaned up after
+
+
+async def test_text_render_builds_preview_png_from_valid_bin(
+    hass, skill_manager, make_frame_entry, monkeypatch,
+    mock_script_download,
+):
+    """A correctly-sized bin yields a PNG preview so the frame's last-image
+    thumbnail survives a text-skill (xOTD) send instead of going blank."""
+    entry = make_frame_entry(entry_id="e1")  # 1200x1600 default
+    entry.add_to_hass(hass)
+    await skill_manager.async_load()
+    created = await skill_manager.async_save_skill("Custom Word", "word", {"word_feed": "custom"})
+
+    async def _fake_exec(*args, **kwargs):
+        config_path = args[4]
+        run_dir = os.path.dirname(config_path)
+        with open(os.path.join(run_dir, "xotd.bin"), "wb") as f:
+            f.write(bytes((1200 * 1600) // 2))  # valid length, all-black
+        return _FakeProcess(returncode=0)
+
+    monkeypatch.setattr("custom_components.fraimic.skills.asyncio.create_subprocess_exec", _fake_exec)
+
+    result = await skill_manager.async_render_for_entry(created["skill_id"], entry)
+    assert result["kind"] == "bin"
+    assert result["preview"] is not None
+    assert result["preview"][:8] == b"\x89PNG\r\n\x1a\n"
 
 
 async def test_text_render_nonzero_exit_raises_skill_error(

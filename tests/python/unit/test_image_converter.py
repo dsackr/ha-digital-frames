@@ -138,3 +138,38 @@ def test_quantized_pixels_are_restricted_to_spectra6_palette(sample_image_bytes)
     quantized = _quantize_to_spectra6(img.convert("RGB"))
     pixels = set(quantized.getdata())
     assert pixels.issubset(set(SPECTRA6_REAL_WORLD_RGB))
+
+
+# ---------------------------------------------------------------------------
+# Unpacking (bin -> preview) -- the reverse path used to build a last-image
+# thumbnail for sends that only ever see packed bytes (text-skill renders).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("width,height", [OFFICIAL_13_3, CLONE_7_3])
+def test_unpack_round_trips_packed_bin(sample_image_bytes, width, height):
+    from custom_components.fraimic.image_converter import (
+        _open_as_rgb,
+        _pack_to_spectra6_bin,
+        unpack_spectra6_bin,
+    )
+
+    quantized = _quantize_to_spectra6(_open_as_rgb(sample_image_bytes(400, 300)).resize((width, height)))
+    packed = _pack_to_spectra6_bin(quantized)
+    unpacked = unpack_spectra6_bin(packed, width, height)
+    assert unpacked.size == (width, height)
+    assert list(unpacked.getdata()) == list(quantized.getdata())
+
+
+def test_unpack_rejects_wrong_length():
+    from custom_components.fraimic.image_converter import unpack_spectra6_bin
+
+    with pytest.raises(ValueError, match="expected"):
+        unpack_spectra6_bin(b"too-short", 1200, 1600)
+
+
+def test_preview_png_from_bin_is_png():
+    from custom_components.fraimic.image_converter import preview_png_from_bin
+
+    png = preview_png_from_bin(bytes((800 * 480) // 2), 800, 480)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"

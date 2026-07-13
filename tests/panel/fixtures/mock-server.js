@@ -9,7 +9,9 @@ const http = require('http');
 const fs = require('fs');
 
 const PANEL_JS_PATH = path.join(__dirname, '..', '..', '..', 'custom_components', 'fraimic', 'fraimic-panel.js');
+const CARD_JS_PATH = path.join(__dirname, '..', '..', '..', 'custom_components', 'fraimic', 'fraimic-card.js');
 const HARNESS_HTML_PATH = path.join(__dirname, 'harness.html');
+const CARD_HARNESS_HTML_PATH = path.join(__dirname, 'card-harness.html');
 const TINY_PNG = fs.readFileSync(path.join(__dirname, 'tiny.png'));
 
 function json(res, status, body) {
@@ -108,6 +110,8 @@ function createMockServer({
   const sends = []; // { entity_id, image_id, packer } per /library/send POST
   const rawSends = []; // { entity_id, has_image } per /send_image POST
   const installCalls = []; // { pack_id, config } per /scene_packs/:id/install POST
+  const cropSaves = []; // { image_id, width, height, crop_box } per /library/crop POST
+  const cropDeletes = []; // { image_id, width, height } per /library/crop DELETE
 
   // --- Embedded config/options flow state machine -----------------------
   // Mirrors FraimicConfigFlow's real step graph (user → pick_device →
@@ -203,9 +207,19 @@ function createMockServer({
       fs.createReadStream(PANEL_JS_PATH).pipe(res);
       return;
     }
+    if (p === '/fraimic-card.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      fs.createReadStream(CARD_JS_PATH).pipe(res);
+      return;
+    }
     if (p === '/' || p === '/harness.html') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       fs.createReadStream(HARNESS_HTML_PATH).pipe(res);
+      return;
+    }
+    if (p === '/card-harness.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      fs.createReadStream(CARD_HARNESS_HTML_PATH).pipe(res);
       return;
     }
 
@@ -303,8 +317,40 @@ function createMockServer({
       return json(res, 200, { success: true, pack_id: installMatch[1], type: 'widget' });
     }
 
+    if (p === '/api/fraimic/library/crop') {
+      // Mirrors FraimicLibraryCropView: save/clear a crop rect keyed by
+      // effective resolution, returning the updated image record.
+      const parsed = await readJsonBody(req);
+      const image = images.find((img) => img.image_id === parsed.image_id);
+      if (!image) return json(res, 404, { message: `Image '${parsed.image_id}' not found` });
+      image.crops = image.crops || {};
+      const key = `${parsed.width}x${parsed.height}`;
+      if (req.method === 'POST') {
+        cropSaves.push({ image_id: parsed.image_id, width: parsed.width, height: parsed.height, crop_box: parsed.crop_box });
+        image.crops[key] = parsed.crop_box;
+      } else if (req.method === 'DELETE') {
+        cropDeletes.push({ image_id: parsed.image_id, width: parsed.width, height: parsed.height });
+        delete image.crops[key];
+      }
+      return json(res, 200, { success: true, image });
+    }
+
     if (p.startsWith('/api/fraimic/library/image/')) {
       res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(TINY_PNG);
+      return;
+    }
+
+    if (p.match(/^\/api\/fraimic\/frame\/[^/]+\/thumbnail$/)) {
+      // The frame's own render preview (uploads, xOTD/skill text renders) --
+      // ETag'd like the real FraimicFrameThumbnailView.
+      const etag = '"tiny-png"';
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { ETag: etag });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'image/png', ETag: etag });
       res.end(TINY_PNG);
       return;
     }
@@ -514,6 +560,8 @@ function createMockServer({
     sends,
     rawSends,
     installCalls,
+    cropSaves,
+    cropDeletes,
     flowSubmissions,
     flowDeletes,
     entryDeletes,

@@ -541,11 +541,12 @@ class SkillManager:
     ) -> dict[str, Any]:
         """Render *skill_id* for *entry*'s resolution/layout.
 
-        Returns {"kind": "bin", "bytes": ...} for text modes or
-        {"kind": "image_id", "image_id": ...} for image sub-modes. Raises
-        SkillError on any failure -- callers (SceneManager.async_send_mappings)
-        catch this and turn it into a per-mapping failure, exactly like any
-        other resolution error (e.g. a deleted library image).
+        Returns {"kind": "bin", "bytes": ..., "preview": png_bytes|None} for
+        text modes or {"kind": "image_id", "image_id": ...} for image
+        sub-modes. Raises SkillError on any failure -- callers
+        (SceneManager.async_send_mappings) catch this and turn it into a
+        per-mapping failure, exactly like any other resolution error (e.g. a
+        deleted library image).
         """
         skill = self._skills.get(skill_id)
         if skill is None:
@@ -559,4 +560,26 @@ class SkillManager:
             return {"kind": "image_id", "image_id": image_id}
 
         bin_bytes = await self._async_render_text(skill, entry)
-        return {"kind": "bin", "bytes": bin_bytes}
+
+        # Decode a small preview PNG out of the packed bin so the send path
+        # can record it as the frame's "last image" (coordinator
+        # last_thumbnail) -- a text render has no library image_id, and
+        # without a preview the frame's thumbnail state would go blank after
+        # every xOTD send. Best-effort: a preview failure must never fail
+        # the send itself.
+        preview: bytes | None = None
+        try:
+            from .helpers import render_spec_for_entry  # noqa: PLC0415
+            from .image_converter import preview_png_from_bin  # noqa: PLC0415
+
+            spec = render_spec_for_entry(entry)
+            preview = await self.hass.async_add_executor_job(
+                preview_png_from_bin, bin_bytes, spec.width, spec.height
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug(
+                "Could not build preview for skill '%s' render: %s",
+                skill.name,
+                err,
+            )
+        return {"kind": "bin", "bytes": bin_bytes, "preview": preview}

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>fraimic-card test harness</title></head>
+<body style="margin:0;padding:0;background:#fafafa;">
+  <!-- The card is mounted per-test via __mountCard so each spec controls
+       config + hass ordering exactly like Lovelace does (setConfig first,
+       then the hass setter on every state change). -->
+  <div id="mount" style="max-width:360px;margin:20px;"></div>
+  <script src="/fraimic-card.js"></script>
+  <script>
+    // A faithful-enough stand-in for the `hass` object Lovelace injects
+    // into every card: states + entity registry slice (getStubConfig
+    // filters battery sensors by platform), auth token for the card's
+    // fetch calls, and a callService recorder for orientation assertions.
+    window.__buildMockHass = function (frames) {
+      const states = {};
+      const entities = {};
+      for (const f of frames) {
+        const batteryId = `sensor.${f.entry_id}_battery`;
+        const orientationId = `select.${f.entry_id}_orientation`;
+        states[batteryId] = { state: '90', attributes: { friendly_name: (f.title || 'Frame') + ' Battery' } };
+        states[orientationId] = { state: 'Portrait', attributes: { options: ['Auto', 'Portrait', 'Landscape'] } };
+        entities[batteryId] = { platform: 'fraimic' };
+        entities[orientationId] = { platform: 'fraimic' };
+      }
+      window.__serviceCalls = [];
+      return {
+        auth: { data: { access_token: 'test-token' } },
+        states,
+        entities,
+        user: { is_admin: true },
+        callService: async (domain, service, data) => {
+          window.__serviceCalls.push({ domain, service, data });
+        },
+      };
+    };
+
+    window.__mountCard = function (config, frames) {
+      const existing = document.getElementById('card');
+      if (existing) existing.remove();
+      const card = document.createElement('fraimic-card');
+      card.id = 'card';
+      card.setConfig(config);
+      card.hass = window.__buildMockHass(frames);
+      document.getElementById('mount').appendChild(card);
+      return true;
+    };
+
+    window.__mountEditor = function (config, frames) {
+      const existing = document.getElementById('editor');
+      if (existing) existing.remove();
+      window.__editorConfigs = [];
+      const editor = document.createElement('fraimic-card-editor');
+      editor.id = 'editor';
+      editor.addEventListener('config-changed', (e) => {
+        window.__editorConfigs.push(e.detail.config);
+      });
+      editor.setConfig(config);
+      editor.hass = window.__buildMockHass(frames);
+      document.getElementById('mount').appendChild(editor);
+      return true;
+    };
+  </script>
+</body>
+</html>

@@ -2777,6 +2777,10 @@
                      file choosers are unreliable with multi-MIME lists. -->
                 <button class="btn-ghost" id="wall-picker-upload-btn" style="flex:1 1 auto">⬆ Upload a photo…</button>
                 <input type="file" id="wall-picker-upload-input" accept="image/*" style="display:none">
+                <!-- Crop targets the staged library pick, or failing that
+                     whatever library image is on the frame now -- uploads
+                     and skills have no library original to re-crop. -->
+                <button class="btn-ghost" id="wall-picker-crop-btn" style="flex:1 1 auto" disabled>✂ Adjust Crop</button>
                 <button class="btn-ghost" id="wall-image-picker-clear" style="flex:1 1 auto">✕ Remove Image</button>
               </div>
               <div class="image-picker-grid" id="wall-image-picker-grid"></div>
@@ -5238,8 +5242,10 @@
 
     // Open the editor for a library image. Defaults to whichever frame
     // already has a saved crop for its effective resolution (if any), loads
-    // the full image, then renders.
-    async _openEditor(image) {
+    // the full image, then renders. presetFrameEntityId (optional) pins the
+    // initial target instead -- used when arriving from a specific frame's
+    // wall picker, where "this frame" is the only target that makes sense.
+    async _openEditor(image, presetFrameEntityId = null) {
       const frames = this._editorFrames();
 
       // Default to whichever frame or orientation already has a saved crop.
@@ -5256,6 +5262,10 @@
           initialVal = frame.entityId;
           break;
         }
+      }
+
+      if (presetFrameEntityId && frames.some(f => f.entityId === presetFrameEntityId)) {
+        initialVal = presetFrameEntityId;
       }
 
       this._editorState = {
@@ -7166,6 +7176,8 @@
         .addEventListener('click', () => this._sendFromWallPicker());
       this.shadowRoot.getElementById('wall-picker-schedule-btn')
         .addEventListener('click', () => this._scheduleFromWallPicker());
+      this.shadowRoot.getElementById('wall-picker-crop-btn')
+        .addEventListener('click', () => this._cropFromWallPicker());
 
       this._wireWallImagePickerDrag();
     }
@@ -7432,11 +7444,23 @@
     _updateWallPickerSendButton() {
       const btn = this.shadowRoot.getElementById('wall-picker-send-btn');
       const schedBtn = this.shadowRoot.getElementById('wall-picker-schedule-btn');
+      const cropBtn = this.shadowRoot.getElementById('wall-picker-crop-btn');
       const entryId = this._wallImagePickerEntryId;
       const frame = entryId && this._frames.find(f => f.entryId === entryId);
       const mapping = frame ? this._wallEffectiveMapping(entryId) : null;
       const isSkillMapping = !!mapping && typeof mapping === 'object' && mapping.type === 'skill';
       const imageId = isSkillMapping ? null : mapping;
+
+      // Crop needs a library original: the staged library pick, or the
+      // library image already on the frame. A staged upload or skill has
+      // nothing in the library to re-crop.
+      const cropTargetId = this._wallPickerSelectedFile
+        ? null
+        : (imageId || (frame && frame.lastImageId) || null);
+      cropBtn.disabled = !frame || !cropTargetId;
+      cropBtn.title = cropTargetId
+        ? 'Adjust how this photo is cropped for this frame'
+        : 'Crop needs a library photo (staged here or already on the frame)';
       // A skill has no library image_id -- it can't be sent from this
       // instant button or scheduled through the image-picker path; use the
       // Daily Content tab's own "Send Now", Save Scene + Send, or the
@@ -7522,6 +7546,41 @@
       this.shadowRoot.getElementById('wall-image-picker-overlay').style.display = 'none';
       this._wallImagePickerEntryId = null;
       this._wallPickerSelectedFile = null;
+    }
+
+    // "✂ Adjust Crop": hand the staged (or on-frame) library image to the
+    // Library crop editor, pre-targeted at this frame -- same editor, same
+    // saved-crop keys, so a crop adjusted from the wall behaves exactly
+    // like one adjusted from the Library shelf. The editor's own "Send to
+    // Canvas" then re-sends with the new framing.
+    async _cropFromWallPicker() {
+      const entryId = this._wallImagePickerEntryId;
+      const frame = entryId && this._frames.find(f => f.entryId === entryId);
+      if (!frame) return;
+      const mapping = this._wallEffectiveMapping(entryId);
+      const imageId = (typeof mapping === 'string' && mapping) || frame.lastImageId;
+      if (!imageId) return;
+
+      // The editor needs the full library record (saved crops, filename) --
+      // the picker grid may have been album-filtered past it, so fall back
+      // to a fresh list fetch.
+      let image = (this._library || []).find(i => i.image_id === imageId);
+      if (!image) {
+        try {
+          const resp = await fetch('/api/fraimic/library/list', { headers: this._authHeaders() });
+          const result = await resp.json();
+          image = (result.images || []).find(i => i.image_id === imageId);
+        } catch (_) { /* handled below */ }
+      }
+      const fb = this.shadowRoot.getElementById('wall-image-picker-fb');
+      if (!image) {
+        fb.className = 'feedback err';
+        fb.textContent = 'This image is no longer in the library, so its crop can\'t be adjusted.';
+        fb.style.display = 'block';
+        return;
+      }
+      this._closeWallImagePicker();
+      await this._openEditor(image, frame.entityId);
     }
 
     // "Create New…" (no active scene) prompts for a name and creates one;

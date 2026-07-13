@@ -233,7 +233,11 @@ class _FakeSkillManager:
             raise Exception("render blew up")
         if skill_id == "image-skill":
             return {"kind": "image_id", "image_id": "resolved-image"}
-        return {"kind": "bin", "bytes": f"bin-for-{skill_id}".encode()}
+        return {
+            "kind": "bin",
+            "bytes": f"bin-for-{skill_id}".encode(),
+            "preview": f"preview-for-{skill_id}".encode(),
+        }
 
 
 async def test_send_mappings_skill_bin_kind_sent_without_image_id(
@@ -245,7 +249,7 @@ async def test_send_mappings_skill_bin_kind_sent_without_image_id(
     sent_calls = []
 
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
-        sent_calls.append((image_bytes, image_id))
+        sent_calls.append((image_bytes, image_id, thumbnail))
         return {"success": True, "queued": False}
 
     from custom_components.fraimic.coordinator import FraimicCoordinator
@@ -256,7 +260,11 @@ async def test_send_mappings_skill_bin_kind_sent_without_image_id(
     result = await scene_manager.async_send_mappings(hass, mappings)
 
     assert result["results"] == [{"entry_id": entries[0].entry_id, "success": True}]
-    assert sent_calls == [(b"bin-for-word_of_the_day", None)]
+    # The renderer's preview must ride along as the thumbnail so the frame's
+    # last-image state survives a text-skill send (it has no image_id).
+    assert sent_calls == [
+        (b"bin-for-word_of_the_day", None, b"preview-for-word_of_the_day")
+    ]
 
 
 async def test_send_mappings_skill_image_kind_routes_through_library(

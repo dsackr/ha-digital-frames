@@ -540,6 +540,9 @@ class FraimicFramesView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        registry = er.async_get(hass)
         frames = []
         for entry in hass.config_entries.async_entries(DOMAIN):
             width = entry.data.get(CONF_WIDTH)
@@ -548,6 +551,20 @@ class FraimicFramesView(HomeAssistantView):
                 frame_type = FRAME_TYPES.get(entry.data.get(CONF_SIZE))
                 spec = render_spec_for_entry(entry)
                 coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+                # The frame's own entity_ids, resolved server-side so
+                # non-admin clients (the Lovelace card) don't need the
+                # admin-only entity-registry WS commands the panel uses:
+                # battery is the entity_id every send endpoint takes, and
+                # the orientation select is what orientation changes target.
+                battery_entity_id = None
+                orientation_entity_id = None
+                for reg_entry in er.async_entries_for_config_entry(
+                    registry, entry.entry_id
+                ):
+                    if reg_entry.unique_id == f"{entry.entry_id}_battery":
+                        battery_entity_id = reg_entry.entity_id
+                    elif reg_entry.unique_id == f"{entry.entry_id}_orientation":
+                        orientation_entity_id = reg_entry.entity_id
                 frames.append(
                     {
                         "entry_id": entry.entry_id,
@@ -567,6 +584,15 @@ class FraimicFramesView(HomeAssistantView):
                         "host": entry.data.get(CONF_HOST),
                         "origin": frame_type.origin if frame_type else None,
                         "platform": frame_type.platform if frame_type else None,
+                        "battery_entity_id": battery_entity_id,
+                        "orientation_entity_id": orientation_entity_id,
+                        # Whether the last poll reached the frame -- what
+                        # drives entity availability, exposed here so the
+                        # card can show online/offline without registry
+                        # access.
+                        "online": bool(
+                            getattr(coordinator, "last_update_success", False)
+                        ),
                         # Library image_id of the last Library/Scene send to
                         # this frame -- UI-only preview hint, not persisted
                         # (see FraimicCoordinator.last_image_id). None until

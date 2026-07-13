@@ -640,6 +640,78 @@ def _process(
     return _pack_to_spectra6_bin(image), image
 
 
+# ---------------------------------------------------------------------------
+# Unpacking (bin → preview) -- the reverse of the packers above, used to give
+# send paths that only ever see packed bytes (the xOTD/skill text renderer,
+# whose pinned subprocess emits xotd.bin directly) a UI preview of what went
+# to the frame. Without this, a text-skill send has neither a library
+# image_id nor a thumbnail, and the frame's "last image" state goes blank.
+# ---------------------------------------------------------------------------
+
+# hardware nibble value → palette index (SPECTRA6_NIBBLE_VALUES inverted).
+# Unknown nibbles (4, 7-15) map to white so a corrupt byte degrades visibly
+# but harmlessly instead of raising.
+_NIBBLE_TO_INDEX = bytes(
+    SPECTRA6_NIBBLE_VALUES.index(n) if n in SPECTRA6_NIBBLE_VALUES else 1
+    for n in range(16)
+)
+# byte → palette index of its high/low nibble, for bytes.translate (C speed).
+_HI_NIBBLE_INDEX = bytes(_NIBBLE_TO_INDEX[b >> 4] for b in range(256))
+_LO_NIBBLE_INDEX = bytes(_NIBBLE_TO_INDEX[b & 0xF] for b in range(256))
+
+
+def _unpack_nibble_pairs(packed: bytes) -> bytes:
+    """Expand nibble-packed bytes into one palette-index byte per pixel."""
+    out = bytearray(len(packed) * 2)
+    out[0::2] = packed.translate(_HI_NIBBLE_INDEX)
+    out[1::2] = packed.translate(_LO_NIBBLE_INDEX)
+    return bytes(out)
+
+
+def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Image":
+    """
+    Decode a packed Spectra 6 ``.bin`` back into an RGB image -- the inverse
+    of :func:`_pack_to_spectra6_bin` for a *width* × *height* panel. The byte
+    layout is looked up like the packers do; an unregistered resolution
+    falls back to split-half, matching the renderer fallback in
+    skills.SkillManager._async_render_text.
+
+    :raises ValueError: If *bin_bytes* isn't exactly ``width*height//2`` long.
+    """
+    expected = (width * height) // 2
+    if len(bin_bytes) != expected:
+        raise ValueError(
+            f"bin is {len(bin_bytes)} bytes, expected {expected} for {width}x{height}"
+        )
+    try:
+        layout = byte_layout_for_resolution(width, height)
+    except ValueError:
+        layout = LAYOUT_SPLIT_HALF
+
+    indices = _unpack_nibble_pairs(bin_bytes)
+
+    if layout == LAYOUT_SPLIT_HALF:
+        # left-half rows first, then right-half rows -- re-interleave.
+        half = width // 2
+        left = indices[: half * height]
+        right = indices[half * height :]
+        rows = bytearray(width * height)
+        for y in range(height):
+            rows[y * width : y * width + half] = left[y * half : (y + 1) * half]
+            rows[y * width + half : (y + 1) * width] = right[y * half : (y + 1) * half]
+        indices = bytes(rows)
+
+    image = Image.frombytes("P", (width, height), indices)
+    image.putpalette(_build_palette_image().getpalette())
+    return image.convert("RGB")
+
+
+def preview_png_from_bin(bin_bytes: bytes, width: int, height: int) -> bytes:
+    """Small PNG preview of a packed ``.bin`` (see :func:`unpack_spectra6_bin`
+    and :func:`_encode_preview_png`)."""
+    return _encode_preview_png(unpack_spectra6_bin(bin_bytes, width, height))
+
+
 def convert_image_cropped(
     image_path: str,
     width: int,
