@@ -74,6 +74,7 @@ The default bump is `patch`. Put the exact-case token BUMPMINOR or BUMPMAJOR in 
 ## Pull requests
 
 - Keep PRs focused — one feature or fix per PR
+- **Definition of done for feature work** (binding, human or AI — see [AGENTS.md](AGENTS.md)): any change to user-facing behavior must ship in the same PR with (1) a new or amended entry in [docs/KEY_PRODUCT_FLOWS.md](docs/KEY_PRODUCT_FLOWS.md), including an accurate Test status line, and (2) the tests that entry claims — pytest under `tests/python/` and/or Playwright under `tests/panel/`
 - Test on real hardware before submitting; internally-consistent code that doesn't work on the frame is not useful
 - `fraimic-panel.js` is intentionally vanilla JS with no build step — keep it that way
 - If you're changing the bin conversion format, include before/after photos of the frame output

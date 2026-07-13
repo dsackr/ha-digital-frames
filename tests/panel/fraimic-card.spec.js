@@ -176,6 +176,34 @@ test.describe('Fraimic card', () => {
     ]);
   });
 
+  test('uploading a photo stages it, and Send posts multipart to send_image', async ({ page }) => {
+    await start({ frames: FRAMES });
+    await mountCard(page, baseUrl, { entry_id: 'entry_1' }, FRAMES);
+    await page.waitForFunction(
+      () => document.getElementById('card').shadowRoot.getElementById('frameName').textContent === 'Living Room Frame'
+    );
+
+    await page.setInputFiles('#card input[type="file"]', {
+      name: 'holiday.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    });
+
+    await page.waitForFunction(
+      () => document.getElementById('card').shadowRoot.getElementById('actions').style.display === 'flex'
+    );
+    expect((await cardQ(page, 'badge')).text).toBe('PREVIEW');
+    expect(mockServer.rawSends).toEqual([]);
+
+    await page.evaluate(() => document.getElementById('card').shadowRoot.getElementById('btnSend').click());
+    await page.waitForFunction(() =>
+      document.getElementById('card').shadowRoot.getElementById('feedback').textContent.includes('Sent')
+    );
+    expect(mockServer.rawSends).toEqual([
+      { entity_id: 'sensor.entry_1_battery', has_image: true },
+    ]);
+  });
+
   test('picking a daily skill and sending posts to skills/:id/send with the entry_id', async ({ page }) => {
     await start({ frames: FRAMES, skills: SKILLS });
     await mountCard(page, baseUrl, { entry_id: 'entry_1' }, FRAMES);
