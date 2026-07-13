@@ -14,6 +14,9 @@ htmlcov/
 # tests/panel (Playwright)
 tests/panel/node_modules/
 tests/panel/test-results/
+# ...and the stray root-level dir Playwright creates when run from the
+# wrong cwd. Durable results live in docs/TEST_LEDGER.md, not here.
+/test-results/
 tests/panel/playwright-report/
 tests/panel/blob-report/
 tests/panel/playwright/.cache/
@@ -24,3 +27,4 @@ scratchpad-capture/
 
 # HA long-lived access token(s) — never commit
 ha.cred
+*.cred

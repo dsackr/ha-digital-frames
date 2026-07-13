@@ -2,7 +2,8 @@
 """Post-release KPF smoke test -- run by hand against a real, running Home
 Assistant instance after a release (see TESTING_STRATEGY.md section 4).
 
-Exercises the REST-shaped KPFs (frames, scenes, library, walls, schedules)
+Exercises the REST-shaped KPFs (frames, scenes, library, walls, schedules,
+skills, and the card-facing frame fields)
 read-only, so it's safe to run repeatedly without pushing anything to a
 physical frame -- image-quality/rotation checks on real hardware stay a
 manual checklist item (see TESTING_STRATEGY.md), since those need eyeballing
@@ -31,16 +32,35 @@ import sys
 import urllib.error
 import urllib.request
 
+def _frames_have_card_fields(collection: list) -> str | None:
+    """Every frame must carry the fields the Lovelace card depends on
+    (KPF 29): entity ids resolved server-side + online status. Returns an
+    error string, or None when the shape is right."""
+    for frame in collection:
+        missing = [
+            k for k in ("battery_entity_id", "orientation_entity_id", "online")
+            if k not in frame
+        ]
+        if missing:
+            return (
+                f"frame {frame.get('entry_id', '?')} missing {missing} -- "
+                "is the deployed integration older than the card rework?"
+            )
+    return None
+
+
 CHECKS = [
     # (label, path, top-level key holding the list if the response wraps
     # one -- e.g. {"frames": [...]} -- or None if the body itself is a
-    # list/dict with no wrapper).
-    ("Base API reachable", "/api/", None),
-    ("Frames list (KPF 3/25: setup + coordinator)", "/api/fraimic/frames", "frames"),
-    ("Scenes list (KPF 16)", "/api/fraimic/scenes", "scenes"),
-    ("Library list (KPF 8)", "/api/fraimic/library/list", None),
-    ("Walls list (KPF 19)", "/api/fraimic/walls", None),
-    ("Schedules list (KPF 20)", "/api/fraimic/schedules", None),
+    # list/dict with no wrapper, optional per-collection validator).
+    ("Base API reachable", "/api/", None, None),
+    ("Frames list (KPF 3/25: setup + coordinator)", "/api/fraimic/frames", "frames", None),
+    ("Frames expose card fields (KPF 29)", "/api/fraimic/frames", "frames", _frames_have_card_fields),
+    ("Scenes list (KPF 16)", "/api/fraimic/scenes", "scenes", None),
+    ("Library list (KPF 8)", "/api/fraimic/library/list", None, None),
+    ("Walls list (KPF 19)", "/api/fraimic/walls", None, None),
+    ("Schedules list (KPF 20)", "/api/fraimic/schedules", None, None),
+    ("Skills list (KPF 28)", "/api/fraimic/skills", "skills", None),
 ]
 
 
@@ -79,7 +99,7 @@ def main() -> int:
         return 2
 
     failures = 0
-    for label, path, wrapper_key in CHECKS:
+    for label, path, wrapper_key, validator in CHECKS:
         status, data, err = _get(base_url, token, path)
         if err is not None:
             print(f"FAIL  {label} ({path}): {err}")
@@ -99,6 +119,13 @@ def main() -> int:
             print(f"FAIL  {label} ({path}): expected a \"{wrapper_key}\" list in the response")
             failures += 1
             continue
+
+        if validator is not None:
+            problem = validator(collection)
+            if problem:
+                print(f"FAIL  {label} ({path}): {problem}")
+                failures += 1
+                continue
 
         count = len(collection) if isinstance(collection, (list, dict)) else "n/a"
         print(f"PASS  {label} ({path}) -- {count} item(s)")

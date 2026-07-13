@@ -41,6 +41,12 @@ every time backend coverage comes up.
 
 ## 3. Where test results live
 
+- **Durable in-repo record**: [docs/TEST_LEDGER.md](docs/TEST_LEDGER.md) —
+  an append-only ledger of suite runs on `main`. Both test workflows
+  append a row (date, commit, suite, result, counts, coverage) on every
+  push run, committed back with `[skip ci]`; failures are recorded too.
+  Manually-run suites for changes CI's path filters won't cover get a
+  `local` row appended by hand (see AGENTS.md).
 - **CI**: `.github/workflows/python-tests.yaml` runs the backend suite on
   every push/PR touching `custom_components/fraimic/**.py` or
   `tests/python/**`, writes a coverage summary to the GitHub Actions job

@@ -5,6 +5,11 @@ name: Backend Python tests
 # and TESTING_STRATEGY.md for what's covered and what isn't yet. Scoped to
 # changes under the backend package or the test suite itself, same pattern
 # as panel-tests.yaml for the frontend.
+#
+# On pushes to main, the outcome is also appended to docs/TEST_LEDGER.md
+# (the durable in-repo record) -- see that file's header. The record
+# commit carries [skip ci] so it never triggers another round of
+# workflows.
 
 on:
   push:
@@ -25,6 +30,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ledger record commit (push runs only)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,12 +39,13 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements-test.txt
       - name: Run tests with coverage
+        shell: bash
         run: |
           python -m pytest tests/python/ \
             --cov=custom_components.fraimic \
             --cov-report=term-missing \
             --cov-report=html \
-            --cov-report=xml
+            --cov-report=xml | tee pytest-output.txt
       - name: Publish coverage summary to the job summary
         if: always()
         run: |
@@ -52,3 +60,35 @@ jobs:
           name: coverage-html
           path: htmlcov/
           retention-days: 30
+      - name: Record result in the test ledger
+        # always(): a failed run is exactly what the ledger must not lose.
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          detail=$(grep -E '^=+ .*(passed|failed|error).* =+$' pytest-output.txt | tail -1 | tr -d '=' | xargs || echo 'no summary captured')
+          coverage=$(python -m coverage report --format=total 2>/dev/null || echo '?')
+          row="| $(date -u +%F) | ${GITHUB_SHA::7} | backend-pytest | ${JOB_STATUS} | ${detail} | ${coverage}% | CI |"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Re-fetch + re-append per attempt (never rebase a stale append):
+          # this step races the version-bump workflow and panel-tests' own
+          # record step, and two same-file-end appends never rebase
+          # cleanly.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git checkout -B main origin/main
+            printf '%s\n' "$row" >> docs/TEST_LEDGER.md
+            git add docs/TEST_LEDGER.md
+            git commit -m "Record backend-pytest result for ${GITHUB_SHA::7} [skip ci]"
+            if git push origin main; then
+              exit 0
+            fi
+            git reset --hard origin/main
+            sleep $((attempt * 3))
+          done
+          echo "::warning::could not record test-ledger row after 5 attempts"

@@ -59,5 +59,9 @@ it, the work is not done.
 
 - `docs/KEY_PRODUCT_FLOWS.md` — the KPF catalog (read it before changing
   behavior; your change almost certainly touches one).
+- `docs/TEST_LEDGER.md` — the durable, append-only record of test runs on
+  `main`. CI appends rows automatically on push; if you run a suite by hand
+  for a change that CI's path filters won't cover, append a `local` row
+  yourself. Never rewrite or delete existing rows.
 - `TESTING_STRATEGY.md` — the testing standard and phase/checkpoint tracker.
 - `CONTRIBUTING.md` — codebase layout and dev-environment setup.
