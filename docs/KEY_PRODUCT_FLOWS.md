@@ -289,10 +289,12 @@ every selected calendar.
 
 ## 19. Walls: virtual multi-frame layout (panel-local state)
 User arranges a subset of frames on a free-form canvas mirroring how
-they're physically hung; a default "All Frames" wall self-syncs with
+they're physically hung; custom walls and a default "All Frames" wall are
+selected via visual picker tiles, and the default wall self-syncs with
 configured frames.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
-  `async_ensure_default_wall`, `async_prune_entry`), `walls_http.py`.
+  `async_ensure_default_wall`, `async_prune_entry`), `walls_http.py`,
+  `fraimic-panel.js` (`_renderWallStrip`, `_openWall`).
 - **If it silently breaks**: removed/re-added frames haunt old layouts, or
   the default wall stops tracking newly-added frames.
 - **Test status**: Extensively panel-tested (`walls-drag.spec.js`,
