@@ -209,21 +209,21 @@ test.describe('Wall multi-select, group move, and align', () => {
     expect(await tilePos(page, 'entry_3')).toEqual({ x: 320, y: 60 });
   });
 
-  test('an align that would overlap is rejected with a message and nothing moves', async ({ page }) => {
+  test('an align that would overlap auto-spaces the frames instead of erroring', async ({ page }) => {
     // entry_1 (x=0) and entry_2 (x=160) share y=0: aligning left edges
-    // would stack them into each other.
+    // would stack them. Under the new auto-spacing rule, they align left (x=0)
+    // and space vertically (y=0 and y=160).
     await shiftClickTile(page, 'entry_1');
     await shiftClickTile(page, 'entry_2');
     await clickAlign(page, 'left');
 
     expect(await tilePos(page, 'entry_1')).toEqual({ x: 0, y: 0 });
-    expect(await tilePos(page, 'entry_2')).toEqual({ x: 160, y: 0 });
-    const fb = await page.evaluate(() => {
-      const el = document.getElementById('panel').shadowRoot.getElementById('wall-fb');
-      return { text: el.textContent, className: el.className };
-    });
-    expect(fb.className).toContain('err');
-    expect(fb.text).toContain('would overlap');
+    expect(await tilePos(page, 'entry_2')).toEqual({ x: 0, y: 160 });
+
+    await page.waitForTimeout(1200);
+    const saved = mockServer.walls.find((w) => w.wall_id === 'default');
+    expect(saved.placements.entry_1).toEqual({ x: 0, y: 0 });
+    expect(saved.placements.entry_2).toEqual({ x: 0, y: 160 });
   });
 
   test('Escape clears a multi-selection and hides the align toolbar', async ({ page }) => {
@@ -235,5 +235,36 @@ test.describe('Wall multi-select, group move, and align', () => {
       () => document.getElementById('panel').shadowRoot.getElementById('wall-align-toolbar').style.display
     );
     expect(display).toBe('none');
+  });
+
+  test('Align Wall to Grid lays out all frames to a clean structure', async ({ page }) => {
+    // Modify placements to be messy
+    await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      panel._wallPlacements = {
+        entry_1: { x: 50, y: 50 },
+        entry_2: { x: 300, y: 10 },
+        entry_3: { x: 10, y: 400 },
+      };
+      panel._renderWallCanvas();
+    });
+
+    // Click "Align Wall to Grid" button
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('wall-grid-align-btn').click();
+    });
+
+    // Expect entry_1 (x=50, y=50) -> (40, 40) (sorted first due to x=50 < x=300)
+    // entry_2 (x=300, y=10) -> (180, 40)
+    // entry_3 (x=10, y=400) -> (320, 40)
+    expect(await tilePos(page, 'entry_1')).toEqual({ x: 40, y: 40 });
+    expect(await tilePos(page, 'entry_2')).toEqual({ x: 180, y: 40 });
+    expect(await tilePos(page, 'entry_3')).toEqual({ x: 320, y: 40 });
+
+    await page.waitForTimeout(1200);
+    const saved = mockServer.walls.find((w) => w.wall_id === 'default');
+    expect(saved.placements.entry_1).toEqual({ x: 40, y: 40 });
+    expect(saved.placements.entry_2).toEqual({ x: 180, y: 40 });
+    expect(saved.placements.entry_3).toEqual({ x: 320, y: 40 });
   });
 });

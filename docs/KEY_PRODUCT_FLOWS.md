@@ -291,14 +291,19 @@ every selected calendar.
 User arranges a subset of frames on a free-form canvas mirroring how
 they're physically hung; custom walls and a default "All Frames" wall are
 selected via visual picker tiles, and the default wall self-syncs with
-configured frames.
+configured frames. An "Align Wall to Grid" option allows users to snap all
+placed frames on a wall to a clean structured layout. When aligning selected
+frames, if they would overlap each other, they are automatically spaced out
+along the other axis rather than producing a collision error.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
   `async_ensure_default_wall`, `async_prune_entry`), `walls_http.py`,
-  `fraimic-panel.js` (`_renderWallStrip`, `_openWall`).
-- **If it silently breaks**: removed/re-added frames haunt old layouts, or
-  the default wall stops tracking newly-added frames.
+  `fraimic-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`).
+- **If it silently breaks**: removed/re-added frames haunt old layouts,
+  the default wall stops tracking newly-added frames, or alignment features
+  produce layout overlaps or throw unexpected error banners.
 - **Test status**: Extensively panel-tested (`walls-drag.spec.js`,
-  `walls-default-and-collision.spec.js`, `walls-multiselect.spec.js`,
+  `walls-default-and-collision.spec.js`, `walls-multiselect.spec.js` — including
+  alignment auto-spacing and Align Wall to Grid logic,
   `walls-flow.spec.js`, `walls-scenes-merge.spec.js`,
   `walls-send-and-offwall.spec.js`, `walls-image-picker.spec.js`,
   `walls-addon-album-lock.spec.js`) — but these exercise the frontend

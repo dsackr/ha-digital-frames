@@ -2316,6 +2316,9 @@
             keys. A frame works the same whether it's on the wall or still in the
             palette — click it either way to choose its image.
           </p>
+          <div style="margin-bottom:12px">
+            <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
+          </div>
           <!-- Appears when 2+ tiles are selected (shift-click or a
                rubber-band drag on empty canvas). Alignment is to the
                selection's own extent -- outermost edge, or the bounding
@@ -5986,6 +5989,7 @@
       this.shadowRoot.getElementById('wall-delete-scene-btn').addEventListener('click', () => this._deleteWallScene());
       this.shadowRoot.getElementById('wall-send-btn').addEventListener('click', () => this._sendWallToFrames());
       this.shadowRoot.getElementById('wall-schedule-btn').addEventListener('click', () => this._scheduleFromWall());
+      this.shadowRoot.getElementById('wall-grid-align-btn').addEventListener('click', () => this._alignWallToGrid());
 
       // Rubber-band multi-select starts on the canvas background (tiles
       // handle their own pointerdown, so this only fires on empty space).
@@ -6103,7 +6107,8 @@
       const maxRight  = Math.max(...rects.map(r => r.x + r.w));
       const maxBottom = Math.max(...rects.map(r => r.y + r.h));
 
-      const targets = rects.map((r) => {
+      // Calculate normal alignment targets first
+      let targets = rects.map((r) => {
         let { x, y } = r;
         if (mode === 'top')    y = minY;
         if (mode === 'bottom') y = maxBottom - r.h;
@@ -6114,21 +6119,52 @@
         return { ...r, x, y };
       });
 
-      // Unlike a group translation, aligning changes relative positions --
-      // members can newly overlap each other, so check pairwise at the
-      // target positions as well as against every non-selected tile.
+      // Check for pairwise overlaps between the normally aligned targets
+      let hasOverlap = false;
       for (let i = 0; i < targets.length; i++) {
         for (let j = i + 1; j < targets.length; j++) {
           const a = targets[i], b = targets[j];
           if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
-            fb.className = 'feedback err';
-            fb.textContent = `Can't align: "${a.title}" and "${b.title}" would overlap. Space them out along the other axis first.`;
-            fb.style.display = 'block';
-            setTimeout(() => { fb.style.display = 'none'; }, 5000);
-            return;
+            hasOverlap = true;
+            break;
           }
         }
+        if (hasOverlap) break;
       }
+
+      // If they would overlap, recalculate targets using auto-spacing
+      if (hasOverlap) {
+        if (mode === 'left' || mode === 'center' || mode === 'right') {
+          const sorted = [...rects].sort((a, b) => (a.y + a.h / 2) - (b.y + b.h / 2));
+          const centerX = Math.round((minX + maxRight) / 2);
+          let currentY = minY;
+          targets = sorted.map((r) => {
+            let x = r.x;
+            if (mode === 'left')   x = minX;
+            if (mode === 'right')  x = maxRight - r.w;
+            if (mode === 'center') x = centerX - Math.round(r.w / 2);
+            const y = currentY;
+            currentY = y + r.h + 20; // 20px gap
+            return { ...r, x, y };
+          });
+        } else {
+          const sorted = [...rects].sort((a, b) => (a.x + a.w / 2) - (b.x + b.w / 2));
+          const centerY = Math.round((minY + maxBottom) / 2);
+          let currentX = minX;
+          targets = sorted.map((r) => {
+            let y = r.y;
+            if (mode === 'top')    y = minY;
+            if (mode === 'bottom') y = maxBottom - r.h;
+            if (mode === 'middle') y = centerY - Math.round(r.h / 2);
+            const x = currentX;
+            currentX = x + r.w + 20; // 20px gap
+            return { ...r, x, y };
+          });
+        }
+      }
+
+      // Check against non-selected tiles. Since they are auto-spaced,
+      // selected tiles will never overlap each other pairwise.
       for (const t of targets) {
         const neighbor = this._wallCollidingNeighbor(t.id, t.x, t.y, this._wallSelection);
         if (neighbor) {
@@ -6147,6 +6183,64 @@
         if (tileEl) {
           tileEl.style.left = `${t.x}px`;
           tileEl.style.top  = `${t.y}px`;
+        }
+      }
+      this._scheduleWallLayoutSave();
+    }
+
+    _alignWallToGrid() {
+      const entryIds = Object.keys(this._wallPlacements);
+      if (!entryIds.length) return;
+
+      const sorted = entryIds
+        .map(id => {
+          const pos = this._wallPlacements[id];
+          const frame = this._frames.find(f => f.entryId === id);
+          return { id, x: pos.x, y: pos.y, frame };
+        })
+        .filter(item => item.frame)
+        .sort((a, b) => {
+          if (Math.abs(a.y - b.y) > 40) {
+            return a.y - b.y;
+          }
+          return a.x - b.x;
+        });
+
+      const newPlacements = {};
+      const GRID = 20;
+      const MARGIN_LEFT = 40;
+      const MARGIN_TOP = 40;
+      const MAX_PER_ROW = 4;
+      const CELL_HEIGHT = 160;
+
+      sorted.forEach((item, index) => {
+        const row = Math.floor(index / MAX_PER_ROW);
+        const col = index % MAX_PER_ROW;
+        const y = MARGIN_TOP + row * CELL_HEIGHT;
+
+        let x = MARGIN_LEFT;
+        if (col > 0) {
+          let rightEdge = MARGIN_LEFT;
+          for (let i = index - col; i < index; i++) {
+            const prevId = sorted[i].id;
+            const prevPos = newPlacements[prevId];
+            const prevFrame = sorted[i].frame;
+            const prevDims = this._wallTileDims(prevFrame);
+            rightEdge = Math.max(rightEdge, prevPos.x + prevDims.width);
+          }
+          x = Math.ceil(rightEdge / GRID) * GRID + GRID;
+        }
+
+        newPlacements[item.id] = { x, y };
+      });
+
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      for (const [id, pos] of Object.entries(newPlacements)) {
+        this._wallPlacements[id] = pos;
+        const tileEl = this._wallTileEl(canvas, id);
+        if (tileEl) {
+          tileEl.style.left = `${pos.x}px`;
+          tileEl.style.top  = `${pos.y}px`;
         }
       }
       this._scheduleWallLayoutSave();
