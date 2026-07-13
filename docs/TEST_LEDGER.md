@@ -22,3 +22,4 @@ Notes on reading it:
 | 2026-07-12 | 7f34f0e | panel-playwright | pass | 132 passed | — | CI + local |
 | 2026-07-12 | 4489da6 | panel-playwright | pass | 133 passed | — | CI + local |
 | 2026-07-13 | 9520461 | panel-playwright | success | 133 passed | — | CI |
+| 2026-07-13 | 9520461 | backend-pytest | success | 253 passed in 66.99s (0:01:06) | 64% | CI |
