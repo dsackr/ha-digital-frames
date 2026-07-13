@@ -326,6 +326,8 @@
       gap: 8px;
       font-size: 13px;
       color: var(--secondary-text-color);
+      flex: 1;
+      min-width: 0;
     }
     .lib-backend select, .lib-card select {
       padding: 6px 8px;
@@ -1823,6 +1825,35 @@
       white-space: nowrap;
       max-width: 100%;
     }
+    @keyframes frame-sway {
+      0%   { transform: rotate(var(--base-rot,0deg)) translateY(0); }
+      25%  { transform: rotate(calc(var(--base-rot,0deg) - 1.5deg)) translateY(-2px); }
+      50%  { transform: rotate(calc(var(--base-rot,0deg) + 1.5deg)) translateY(-1px); }
+      75%  { transform: rotate(calc(var(--base-rot,0deg) - 0.8deg)) translateY(-2px); }
+      100% { transform: rotate(var(--base-rot,0deg)) translateY(0); }
+    }
+    .wall-pick-tile {
+      display:flex;flex-direction:column;align-items:center;gap:6px;
+      padding:8px 10px 10px;border-radius:10px;
+      border:1.5px solid var(--divider-color,#e2e8f0);
+      background:var(--secondary-background-color,#f8fafc);
+      cursor:pointer;flex-shrink:0;min-width:90px;
+      transition:border-color .15s,background .15s,box-shadow .15s;
+    }
+    .wall-pick-tile:hover { border-color:var(--primary-color,#03a9f4); background:var(--primary-background-color,#f0f9ff); box-shadow:0 2px 8px rgba(3,169,244,.15); }
+    .wall-pick-tile.active { border-color:var(--primary-color,#03a9f4); background:rgba(3,169,244,.08); box-shadow:0 2px 8px rgba(3,169,244,.18); }
+    .wall-pick-mini { width:80px;height:56px;border-radius:5px;position:relative;overflow:visible;flex-shrink:0;background-image:linear-gradient(180deg,#ede8db 0%,#f0ebe0 60%,#e8e2d4 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -1px 0 rgba(0,0,0,.06); }
+    .wall-pick-mini::after { content:'';position:absolute;bottom:0;left:0;right:0;height:5px;border-radius:0 0 5px 5px;background:#cfc8b8; }
+    .wall-pick-frame { position:absolute;border-radius:1px;box-shadow:0 0 0 1.5px #8a7a5a,0 0 0 2.5px #c4b48e,0 1px 3px rgba(0,0,0,.3);overflow:hidden;transform-origin:50% -12px;transform:rotate(var(--base-rot,0deg));transition:transform .2s ease; }
+    .wall-pick-frame::before { content:'';position:absolute;top:-4px;left:50%;transform:translateX(-50%);width:3px;height:3px;border-radius:50%;background:#8a7a5a;z-index:2; }
+    .wall-pick-tile:hover .wall-pick-frame { animation:frame-sway .55s ease-in-out forwards; }
+    .wall-pick-tile:hover .wall-pick-frame:nth-child(1) { animation-delay:0s; }
+    .wall-pick-tile:hover .wall-pick-frame:nth-child(2) { animation-delay:.07s; }
+    .wall-pick-tile:hover .wall-pick-frame:nth-child(3) { animation-delay:.14s; }
+    .wall-pick-tile:hover .wall-pick-frame:nth-child(4) { animation-delay:.05s; }
+    .wall-pick-name { font-size:12px;font-weight:500;color:var(--primary-text-color);white-space:nowrap; }
+    .wall-pick-tile.active .wall-pick-name { font-weight:600;color:var(--primary-color,#03a9f4); }
+    .wall-pick-count { font-size:10px;color:var(--secondary-text-color);margin-top:-4px;white-space:nowrap; }
     .discovery-banner .banner-add-btn {
       padding: 6px 14px;
       border-radius: 8px;
@@ -2264,8 +2295,8 @@
         <div class="discovery-banner" id="discovery-banner" style="display:none"></div>
         <div class="lib-toolbar">
           <div class="lib-backend">
-            <label for="wall-select">Wall:</label>
-            <select id="wall-select"><option value="">Untitled (unsaved)</option></select>
+            <span style="font-size:12px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;flex-shrink:0">Wall</span>
+            <div id="wall-strip" style="display:flex;gap:8px;overflow-x:auto;padding:4px 2px;scrollbar-width:none;flex:1;min-width:0"></div>
           </div>
           <div class="lib-toolbar-actions">
             <button class="btn-ghost" id="wall-new-btn" style="flex:0 0 auto">＋ New Wall</button>
@@ -5944,9 +5975,7 @@
       // No unsaved-changes guard: layout edits auto-save (debounced), so
       // switching walls never discards anything -- a pending save fires
       // with its own snapshot of the wall it belongs to.
-      this.shadowRoot.getElementById('wall-select').addEventListener('change', (e) => {
-        this._openWall(e.target.value || null);
-      });
+
       this.shadowRoot.getElementById('wall-new-btn').addEventListener('click', () => this._createWall());
       this.shadowRoot.getElementById('wall-delete-btn').addEventListener('click', () => this._deleteWall());
       this.shadowRoot.getElementById('wall-scene-select').addEventListener('change', (e) => {
@@ -6162,25 +6191,75 @@
     }
 
     _renderWallsSubview() {
-      const select = this.shadowRoot.getElementById('wall-select');
-      // Default wall always listed first; custom walls in creation order.
-      const walls = [...this._walls].sort((a, b) => {
-        if (a.kind === 'default') return -1;
-        if (b.kind === 'default') return 1;
-        return (a.created_at || 0) - (b.created_at || 0);
-      });
-      select.innerHTML = walls.length
-        ? walls.map(w => `<option value="${this._esc(w.wall_id)}">${this._esc(w.name)}</option>`).join('')
-        : '<option value="">Untitled (unsaved)</option>';
-      select.value = this._activeWallId || '';
+      this._renderWallStrip();
+      this._renderWallScenePicker();
+      this._renderWallCanvas();
+    }
 
-      // The default wall is permanent -- no delete affordance.
+    _renderWallStrip() {
+      const strip = this.shadowRoot.getElementById('wall-strip');
+      if (!strip) return;
+      strip.innerHTML = '';
+
+      const tileLayouts = {
+        0: [],
+        1: [{x:22,y:8,w:36,h:30,rot:0}],
+        2: [{x:8,y:10,w:26,h:30,rot:-1},{x:44,y:8,w:24,h:22,rot:1}],
+        3: [{x:4,y:10,w:22,h:28,rot:-1},{x:30,y:6,w:20,h:26,rot:0.5},{x:54,y:10,w:18,h:24,rot:-0.8}],
+        4: [{x:2,y:12,w:18,h:24,rot:-1.2},{x:23,y:8,w:16,h:22,rot:0.5},{x:42,y:10,w:18,h:26,rot:-0.5},{x:62,y:12,w:12,h:18,rot:1}],
+      };
+      const fills = [
+        'linear-gradient(135deg,#7ec8c8,#a8d8b0)',
+        'linear-gradient(135deg,#e8c4a0,#d4a0c0)',
+        'linear-gradient(135deg,#a0b8d8,#c8b0e8)',
+        'linear-gradient(135deg,#d8c0a0,#b8d0b0)',
+        'linear-gradient(135deg,#c8a0b8,#d0c8a0)',
+      ];
+
+      const sorted = [...this._walls].sort((a,b) => {
+        if (a.kind==='default') return -1;
+        if (b.kind==='default') return 1;
+        return (a.created_at||0)-(b.created_at||0);
+      });
+
+      sorted.forEach(wall => {
+        const isActive = wall.wall_id === this._activeWallId;
+        const frameCount = Object.keys(wall.placements || {}).length;
+        const layoutCount = Math.min(frameCount, 4);
+        const layout = tileLayouts[layoutCount] || tileLayouts[4];
+
+        const tile = document.createElement('div');
+        tile.className = 'wall-pick-tile' + (isActive ? ' active' : '');
+
+        const mini = document.createElement('div');
+        mini.className = 'wall-pick-mini';
+        layout.forEach((pos, i) => {
+          const fr = document.createElement('div');
+          fr.className = 'wall-pick-frame';
+          fr.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${pos.w}px;height:${pos.h}px;--base-rot:${pos.rot}deg;background:${fills[i%fills.length]}`;
+          mini.appendChild(fr);
+        });
+
+        const name = document.createElement('div');
+        name.className = 'wall-pick-name';
+        name.textContent = wall.name;
+
+        const count = document.createElement('div');
+        count.className = 'wall-pick-count';
+        count.textContent = `${frameCount} frame${frameCount!==1?'s':''}`;
+
+        tile.appendChild(mini);
+        tile.appendChild(name);
+        tile.appendChild(count);
+
+        tile.addEventListener('click', () => this._openWall(wall.wall_id));
+        strip.appendChild(tile);
+      });
+
+      // Keep delete button logic (was driven by select value)
       const active = this._activeWall();
       this.shadowRoot.getElementById('wall-delete-btn').style.display =
         (active && active.kind !== 'default') ? '' : 'none';
-
-      this._renderWallScenePicker();
-      this._renderWallCanvas();
     }
 
     _openWall(wallId) {

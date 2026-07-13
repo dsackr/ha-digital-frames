@@ -46,16 +46,18 @@ test.describe('Scenes tab is the wall canvas', () => {
 
     const state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const sel = root.getElementById('wall-select');
+      const tiles = [...root.querySelectorAll('#wall-strip .wall-pick-tile')];
+      const activeTile = root.querySelector('#wall-strip .wall-pick-tile.active');
+      const activeName = activeTile ? activeTile.querySelector('.wall-pick-name').textContent : null;
       return {
-        value: sel.value,
-        firstOption: sel.options[0].textContent,
-        optionValues: [...sel.options].map((o) => o.value),
+        activeName,
+        firstTileName: tiles[0] ? tiles[0].querySelector('.wall-pick-name').textContent : null,
+        tileNames: tiles.map(t => t.querySelector('.wall-pick-name').textContent),
       };
     });
-    expect(state.value).toBe('default');
-    expect(state.firstOption).toBe('All Frames');
-    expect(state.optionValues).toContain('wall_1');
+    expect(state.activeName).toBe('All Frames');
+    expect(state.firstTileName).toBe('All Frames');
+    expect(state.tileNames).toContain('Living Room');
   });
 
   test('the default wall places every frame, hides delete, and auto-saves drags', async ({ page }) => {
