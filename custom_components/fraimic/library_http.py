@@ -239,6 +239,40 @@ class FraimicLibraryImageAlbumsView(HomeAssistantView):
         return self.json({"success": True, "image": record})
 
 
+class FraimicLibraryImageVoiceNameView(HomeAssistantView):
+    """Update the voice name on one library image."""
+
+    url = "/api/fraimic/library/image/{image_id}/voice_name"
+    name = "api:fraimic:library:image:voice_name"
+    requires_auth = True
+
+    async def post(self, request: web.Request, image_id: str) -> web.Response:
+        hass = request.app["hass"]
+        manager = _get_manager(hass)
+
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON body: {err}", status_code=400)
+
+        voice_name = (body or {}).get("voice_name")
+        if voice_name is not None and not isinstance(voice_name, str):
+            return self.json_message("voice_name must be a string or null", status_code=400)
+
+        from .library import LibraryBackendError  # noqa: PLC0415
+
+        try:
+            record = await manager.async_set_image_voice_name(image_id, voice_name)
+        except LibraryBackendError as err:
+            return self.json_message(str(err), status_code=404)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to set voice name for %s: %s", image_id, err)
+            return self.json_message(f"Failed to set voice name: {err}", status_code=500)
+
+        return self.json({"success": True, "image": record})
+
+
+
 class FraimicLibrarySendView(HomeAssistantView):
     """Send an existing library image to a frame.
 

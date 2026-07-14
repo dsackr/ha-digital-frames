@@ -141,6 +141,8 @@ class LibraryImage:
     # Album tags this image belongs to. Not folders -- an image can carry
     # any number of these with no duplication of the underlying file.
     albums: list[str] = field(default_factory=lambda: [DEFAULT_ALBUM])
+    # User-defined voice name for voice control matching.
+    voice_name: str | None = None
 
     def has_resolution(self, width: int, height: int) -> bool:
         return [width, height] in self.resolutions
@@ -154,6 +156,7 @@ class LibraryImage:
             "resolutions": self.resolutions,
             "crops": self.crops,
             "albums": self.albums,
+            "voice_name": self.voice_name,
         }
 
     @classmethod
@@ -166,6 +169,7 @@ class LibraryImage:
             resolutions=data.get("resolutions", []),
             crops=data.get("crops", {}),
             albums=_normalize_albums(data.get("albums")),
+            voice_name=data.get("voice_name"),
         )
 
 
@@ -1617,6 +1621,18 @@ class LibraryManager:
         normalized = _normalize_albums(albums)
         await self._backend.async_update_image_fields(image_id, albums=normalized)
         record.albums = normalized
+        return record.to_dict()
+
+    async def async_set_image_voice_name(
+        self, image_id: str, voice_name: str | None
+    ) -> dict[str, Any]:
+        """Update the voice name of one image."""
+        record = await self._find_image(image_id)
+        if record is None:
+            raise LibraryBackendError(f"Image '{image_id}' not found")
+        vname = voice_name.strip() if voice_name else None
+        await self._backend.async_update_image_fields(image_id, voice_name=vname)
+        record.voice_name = vname
         return record.to_dict()
 
     async def _async_apply_album_transform(

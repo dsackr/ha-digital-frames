@@ -117,3 +117,31 @@ async def test_delete_of_unknown_image_does_not_raise(library_manager):
     # isn't in the manifest -- deleting twice (e.g. a double-click) must
     # not error.
     await library_manager.async_delete("never-existed")
+
+
+async def test_update_voice_name(library_manager, sample_image_bytes):
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(200, 200))
+    assert record["voice_name"] is None
+
+    updated = await library_manager.async_set_image_voice_name(record["image_id"], "my profile pic")
+    assert updated["voice_name"] == "my profile pic"
+
+    # Verify that listing the images returns the updated voice name
+    images = await library_manager.async_list_images()
+    assert len(images) == 1
+    assert images[0]["voice_name"] == "my profile pic"
+
+    # Verify that loading from the manifest returns the updated voice name
+    # (i.e. it was successfully written/serialized)
+    new_manager = LibraryManager(library_manager.hass)
+    await new_manager.async_load()
+    images2 = await new_manager.async_list_images()
+    assert len(images2) == 1
+    assert images2[0]["voice_name"] == "my profile pic"
+
+    # Verify clearing it works
+    cleared = await library_manager.async_set_image_voice_name(record["image_id"], None)
+    assert cleared["voice_name"] is None
+    images3 = await library_manager.async_list_images()
+    assert images3[0]["voice_name"] is None
+

@@ -26,6 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 
 INTENT_GENERATE_AI_IMAGE = "FraimicGenerateAIImage"
 INTENT_SEND_SKILL = "FraimicSendSkill"
+INTENT_SHOW_IMAGE = "FraimicShowImage"
 
 
 def _normalize(name: str) -> str:
@@ -212,7 +213,96 @@ class FraimicSendSkillIntent(intent.IntentHandler):
         return response
 
 
+class FraimicShowImageIntent(intent.IntentHandler):
+    """Show an existing image from the library on a named frame."""
+
+    intent_type = INTENT_SHOW_IMAGE
+    description = (
+        "Show or display an existing image from the shared image library "
+        "by its name or filename on a named Fraimic e-ink photo frame."
+    )
+
+    @property
+    def slot_schema(self) -> dict:
+        return {
+            vol.Required(
+                "image_name", description="Name or filename of the image in the library"
+            ): intent.non_empty_string,
+            vol.Required(
+                "frame", description="Name of the Fraimic frame to send it to"
+            ): intent.non_empty_string,
+        }
+
+    async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        hass = intent_obj.hass
+        slots = self.async_validate_slots(intent_obj.slots)
+        image_name: str = slots["image_name"]["value"]
+        frame_name: str = slots["frame"]["value"]
+
+        response = intent_obj.create_response()
+
+        try:
+            device_id = _match_frame_device_id(hass, frame_name)
+        except HomeAssistantError as err:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_VALID_TARGETS, str(err)
+            )
+            return response
+
+        library_manager = hass.data.get(DOMAIN, {}).get("_library")
+        if library_manager is None:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                "Library manager not initialised"
+            )
+            return response
+
+        images = await library_manager.async_list_images()
+        try:
+            matched_image = _match_by_name(
+                image_name,
+                images,
+                get_name=lambda img: img.get("voice_name") or img["filename"],
+                kind="library image",
+            )
+        except HomeAssistantError as err:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.NO_VALID_TARGETS, str(err)
+            )
+            return response
+
+        try:
+            from . import _get_coordinator_by_device_id  # noqa: PLC0415
+            from .helpers import render_spec_for_entry  # noqa: PLC0415
+
+            coordinator, entry_id = _get_coordinator_by_device_id(hass, device_id)
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry is None:
+                raise HomeAssistantError(f"Config entry '{entry_id}' not found")
+
+            spec = render_spec_for_entry(entry)
+            bin_bytes = await library_manager.async_get_bin_for_send(
+                matched_image["image_id"], spec
+            )
+            await coordinator.async_send_image_or_queue(
+                bin_bytes, image_id=matched_image["image_id"]
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("show_image intent failed: %s", err)
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"Couldn't send image: {err}",
+            )
+            return response
+
+        response.async_set_speech(
+            f"Sure, putting {matched_image.get('voice_name') or matched_image['filename']} on {frame_name} now."
+        )
+        return response
+
+
 def async_register_intents(hass: HomeAssistant) -> None:
     """Register Fraimic's custom Assist intents."""
     intent.async_register(hass, FraimicGenerateAIImageIntent())
     intent.async_register(hass, FraimicSendSkillIntent())
+    intent.async_register(hass, FraimicShowImageIntent())
