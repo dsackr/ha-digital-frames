@@ -215,3 +215,35 @@ async def test_flush_failure_drops_pending_entry_without_retry(coordinator, monk
     # actually already displayed the image before timing out (see the
     # docstring on _async_flush_pending_send).
     assert coordinator.pending_send is None
+
+
+async def test_async_send_image_uses_240s_timeout(coordinator, monkeypatch):
+    import aiohttp
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.raise_for_status = MagicMock()
+
+    class MockAsyncContextManager:
+        async def __aenter__(self):
+            return mock_response
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    captured_kwargs = {}
+    def fake_post(url, **kwargs):
+        nonlocal captured_kwargs
+        captured_kwargs = kwargs
+        return MockAsyncContextManager()
+
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+    session = async_get_clientsession(coordinator.hass)
+    monkeypatch.setattr(session, "post", fake_post)
+
+    await coordinator.async_send_image(b"test-bytes")
+
+    assert "timeout" in captured_kwargs
+    assert isinstance(captured_kwargs["timeout"], aiohttp.ClientTimeout)
+    assert captured_kwargs["timeout"].total == 240
+

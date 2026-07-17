@@ -35,7 +35,7 @@ MODE_ROTATION = "rotation"
 # origin) live in frame_types.py's FRAME_TYPES registry, not here.
 
 # HA platforms this integration provides
-PLATFORMS = [Platform.SENSOR, Platform.SELECT]
+PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.CAMERA]
 
 # The "kind" marker (entry.data["kind"]) for the auto-created, device-less
 # config entry that hosts scene entities -- see scenes.py / scene.py for why

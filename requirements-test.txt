@@ -21,3 +21,4 @@ home-assistant-frontend==20260128.6
 aiodhcpwatcher==1.2.1
 aiodiscover==2.7.1
 cached-ipaddress==1.0.1
+PyTurboJPEG==2.5.0

@@ -63,7 +63,10 @@ frame).
 ## 4. Send image now (queue-if-asleep) — the core send primitive
 Every "send to frame" path (service, raw upload, library send, scene send,
 schedule fire) funnels through one send-or-queue mechanism so a sleeping
-frame gets the image on wake instead of losing it or double-sending.
+frame gets the image on wake instead of losing it or double-sending. A
+generous 240-second timeout is used to ensure slow ESP32-based clone frames
+finish their e-ink redraw before the connection is aborted, preventing
+spurious delivery failure reports and double-refreshes.
 - **Entry points**: `coordinator.py` (`async_send_image_or_queue`,
   `_async_flush_pending_send`, `_set_pending`, `_clear_pending_if_current`).
 - **If it silently breaks**: images sent to a sleeping frame vanish, or a

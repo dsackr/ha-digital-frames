@@ -549,7 +549,7 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # redraw BEFORE answering, so a 60s budget can expire after
                 # the frame already accepted (and displayed) the image --
                 # which used to read as a failure and requeue a duplicate.
-                timeout=aiohttp.ClientTimeout(total=120),
+                timeout=aiohttp.ClientTimeout(total=240),
             ) as response:
                 response.raise_for_status()
                 status: int = response.status
