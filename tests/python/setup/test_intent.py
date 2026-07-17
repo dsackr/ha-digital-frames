@@ -18,7 +18,7 @@ from custom_components.fraimic.intent import (
     INTENT_SHOW_IMAGE,
     _match_frame_device_id,
     _match_skill_id,
-    async_register_intents,
+    async_setup_intents,
 )
 
 
@@ -71,7 +71,7 @@ async def test_intent_handler_success_calls_generate_ai_image_service(
     hass, make_frame_entry
 ):
     office = _make_device(hass, make_frame_entry, "Office Frame", "k1")
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     calls = []
 
@@ -92,7 +92,7 @@ async def test_intent_handler_success_calls_generate_ai_image_service(
 
 
 async def test_intent_handler_no_match_returns_no_valid_targets_error(hass):
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     response = await ha_intent.async_handle(
         hass,
@@ -108,7 +108,7 @@ async def test_intent_handler_service_failure_surfaces_as_speech_error(
     hass, make_frame_entry
 ):
     _make_device(hass, make_frame_entry, "Office Frame", "k1")
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     async def _failing_service(call):
         raise HomeAssistantError("no AI task entity configured")
@@ -166,7 +166,7 @@ async def test_send_skill_intent_success_calls_send_skill_service(
 ):
     office = _make_device(hass, make_frame_entry, "Office Frame", "k1")
     _register_skills(hass, _FakeSkill("word_of_the_day", "Word of the Day"))
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     calls = []
 
@@ -191,7 +191,7 @@ async def test_send_skill_intent_unknown_skill_returns_no_valid_targets_error(
 ):
     _make_device(hass, make_frame_entry, "Office Frame", "k1")
     _register_skills(hass, _FakeSkill("word_of_the_day", "Word of the Day"))
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     response = await ha_intent.async_handle(
         hass,
@@ -208,7 +208,7 @@ async def test_send_skill_intent_service_failure_surfaces_as_speech_error(
 ):
     _make_device(hass, make_frame_entry, "Office Frame", "k1")
     _register_skills(hass, _FakeSkill("word_of_the_day", "Word of the Day"))
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     async def _failing_service(call):
         raise HomeAssistantError("renderer script unreachable")
@@ -267,7 +267,7 @@ async def test_show_image_intent_success_sends_image(
         hass, make_frame_entry, make_coordinator, "Office Frame", "k1"
     )
     _register_library(hass, {"image_id": "mona_lisa_uuid", "filename": "mona_lisa.jpg"})
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     calls = []
 
@@ -294,7 +294,7 @@ async def test_show_image_intent_no_match_returns_no_valid_targets(hass, make_fr
         hass, make_frame_entry, make_coordinator, "Office Frame", "k1"
     )
     _register_library(hass)  # empty library
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     response = await ha_intent.async_handle(
         hass,
@@ -313,7 +313,7 @@ async def test_show_image_intent_service_failure_surfaces_as_speech_error(
         hass, make_frame_entry, make_coordinator, "Office Frame", "k1"
     )
     _register_library(hass, {"image_id": "mona_lisa_uuid", "filename": "mona_lisa.jpg"})
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     async def _failing_send(self, image_bytes, *, image_id=None, thumbnail=None):
         raise HomeAssistantError("frame connection timed out")
@@ -343,7 +343,7 @@ async def test_show_image_intent_matches_voice_name(
         {"image_id": "img1", "filename": "photo_12345.png", "voice_name": "my profile pic"},
         {"image_id": "img2", "filename": "other.jpg", "voice_name": None},
     )
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     calls = []
 
@@ -378,7 +378,7 @@ async def test_show_image_intent_tag_match_sends_random_tagged_image(
         {"image_id": "alyssa_2", "filename": "2.jpg", "tags": ["Alyssa"]},
         {"image_id": "other", "filename": "3.jpg", "tags": ["other"]},
     )
-    async_register_intents(hass)
+    await async_setup_intents(hass)
 
     calls = []
 

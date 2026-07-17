@@ -322,7 +322,7 @@ class FraimicShowImageIntent(intent.IntentHandler):
         return response
 
 
-def async_register_intents(hass: HomeAssistant) -> None:
+async def async_setup_intents(hass: HomeAssistant) -> None:
     """Register Fraimic's custom Assist intents."""
     intent.async_register(hass, FraimicGenerateAIImageIntent())
     intent.async_register(hass, FraimicSendSkillIntent())

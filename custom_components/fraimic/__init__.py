@@ -149,9 +149,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Voice/LLM: "generate an image of X and send it to [frame]" as a single
     # Assist tool, available the moment an LLM-backed conversation agent is
     # configured -- no user-authored script needed.
-    from .intent import async_register_intents  # noqa: PLC0415
+    from .intent import async_setup_intents  # noqa: PLC0415
 
-    async_register_intents(hass)
+    hass.async_create_task(async_setup_intents(hass))
 
     from .library_http import (  # noqa: PLC0415
         FraimicFramesView,
