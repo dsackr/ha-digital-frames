@@ -17,6 +17,36 @@ from custom_components.fraimic.const import DOMAIN
 from custom_components.fraimic.media_source import FraimicMediaSource
 
 
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch):
+    class _FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def json(self):
+            return {"battery": 90, "width": 1200, "height": 1600}
+
+    class _FakeSession:
+        def get(self, *a, **kw):
+            return _FakeResponse()
+
+        def post(self, *a, **kw):
+            return _FakeResponse()
+
+    monkeypatch.setattr(
+        "custom_components.fraimic.coordinator.async_get_clientsession",
+        lambda hass: _FakeSession(),
+    )
+
+
 @pytest.fixture
 async def library_manager(hass):
     manager = LibraryManager(hass)
@@ -146,3 +176,58 @@ async def test_media_source_resolve_and_browse(
     assert isinstance(album_browse, BrowseMediaSource)
     assert len(album_browse.children) == 1
     assert album_browse.children[0].identifier == f"image/{record['image_id']}"
+
+
+async def test_auto_tag_all_service(
+    hass, make_frame_entry, sample_image_bytes, mock_ai_task
+):
+    entry = make_frame_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    library_manager = hass.data[DOMAIN]["_library"]
+
+    # 1. Upload one image that has tags and one that doesn't
+    await library_manager.async_set_ai_auto_tagging(False)
+    img1 = await library_manager.async_upload("photo1.jpg", sample_image_bytes(200, 200))
+    img2 = await library_manager.async_upload("photo2.jpg", sample_image_bytes(200, 200))
+
+    # Manually assign tags to img1
+    await library_manager._backend.async_update_image_fields(
+        img1["image_id"], tags=["already_tagged"]
+    )
+
+    # 2. Call auto_tag_all service without overwrite
+    await hass.services.async_call(
+        DOMAIN,
+        "auto_tag_all",
+        {"overwrite": False},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # Verify mock AI task was called only for the untagged image (img2)
+    assert len(mock_ai_task) == 1
+    assert mock_ai_task[0].data["attachments"][0]["media_content_id"] == f"media-source://{DOMAIN}/image/{img2['image_id']}"
+
+    # Verify tags updated in manifest for img2, and unchanged for img1
+    images_after = await library_manager.async_list_images()
+    tags_by_id = {img["image_id"]: img.get("tags", []) for img in images_after}
+    assert tags_by_id[img1["image_id"]] == ["already_tagged"]
+    assert sorted(tags_by_id[img2["image_id"]]) == ["beach", "landscape", "sunset"]
+
+    # Reset mock AI task calls
+    mock_ai_task.clear()
+
+    # 3. Call auto_tag_all service with overwrite=True
+    await hass.services.async_call(
+        DOMAIN,
+        "auto_tag_all",
+        {"overwrite": True},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # Verify mock AI task was called for both images
+    assert len(mock_ai_task) == 2

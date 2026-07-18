@@ -113,3 +113,15 @@ send_skill:
       required: true
       selector:
         text:
+
+auto_tag_all:
+  name: Auto-tag All Images
+  description: Scan the Fraimic image library and queue AI auto-tagging for images. By default, only scans images that do not have any tags yet.
+  fields:
+    overwrite:
+      name: Overwrite existing tags
+      description: Whether to re-tag images that already have tags.
+      required: false
+      default: false
+      selector:
+        boolean:

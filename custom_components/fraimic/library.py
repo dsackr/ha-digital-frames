@@ -1760,13 +1760,13 @@ class LibraryManager:
                 return state.entity_id
         return None
 
-    def _schedule_auto_tagging(self, image_id: str) -> None:
+    def _schedule_auto_tagging(self, image_id: str, force: bool = False) -> None:
         """Queue auto-tagging for an image."""
-        self.hass.async_create_task(self.async_auto_tag_image(image_id))
+        self.hass.async_create_task(self.async_auto_tag_image(image_id, force=force))
 
-    async def async_auto_tag_image(self, image_id: str) -> None:
+    async def async_auto_tag_image(self, image_id: str, force: bool = False) -> None:
         """Analyze the image using the default AI Task entity and add tags."""
-        if not self.ai_auto_tagging:
+        if not force and not self.ai_auto_tagging:
             _LOGGER.debug("AI auto-tagging is not enabled in Fraimic settings")
             return
 

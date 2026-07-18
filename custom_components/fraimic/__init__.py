@@ -914,3 +914,29 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, "send_skill", _handle_send_skill, schema=_SEND_SKILL_SCHEMA
     )
+
+    async def _handle_auto_tag_all(call: ServiceCall) -> None:
+        overwrite: bool = call.data.get("overwrite", False)
+        manager = hass.data.get(DOMAIN, {}).get("_library")
+        if manager is None:
+            raise HomeAssistantError("Library manager not initialised")
+
+        images = await manager.async_list_images()
+        count = 0
+        for img in images:
+            image_id = img.get("image_id")
+            if not image_id:
+                continue
+            if not overwrite and img.get("tags"):
+                continue
+            manager._schedule_auto_tagging(image_id, force=True)
+            count += 1
+
+        _LOGGER.info("Scheduled AI auto-tagging for %d library images", count)
+
+    hass.services.async_register(
+        DOMAIN,
+        "auto_tag_all",
+        _handle_auto_tag_all,
+        schema=vol.Schema({vol.Optional("overwrite", default=False): bool}),
+    )
