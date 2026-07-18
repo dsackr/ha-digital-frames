@@ -149,6 +149,8 @@ async def test_media_source_resolve_and_browse(
     assert isinstance(playable, PlayMedia)
     assert playable.url == f"/api/fraimic/library/image/{record['image_id']}"
     assert playable.mime_type == "image/png"
+    assert playable.path is not None
+    assert str(playable.path).endswith(record["filename"])
 
     # 2. Browse Root
     root_item = MediaSourceItem(hass, DOMAIN, "", None)

@@ -265,6 +265,10 @@ class LibraryBackend:
         supports_discovery is True."""
         raise NotImplementedError
 
+    async def async_get_local_path(self, image_id: str) -> str:
+        """Return the absolute path to a local copy of the original image."""
+        raise NotImplementedError
+
 
 # ---------------------------------------------------------------------------
 # Local (HA-server) backend -- fully implemented
@@ -514,6 +518,23 @@ class LocalLibraryBackend(LibraryBackend):
     async def async_delete_image(self, image_id: str) -> None:
         async with self._manifest_lock:
             await self.hass.async_add_executor_job(self._delete_image_sync, image_id)
+
+    async def async_get_local_path(self, image_id: str) -> str:
+        return await self.hass.async_add_executor_job(self._get_local_path_sync, image_id)
+
+    def _get_local_path_sync(self, image_id: str) -> str:
+        manifest = self._read_manifest()
+        entry = next((d for d in manifest.get("images", []) if d["image_id"] == image_id), None)
+        path = None
+        if entry and entry.get("filename"):
+            candidate = self._original_path_for(image_id, entry["filename"])
+            if os.path.isfile(candidate):
+                path = candidate
+        if path is None:
+            path = self._find_original_path(image_id)
+        if path is None:
+            raise LibraryBackendError(f"Original for image '{image_id}' not found")
+        return path
 
 
 # ---------------------------------------------------------------------------
@@ -926,6 +947,27 @@ class DropboxLibraryBackend(LibraryBackend):
 
         return adopted
 
+    async def async_get_local_path(self, image_id: str) -> str:
+        cache_dir = self.hass.config.path("fraimic_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        manifest = await self.async_list_images()
+        entry = next((img for img in manifest if img.image_id == image_id), None)
+        filename = entry.filename if entry else f"{image_id}.jpg"
+        ext = os.path.splitext(filename)[1] or ".jpg"
+        
+        cached_path = os.path.join(cache_dir, f"{image_id}{ext}")
+        if os.path.isfile(cached_path):
+            return cached_path
+            
+        data, _ = await self.async_get_original(image_id)
+        await self.hass.async_add_executor_job(self._save_cached_file, cached_path, data)
+        return cached_path
+
+    def _save_cached_file(self, path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
+
 
 # ---------------------------------------------------------------------------
 # Google Drive backend -- OAuth2 with a refresh token, obtained via the
@@ -1209,6 +1251,27 @@ class GoogleDriveLibraryBackend(LibraryBackend):
             ]
             await self._write_manifest(manifest)
 
+    async def async_get_local_path(self, image_id: str) -> str:
+        cache_dir = self.hass.config.path("fraimic_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        manifest = await self.async_list_images()
+        entry = next((img for img in manifest if img.image_id == image_id), None)
+        filename = entry.filename if entry else f"{image_id}.jpg"
+        ext = os.path.splitext(filename)[1] or ".jpg"
+        
+        cached_path = os.path.join(cache_dir, f"{image_id}{ext}")
+        if os.path.isfile(cached_path):
+            return cached_path
+            
+        data, _ = await self.async_get_original(image_id)
+        await self.hass.async_add_executor_job(self._save_cached_file, cached_path, data)
+        return cached_path
+
+    def _save_cached_file(self, path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
+
 
 # ---------------------------------------------------------------------------
 # Manager -- backend-agnostic operations used by the HTTP views
@@ -1335,6 +1398,9 @@ class LibraryManager:
 
     async def async_get_original(self, image_id: str) -> tuple[bytes, str]:
         return await self._backend.async_get_original(image_id)
+
+    async def async_get_local_path(self, image_id: str) -> str:
+        return await self._backend.async_get_local_path(image_id)
 
     # -- thumbnails (local disk cache, backend-agnostic) --
 

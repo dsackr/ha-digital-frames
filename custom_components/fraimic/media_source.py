@@ -51,9 +51,21 @@ class FraimicMediaSource(MediaSource):
         if entry is None:
             raise Unresolvable(f"Image '{image_id}' not found in Fraimic library")
 
+        # Get local path to support local file attachments in AI/camera tasks
+        from pathlib import Path  # noqa: PLC0415
+        try:
+            local_path = await manager.async_get_local_path(image_id)
+            path_obj = Path(local_path)
+        except Exception:  # noqa: BLE001
+            path_obj = None
+
         # The URL for streaming original image
         url = f"/api/fraimic/library/image/{image_id}"
-        return PlayMedia(url=url, mime_type=entry.get("content_type", "image/png"))
+        return PlayMedia(
+            url=url,
+            mime_type=entry.get("content_type", "image/png"),
+            path=path_obj,
+        )
 
     async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
         """Browse media."""
