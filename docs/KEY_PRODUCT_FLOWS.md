@@ -658,12 +658,15 @@ services `digital_frames.*`, HTTP `/api/digital_frames/*`, media source
 `media-source://digital_frames/…`. Official Spectra hardware still uses
 manufacturer **Fraimic** and driver id `fraimic`.
 
-**Albums / library survive the domain rename:** local originals + album
-tags stay under config/`fraimic_library/` (and Dropbox `/fraimic_library`);
-library backend settings migrate from `.storage/fraimic_library_settings`
-→ `digital_frames_library_settings` on first load. Config entries,
-walls, scenes, and schedules under the old domain are **not** migrated —
-re-add frames after upgrade.
+**Albums / library survive the domain rename:** on first load the local
+library is renamed `config/fraimic_library/` →
+`config/digital_frames_library/` (manifest + originals + album tags).
+Dropbox does the same for `/fraimic_library` → `/digital_frames_library`
+when possible; Google Drive reuses an existing "Fraimic Library" folder
+if present. Library settings migrate
+`.storage/fraimic_library_settings` → `digital_frames_library_settings`.
+Config entries, walls, scenes, and schedules under the old domain are
+**not** migrated — re-add frames after upgrade.
 
 **Panel URL:** primary sidebar path is `/digital_frames`. Setup also
 registers a **legacy alias** at `/fraimic` (no second sidebar entry) so

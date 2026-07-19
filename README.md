@@ -2,7 +2,7 @@
 
 Turn your digital photo frames into a gallery wall that Home Assistant actually controls — no vendor app, no cloud account required for the local drivers. Point it at your frames and start sending photos in minutes.
 
-**Digital Frames** is the product name and HA domain (`digital_frames`, package `custom_components/digital_frames/`). Official Spectra e‑ink panels remain manufacturer **Fraimic** in the device registry. **Your photo library and albums** keep living under `config/fraimic_library/` (path intentionally unchanged). Re-add frames after upgrading from the old `fraimic` domain — walls/scenes/entries are not auto-migrated.
+**Digital Frames** is the product name and HA domain (`digital_frames`, package `custom_components/digital_frames/`). Official Spectra e‑ink panels remain manufacturer **Fraimic** in the device registry. **Your photo library and albums** live under `config/digital_frames_library/` (first load renames a leftover `config/fraimic_library/` automatically). Re-add frames after upgrading from the old `fraimic` domain — walls/scenes/entries are not auto-migrated.
 
 ## Why you'll want this
 

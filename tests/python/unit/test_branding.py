@@ -8,6 +8,7 @@ from pathlib import Path
 from custom_components.digital_frames.const import (
     DOMAIN,
     LEGACY_DOMAIN,
+    LEGACY_LIBRARY_DIRNAME,
     LIBRARY_DIRNAME,
     PRODUCT_NAME,
 )
@@ -21,9 +22,10 @@ def test_product_name_constant():
     assert LEGACY_DOMAIN == "fraimic"
 
 
-def test_library_dirname_stable_for_albums():
-    """Albums live under the legacy path so domain renames do not orphan them."""
-    assert LIBRARY_DIRNAME == "fraimic_library"
+def test_library_dirname_product_branded():
+    """Canonical local library folder is product-named; legacy is migrated."""
+    assert LIBRARY_DIRNAME == "digital_frames_library"
+    assert LEGACY_LIBRARY_DIRNAME == "fraimic_library"
 
 
 def test_manifest_display_name_and_domain():

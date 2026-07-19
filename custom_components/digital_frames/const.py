@@ -7,13 +7,16 @@ DOMAIN = "digital_frames"
 # User-facing product name (HACS, sidebar, media browser, banners).
 PRODUCT_NAME = "Digital Frames"
 
-# On-disk library root under HA config/. Intentionally NOT renamed with the
-# domain: albums + originals live here, and existing installs already have
-# data under this path. Dropbox uses the same folder name at cloud root.
-LIBRARY_DIRNAME = "fraimic_library"
-# Local thumbnail / bin cache roots (same stability rule as LIBRARY_DIRNAME).
-CACHE_DIRNAME = "fraimic_cache"
-ADDONS_DIRNAME = "fraimic_addons"
+# Local library root under HA config/. New installs use LIBRARY_DIRNAME;
+# first load renames LEGACY_LIBRARY_DIRNAME → LIBRARY_DIRNAME when present
+# so albums/originals survive the product rename (see library.py).
+LIBRARY_DIRNAME = "digital_frames_library"
+LEGACY_LIBRARY_DIRNAME = "fraimic_library"
+# Local thumbnail / bin cache roots (same one-shot rename pattern).
+CACHE_DIRNAME = "digital_frames_cache"
+LEGACY_CACHE_DIRNAME = "fraimic_cache"
+ADDONS_DIRNAME = "digital_frames_addons"
+LEGACY_ADDONS_DIRNAME = "fraimic_addons"
 
 # Pre-rename domain — used only to migrate library settings store keys.
 LEGACY_DOMAIN = "fraimic"

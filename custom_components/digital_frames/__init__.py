@@ -404,7 +404,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         _LOGGER.warning(
             "Found leftover custom_components/fraimic/ next to digital_frames/. "
             "Remove that folder and restart Home Assistant so only Digital Frames "
-            "loads (library under config/fraimic_library/ is safe to keep)."
+            "loads. Your photo library migrates to config/digital_frames_library/ "
+            "automatically (legacy config/fraimic_library/ is renamed on first load)."
         )
 
     return True

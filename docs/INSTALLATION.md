@@ -10,7 +10,8 @@
    `custom_components/digital_frames/`)
 5. If upgrading from the old **Fraimic** domain, remove
    `custom_components/fraimic/` so only Digital Frames loads. Library and
-   albums under `config/fraimic_library/` are preserved; re-add frames.
+   albums move to `config/digital_frames_library/` on first load (legacy
+   `config/fraimic_library/` is renamed automatically); re-add frames.
 6. Restart Home Assistant
 
 ## Install manually
