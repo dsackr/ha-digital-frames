@@ -461,13 +461,13 @@ random-from-album) and sends one to any frame — ad hoc ("Send Now" in the
 Daily Content tab, the Lovelace card's Daily picker), staged into a scene
 via the wall picker, or on a schedule. Text modes render through the
 pinned remote `xotd_renderer.py` subprocess at the target frame's
-composition size (always Spectra `.bin` from the script); the integration
-then re-encodes via `text_skill_payload_for_codec` for the panel's codec —
-Spectra frames get the `.bin` as-is, Meural/`jpeg_q90` gets unpacked RGB
-→ JPEG postcard. Image modes resolve to a library image_id (feeds upload
+composition size. The script writes Spectra `xotd.bin` **and** full RGB
+`xotd_preview.png` (before pack). `text_skill_payload_for_codec` then
+picks the wire format: Spectra frames get the `.bin`; Meural/`jpeg_q90`
+gets JPEG from the **RGB PNG** (not Spectra-unpack, so anti-aliased text
+is preserved). Image modes resolve to a library image_id (feeds upload
 the fetched photo into the library first) and use the normal library
-codec path. Text renders also produce a preview PNG so the frame's
-last-image thumbnail survives the send.
+codec path. Previews prefer the RGB PNG so last-image thumbnails stay sharp.
 - **Entry points**: `skills.py` (`SkillManager.async_save_skill` /
   `async_render_for_entry` / `_async_render_text` /
   `_async_fetch_image_feed` / `_async_pick_image_album`),

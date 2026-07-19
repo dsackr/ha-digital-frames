@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .const import CONF_DRIVER, DRIVER_MEURAL, MEURAL_SIZE_LABEL
 from .frame_types import (
@@ -283,41 +283,63 @@ def text_skill_payload_for_codec(
     height: int,
     rotation: int = 0,
     codec_id: str | None = None,
+    rgb_png: bytes | None = None,
 ) -> tuple[bytes, bytes | None]:
-    """Turn a text-skill Spectra ``.bin`` into wire bytes + preview for *codec_id*.
+    """Turn text-skill renderer outputs into wire bytes + preview for *codec_id*.
 
-    The pinned xOTD renderer always emits Spectra 6 packed bytes at the
-    composition size. Fraimic frames send that ``.bin`` as-is. Meural (and
-    any ``jpeg_q90`` panel) cannot display Spectra packing, so we unpack to
-    RGB and re-encode JPEG — same composition the e‑ink frame would show,
-    full RGB channels limited to the 6 Spectra palette colors the renderer
-    used (good enough for text cards until the renderer gains a native RGB
-    output mode).
+    The pinned xOTD renderer writes:
+
+    - ``xotd.bin`` — Spectra 6 packed (Fraimic wire)
+    - ``xotd_preview.png`` — full RGB composition *before* packing (fonts may
+      anti-alias; palette colors are intentional, intermediate AA grays are
+      not)
+
+    Prefer *rgb_png* when present:
+
+    - **JPEG panels (Meural):** encode JPEG from the RGB PNG (not unpack of
+      ``.bin``), so anti-aliased text is not posterized through Spectra 6.
+    - **Spectra panels:** wire stays ``.bin``; preview prefers RGB PNG for a
+      sharper last-image thumbnail.
+
+    Fallback when *rgb_png* is missing: Spectra pass-through + unpack-based
+    preview; JPEG unpacks ``.bin`` (6-color posterized).
 
     Positional-friendly for ``async_add_executor_job``.
-
-    Returns ``(wire_bytes, preview_png_or_None)``. Preview is best-effort
-    for Spectra (invalid bin length → None); for JPEG a failed unpack
-    raises so callers do not postcard garbage.
     """
     from .image_converter import (  # noqa: PLC0415
         _encode_preview_png,
+        _open_as_rgb,
         preview_png_from_bin,
         unpack_spectra6_bin,
     )
 
-    if codec_id is None or codec_id != CODEC_JPEG_Q90:
-        preview: bytes | None = None
+    def _image_from_rgb_png() -> Any:
+        image = _open_as_rgb(rgb_png)  # type: ignore[arg-type]
+        if rotation:
+            image = image.rotate(rotation, expand=True)
+        return image
+
+    if codec_id == CODEC_JPEG_Q90:
+        if rgb_png:
+            image = _image_from_rgb_png()
+        else:
+            image = unpack_spectra6_bin(spectra_bin, width, height)
+            if rotation:
+                image = image.rotate(rotation, expand=True)
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=90, optimize=True)
+        return buf.getvalue(), _encode_preview_png(image)
+
+    # Spectra wire payload
+    preview: bytes | None = None
+    if rgb_png:
+        try:
+            preview = _encode_preview_png(_image_from_rgb_png())
+        except Exception:  # noqa: BLE001
+            preview = None
+    if preview is None:
         try:
             preview = preview_png_from_bin(spectra_bin, width, height)
         except Exception:  # noqa: BLE001
             preview = None
-        return spectra_bin, preview
-
-    # JPEG path: unpack is required.
-    image = unpack_spectra6_bin(spectra_bin, width, height)
-    if rotation:
-        image = image.rotate(rotation, expand=True)
-    buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=90, optimize=True)
-    return buf.getvalue(), _encode_preview_png(image)
+    return spectra_bin, preview

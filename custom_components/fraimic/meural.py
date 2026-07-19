@@ -1,8 +1,16 @@
 """Local Meural Canvas transport (FramePort Phase 3).
 
-Talks to a Meural on the LAN only — no Meural cloud / Cognito auth. Protocol
-knowledge is drawn from the community HA-meural integration (GuySie/ha-meural
-LocalMeural client) and live probes against Canvas firmware 2.3.x.
+Talks to a Meural on the LAN only — no Meural cloud / Cognito auth.
+
+**Acknowledgements:** Local HTTP endpoint paths and protocol shapes for the
+Canvas ``/remote/`` API were documented by the community Home Assistant
+integration **HA-meural** by Guy Sie ([GuySie/ha-meural](https://github.com/GuySie/ha-meural),
+MIT License). This module is an independent reimplementation for Fraimic's
+FramePort driver; it does not vendor HA-meural source. See also the root
+``README.md`` Credits section.
+
+Live probes against Canvas firmware 2.3.x refined field names (e.g. gsensor,
+backlight, lux) used in the coordinator.
 
 Endpoints used (relative to http://{host}/remote/):
 

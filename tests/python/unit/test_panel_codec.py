@@ -94,12 +94,12 @@ def test_text_skill_payload_spectra_pass_through_with_preview(sample_image_bytes
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_text_skill_payload_jpeg_from_spectra_bin(sample_image_bytes):
-    # Registered Spectra geometry packs cleanly; re-encode as JPEG for Meural.
+def test_text_skill_payload_jpeg_from_spectra_bin_fallback(sample_image_bytes):
+    # No RGB PNG: JPEG path falls back to unpacking Spectra .bin.
     w, h = 1200, 1600
     bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
     wire, preview = text_skill_payload_for_codec(
-        bin_bytes, w, h, 0, CODEC_JPEG_Q90
+        bin_bytes, w, h, 0, CODEC_JPEG_Q90, None
     )
     assert wire[:2] == b"\xff\xd8"
     assert len(wire) > 100
@@ -107,25 +107,46 @@ def test_text_skill_payload_jpeg_from_spectra_bin(sample_image_bytes):
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_text_skill_payload_jpeg_unregistered_meural_geometry():
-    """xOTD packs at Meural size with layout fallback; unpack must still work."""
-    w, h = 1920, 1080
-    bin_bytes = bytes((w * h) // 2)  # valid length; all palette index 0
+def test_text_skill_payload_jpeg_prefers_rgb_png(sample_image_bytes):
+    """Meural path encodes from full RGB preview, not Spectra unpack."""
+    from PIL import Image
+    import io
+
+    w, h = 200, 100
+    # Distinct non-Spectra color so unpack-fallback would not match.
+    img = Image.new("RGB", (w, h), color=(12, 34, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    rgb_png = buf.getvalue()
+    # Invalid bin would fail if RGB path were ignored.
     wire, preview = text_skill_payload_for_codec(
-        bin_bytes, w, h, 0, CODEC_JPEG_Q90
+        b"not-a-valid-bin", w, h, 0, CODEC_JPEG_Q90, rgb_png
     )
     assert wire[:2] == b"\xff\xd8"
     assert preview is not None
+    assert preview[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_text_skill_payload_jpeg_bad_bin_raises():
+def test_text_skill_payload_jpeg_bad_bin_raises_without_rgb():
     with pytest.raises(ValueError, match="bin is"):
-        text_skill_payload_for_codec(b"too-short", 1920, 1080, 0, CODEC_JPEG_Q90)
+        text_skill_payload_for_codec(b"too-short", 1920, 1080, 0, CODEC_JPEG_Q90, None)
 
 
 def test_text_skill_payload_spectra_bad_bin_soft_preview():
     wire, preview = text_skill_payload_for_codec(
-        b"not-a-bin", 1200, 1600, 0, CODEC_SPECTRA6_SPLIT_HALF
+        b"not-a-bin", 1200, 1600, 0, CODEC_SPECTRA6_SPLIT_HALF, None
     )
     assert wire == b"not-a-bin"
     assert preview is None
+
+
+def test_text_skill_payload_spectra_prefers_rgb_preview(sample_image_bytes):
+    w, h = 1200, 1600
+    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
+    rgb_png = sample_image_bytes(w, h)
+    wire, preview = text_skill_payload_for_codec(
+        bin_bytes, w, h, 0, CODEC_SPECTRA6_SPLIT_HALF, rgb_png
+    )
+    assert wire == bin_bytes
+    assert preview is not None
+    assert preview[:8] == b"\x89PNG\r\n\x1a\n"

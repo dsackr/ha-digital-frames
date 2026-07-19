@@ -21,6 +21,17 @@ That's it — your frame shows up as a device, ready to receive photos.
 
 Manual install, troubleshooting, and full hardware requirements: see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
+## Credits
+
+**Meural Canvas local protocol** — endpoint inventory for the on-device
+`/remote/` HTTP API (identify, system check, backlight, suspend/resume,
+postcard upload, galleries JSON, etc.) was published by **Guy Sie** in
+[HA-meural](https://github.com/GuySie/ha-meural) (MIT License,
+Copyright © 2020 Guy Sie). Our Meural support is a **local-only** FramePort
+driver inspired by that documentation; we do not use Meural cloud/Cognito and
+do not vendor HA-meural code. If you want full Meural cloud playlists and
+media-player UX in Home Assistant, use HA-meural.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

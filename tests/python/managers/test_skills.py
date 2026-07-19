@@ -395,14 +395,23 @@ async def test_text_render_meural_returns_jpeg_not_spectra_bin(
         "Custom Word", "word", {"word_feed": "custom"}
     )
 
-    # Valid Spectra bin length at Meural composition size (layout fallback).
+    # Renderer writes Spectra bin + full RGB preview (like real xotd_renderer).
+    from PIL import Image
+    import io
+
     packed = bytes((1920 * 1080) // 2)
+    rgb = Image.new("RGB", (1920, 1080), color=(18, 44, 190))
+    rgb_buf = io.BytesIO()
+    rgb.save(rgb_buf, format="PNG")
+    rgb_png = rgb_buf.getvalue()
 
     async def _fake_exec(*args, **kwargs):
         config_path = args[4]
         run_dir = os.path.dirname(config_path)
         with open(os.path.join(run_dir, "xotd.bin"), "wb") as f:
             f.write(packed)
+        with open(os.path.join(run_dir, "xotd_preview.png"), "wb") as f:
+            f.write(rgb_png)
         return _FakeProcess(returncode=0)
 
     monkeypatch.setattr(

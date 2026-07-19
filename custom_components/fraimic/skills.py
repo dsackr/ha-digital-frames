@@ -19,9 +19,9 @@ split the retired XotdManager used (see git history: xotd.py):
     as a subprocess with --render-only in a fresh per-render temp
     directory, so concurrent renders (e.g. one skill mapped to five frames
     in a single scene send) never collide on the same config.json/xotd.bin.
-    The resulting Spectra .bin is read back and re-encoded for the target
-    panel codec (pass-through for Fraimic; unpack→JPEG for Meural) via
-    panel_codec.text_skill_payload_for_codec.
+    The resulting Spectra .bin and full-RGB xotd_preview.png are read back;
+    text_skill_payload_for_codec passes .bin to Fraimic and encodes JPEG from
+    the RGB PNG for Meural (preserving font anti-aliasing).
   - image_feed/image_album: no script, no subprocess -- a web feed (NASA
     APOD / Wikimedia Picture of the Day / Bing wallpaper) is fetched
     directly and imported into the photo library, or an existing photo is
@@ -377,7 +377,15 @@ class SkillManager:
         self._content_cache[cache_key] = (fields, now)
         return fields
 
-    async def _async_render_text(self, skill: Skill, entry: "ConfigEntry") -> bytes:
+    async def _async_render_text(
+        self, skill: Skill, entry: "ConfigEntry"
+    ) -> tuple[bytes, bytes | None]:
+        """Run the pinned xOTD renderer; return (spectra_bin, rgb_png|None).
+
+        The renderer writes ``xotd.bin`` (Spectra pack) and
+        ``xotd_preview.png`` (full RGB composition before pack). RGB is used
+        for Meural JPEG encode and sharper previews.
+        """
         script_content = await self._async_script_bytes()
         content_fields = await self._async_fetch_content_fields(skill)
 
@@ -449,12 +457,18 @@ class SkillManager:
             )
 
             bin_path = os.path.join(run_dir, "xotd.bin")
+            rgb_path = os.path.join(run_dir, "xotd_preview.png")
 
-            def _read_bin() -> bytes:
+            def _read_outputs() -> tuple[bytes, bytes | None]:
                 with open(bin_path, "rb") as f:
-                    return f.read()
+                    bin_bytes = f.read()
+                rgb_png: bytes | None = None
+                if os.path.isfile(rgb_path):
+                    with open(rgb_path, "rb") as f:
+                        rgb_png = f.read()
+                return bin_bytes, rgb_png
 
-            return await self.hass.async_add_executor_job(_read_bin)
+            return await self.hass.async_add_executor_job(_read_outputs)
         finally:
             await self.hass.async_add_executor_job(shutil.rmtree, run_dir, True)
 
@@ -560,11 +574,10 @@ class SkillManager:
             image_id = await self._async_pick_image_album(skill)
             return {"kind": "image_id", "image_id": image_id}
 
-        bin_bytes = await self._async_render_text(skill, entry)
+        bin_bytes, rgb_png = await self._async_render_text(skill, entry)
 
-        # Text renderer always emits Spectra .bin. Re-encode for the target
-        # panel codec (JPEG for Meural; Spectra pass-through for Fraimic) and
-        # build a preview PNG so last_thumbnail survives the send.
+        # Re-encode for the target panel codec: Spectra .bin as-is, or JPEG
+        # from full RGB xotd_preview.png for Meural (not Spectra-unpack).
         from .helpers import render_spec_for_entry  # noqa: PLC0415
         from .panel_codec import (  # noqa: PLC0415
             panel_codec_for_entry,
@@ -585,10 +598,11 @@ class SkillManager:
                 spec.height,
                 spec.rotation,
                 codec_id,
+                rgb_png,
             )
         except Exception as err:  # noqa: BLE001
             # Spectra: unpack/preview failures are soft (return raw bin).
-            # JPEG: unpack is required — surface as SkillError.
+            # JPEG: encode is required — surface as SkillError.
             from .panel_codec import CODEC_JPEG_Q90  # noqa: PLC0415
 
             if codec_id == CODEC_JPEG_Q90:
