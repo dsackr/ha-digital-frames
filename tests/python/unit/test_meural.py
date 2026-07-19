@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.fraimic.const import (
+    API_SLEEP,
     CONF_DRIVER,
     CONF_HOST,
     CONF_ORIENTATION,
@@ -24,6 +26,7 @@ from custom_components.fraimic.panel_codec import (
 )
 from custom_components.fraimic.meural import (
     meural_orientation_from_payload,
+    parse_meural_system_stats,
     probe_meural,
     send_meural_postcard,
 )
@@ -55,7 +58,6 @@ def test_encode_jpeg_for_meural_geometry(sample_image_bytes):
         None,
         CODEC_JPEG_Q90,
     )
-    # JPEG SOI marker
     assert out[:2] == b"\xff\xd8"
     assert len(out) > 100
 
@@ -104,12 +106,31 @@ async def test_send_meural_postcard_ok():
     assert result["status"] == "pass"
 
 
-def test_meural_orientation_from_payload():
+def test_meural_orientation_prefers_gsensor():
+    assert meural_orientation_from_payload(
+        {"orientation": "landscape", "gsensor": "portrait"}
+    ) == "portrait"
     assert meural_orientation_from_payload({"orientation": "portrait"}) == "portrait"
     assert meural_orientation_from_payload({"gsensor": "Landscape"}) == "landscape"
     assert meural_orientation_from_payload({"orientation": "upside_down"}) is None
     assert meural_orientation_from_payload(None) is None
-    assert meural_orientation_from_payload("portrait") is None
+
+
+def test_parse_meural_system_stats():
+    stats = parse_meural_system_stats(
+        {
+            "backlight": "9",
+            "lux": "42",
+            "free_space": 3906,
+            "wifi_status": {"name": "TheMachine", "signal": "-53"},
+        }
+    )
+    assert stats["backlight"] == 9
+    assert stats["lux"] == 42.0
+    assert stats["free_space_mb"] == 3906
+    assert stats["wifi_rssi"] == -53
+    assert stats["wifi_ssid"] == "TheMachine"
+    assert parse_meural_system_stats(None)["backlight"] is None
 
 
 @pytest.mark.asyncio
@@ -122,30 +143,38 @@ async def test_follow_device_writes_orientation_option():
     entry.options = {CONF_ORIENTATION_FOLLOW_DEVICE: True}
     coord = MeuralCoordinator(hass, entry)
 
-    identify = {
-        "status": "pass",
-        "response": {
-            "wifi_ip": "192.168.1.32",
-            "orientation": "portrait",
-            "version": "2.3.2",
-        },
-    }
-    # probe_meural unwraps response; mock at meural layer via coordinator imports
     system = {
         "orientation": "portrait",
         "gsensor": "portrait",
         "version": "2.3.2_2.0.13",
-        "wifi_status": {"ip": "192.168.1.32"},
+        "backlight": "9",
+        "lux": "0",
+        "free_space": 3906,
+        "wifi_status": {"ip": "192.168.1.32", "signal": "-53", "name": "LAN"},
     }
 
     with (
         patch(
             "custom_components.fraimic.meural_coordinator.probe_meural",
-            new=AsyncMock(return_value={**identify["response"], "host": "192.168.1.32"}),
+            new=AsyncMock(
+                return_value={
+                    "wifi_ip": "192.168.1.32",
+                    "orientation": "portrait",
+                    "host": "192.168.1.32",
+                }
+            ),
         ),
         patch(
             "custom_components.fraimic.meural_coordinator.meural_system_info",
             new=AsyncMock(return_value=system),
+        ),
+        patch(
+            "custom_components.fraimic.meural_coordinator.meural_get_backlight",
+            new=AsyncMock(return_value=9),
+        ),
+        patch(
+            "custom_components.fraimic.meural_coordinator.meural_is_sleeping",
+            new=AsyncMock(return_value=False),
         ),
         patch(
             "custom_components.fraimic.meural_coordinator.async_get_clientsession",
@@ -155,11 +184,14 @@ async def test_follow_device_writes_orientation_option():
         data = await coord._async_update_data()
 
     assert data["device_orientation"] == ORIENTATION_PORTRAIT
+    assert data["backlight"] == 9
+    assert data["lux"] == 0.0
+    assert data["free_space_mb"] == 3906
+    assert data["wifi_rssi"] == -53
+    assert data["sleeping"] is False
     assert data["ip_address"] == "192.168.1.32"
-    # Task scheduled with coroutine for option write
     assert hass.async_create_task.called
     coro = hass.async_create_task.call_args[0][0]
-    # Run the follow helper
     await coro
     hass.config_entries.async_update_entry.assert_called_once()
     kwargs = hass.config_entries.async_update_entry.call_args.kwargs
@@ -192,6 +224,14 @@ async def test_follow_device_skipped_when_manual_lock():
             new=AsyncMock(return_value={"gsensor": "portrait"}),
         ),
         patch(
+            "custom_components.fraimic.meural_coordinator.meural_get_backlight",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "custom_components.fraimic.meural_coordinator.meural_is_sleeping",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
             "custom_components.fraimic.meural_coordinator.async_get_clientsession",
             return_value=MagicMock(),
         ),
@@ -202,3 +242,63 @@ async def test_follow_device_skipped_when_manual_lock():
     coro = hass.async_create_task.call_args[0][0]
     await coro
     hass.config_entries.async_update_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sleep_command_maps_to_suspend():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "meural_entry"
+    entry.data = {CONF_HOST: "192.168.1.32", CONF_DRIVER: DRIVER_MEURAL}
+    entry.options = {}
+    coord = MeuralCoordinator(hass, entry)
+    coord.data = {"sleeping": False, "backlight": 9}
+
+    with patch(
+        "custom_components.fraimic.meural_coordinator.meural_suspend",
+        new=AsyncMock(),
+    ) as suspend:
+        with patch(
+            "custom_components.fraimic.meural_coordinator.async_get_clientsession",
+            return_value=MagicMock(),
+        ):
+            status = await coord.async_send_command(API_SLEEP)
+    assert status == 200
+    suspend.assert_awaited_once()
+    assert coord.data["sleeping"] is True
+
+
+@pytest.mark.asyncio
+async def test_restart_unsupported():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "meural_entry"
+    entry.data = {CONF_HOST: "192.168.1.32", CONF_DRIVER: DRIVER_MEURAL}
+    entry.options = {}
+    coord = MeuralCoordinator(hass, entry)
+    with pytest.raises(HomeAssistantError, match="Restart"):
+        await coord.async_send_command("/api/restart")
+
+
+@pytest.mark.asyncio
+async def test_set_backlight():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "meural_entry"
+    entry.data = {CONF_HOST: "192.168.1.32", CONF_DRIVER: DRIVER_MEURAL}
+    entry.options = {}
+    coord = MeuralCoordinator(hass, entry)
+    coord.data = {"backlight": 9}
+    with (
+        patch(
+            "custom_components.fraimic.meural_coordinator.meural_set_backlight",
+            new=AsyncMock(),
+        ) as set_bl,
+        patch(
+            "custom_components.fraimic.meural_coordinator.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+    ):
+        await coord.async_set_backlight(40)
+    set_bl.assert_awaited_once()
+    assert coord.data["backlight"] == 40

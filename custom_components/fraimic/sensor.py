@@ -11,7 +11,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.const import (
+    LIGHT_LUX,
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfInformation,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -37,14 +42,16 @@ async def async_setup_entry(
 
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Meural has no battery/charge/queue sensors; expose IP, firmware, and
-    # device orientation (gsensor from identify/system).
+    # Meural: no battery/charge/queue; local system sensors instead.
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
         async_add_entities(
             [
                 FraimicFirmwareSensor(coordinator, entry),
                 FraimicIpAddressSensor(coordinator, entry),
                 MeuralDeviceOrientationSensor(coordinator, entry),
+                MeuralAmbientLightSensor(coordinator, entry),
+                MeuralFreeSpaceSensor(coordinator, entry),
+                MeuralWifiRssiSensor(coordinator, entry),
             ]
         )
         return
@@ -305,6 +312,92 @@ class MeuralDeviceOrientationSensor(FraimicBaseSensor):
             return None
         value = self.coordinator.data.get("device_orientation")
         return value if isinstance(value, str) else None
+
+
+class MeuralAmbientLightSensor(FraimicBaseSensor):
+    """Ambient light (lux) from the Meural ALS."""
+
+    _attr_device_class = SensorDeviceClass.ILLUMINANCE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = LIGHT_LUX
+
+    def __init__(
+        self,
+        coordinator: FraimicCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_ambient_light"
+        self._attr_name = "Ambient light"
+
+    @property
+    def native_value(self) -> float | None:
+        if not self.coordinator.data:
+            return None
+        raw = self.coordinator.data.get("lux")
+        try:
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+
+class MeuralFreeSpaceSensor(FraimicBaseSensor):
+    """Free storage on the Canvas (MB), diagnostic."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfInformation.MEGABYTES
+    _attr_suggested_display_precision = 0
+
+    def __init__(
+        self,
+        coordinator: FraimicCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_free_space"
+        self._attr_name = "Free space"
+
+    @property
+    def native_value(self) -> int | None:
+        if not self.coordinator.data:
+            return None
+        raw = self.coordinator.data.get("free_space_mb")
+        try:
+            return int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+
+class MeuralWifiRssiSensor(FraimicBaseSensor):
+    """WiFi signal (dBm) from Meural system wifi_status."""
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: FraimicCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_wifi_rssi"
+        self._attr_name = "WiFi Signal"
+
+    @property
+    def native_value(self) -> int | None:
+        if not self.coordinator.data:
+            return None
+        raw = self.coordinator.data.get("wifi_rssi")
+        try:
+            return int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
 
 
 class FraimicQueuedSendSensor(FraimicBaseSensor):

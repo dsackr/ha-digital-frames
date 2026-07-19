@@ -169,10 +169,19 @@ class MeuralOrientationSelect(CoordinatorEntity, SelectEntity):
             }
             if device in (ORIENTATION_PORTRAIT, ORIENTATION_LANDSCAPE):
                 new_options[CONF_ORIENTATION] = device
+                # Align Canvas UI lock with physical hang when returning to follow.
+                try:
+                    await self.coordinator.async_set_device_orientation(device)
+                except Exception:  # noqa: BLE001
+                    pass
             self.hass.config_entries.async_update_entry(
                 self._entry, options=new_options
             )
         else:
+            try:
+                await self.coordinator.async_set_device_orientation(value)
+            except Exception:  # noqa: BLE001
+                pass
             self.hass.config_entries.async_update_entry(
                 self._entry,
                 options={

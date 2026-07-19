@@ -8,11 +8,15 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    API_REFRESH,
+    API_RESTART,
+    API_SLEEP,
     CONF_HOST,
     CONF_ORIENTATION,
     CONF_ORIENTATION_FOLLOW_DEVICE,
@@ -22,8 +26,15 @@ from .const import (
     ORIENTATION_PORTRAIT,
 )
 from .meural import (
+    meural_get_backlight,
+    meural_is_sleeping,
     meural_orientation_from_payload,
+    meural_resume,
+    meural_set_backlight,
+    meural_set_orientation,
+    meural_suspend,
     meural_system_info,
+    parse_meural_system_stats,
     probe_meural,
     send_meural_postcard,
 )
@@ -35,6 +46,18 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 _PREVIEW_STORE_VERSION = 1
+
+# Fraimic service endpoints → Meural local control_command paths.
+_CMD_MAP = {
+    API_SLEEP: "suspend",
+    "/api/sleep": "suspend",
+    "sleep": "suspend",
+    "/api/wake": "resume",
+    "wake": "resume",
+    API_REFRESH: "resume",
+    "/api/refresh": "resume",
+    "refresh": "resume",
+}
 
 
 class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -58,9 +81,6 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=scan_seconds),
             config_entry=config_entry,
         )
-        # Keep an explicit ref for duck-typing with FraimicCoordinator and for
-        # tests that pass a simple MagicMock entry (some HA versions only
-        # attach config_entry via the super() kwarg above).
         self.config_entry = config_entry
 
         self.last_image_id: str | None = None
@@ -120,6 +140,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         device_orientation = meural_orientation_from_payload(
             system
         ) or meural_orientation_from_payload(info)
+        stats = parse_meural_system_stats(system)
 
         wifi_ip: str | None = None
         if isinstance(info, dict) and info.get("wifi_ip"):
@@ -129,6 +150,13 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(wifi_status, dict) and wifi_status.get("ip"):
                 wifi_ip = str(wifi_status["ip"])
 
+        # Prefer dedicated backlight endpoint when available.
+        bl = await meural_get_backlight(session, self.host)
+        if bl is not None:
+            stats["backlight"] = bl
+
+        sleeping = await meural_is_sleeping(session, self.host)
+
         data: dict[str, Any] = {
             "driver": "meural",
             "host": self.host,
@@ -136,11 +164,16 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "firmware_version": None,
             "device_orientation": device_orientation,
             "ip_address": wifi_ip or self.host,
+            "backlight": stats["backlight"],
+            "lux": stats["lux"],
+            "free_space_mb": stats["free_space_mb"],
+            "wifi_rssi": stats["wifi_rssi"],
+            "wifi_ssid": stats["wifi_ssid"],
+            "sleeping": sleeping,
         }
 
         if system:
             data["system"] = system
-            # Best-effort common keys — field names vary by firmware.
             for key in ("version", "firmware", "fw_version", "sw_version"):
                 if key in system and system[key]:
                     data["firmware_version"] = str(system[key])
@@ -155,11 +188,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     async def _async_maybe_follow_device_orientation(self, device_orientation: str) -> None:
-        """When follow-device is on, mirror gsensor into entry.options.orientation.
-
-        That drives render_spec / crop aspect / wall tile size. Only writes when
-        the value changes (async_update_entry reloads the entry).
-        """
+        """When follow-device is on, mirror gsensor into entry.options.orientation."""
         entry = self.config_entry
         follow = entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
         if not follow:
@@ -186,16 +215,49 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.host = new_host
             await self.async_request_refresh()
 
+    async def async_set_backlight(self, level: int) -> None:
+        session = async_get_clientsession(self.hass)
+        await meural_set_backlight(session, self.host, level)
+        if self.data is not None:
+            self.data = {**self.data, "backlight": max(0, min(100, int(level)))}
+        self.async_update_listeners()
+
+    async def async_suspend(self) -> None:
+        session = async_get_clientsession(self.hass)
+        await meural_suspend(session, self.host)
+        if self.data is not None:
+            self.data = {**self.data, "sleeping": True}
+        self.async_update_listeners()
+
+    async def async_resume(self) -> None:
+        session = async_get_clientsession(self.hass)
+        await meural_resume(session, self.host)
+        if self.data is not None:
+            self.data = {**self.data, "sleeping": False}
+        self.async_update_listeners()
+
+    async def async_set_device_orientation(self, orientation: str) -> None:
+        session = async_get_clientsession(self.hass)
+        await meural_set_orientation(session, self.host, orientation)
+
     async def async_send_image(self, image_bytes: bytes) -> int:
         """Upload JPEG (or other image) bytes as a Meural postcard."""
         session = async_get_clientsession(self.hass)
+        # Wake first if suspended so postcard isn't dropped.
+        if self.data and self.data.get("sleeping"):
+            try:
+                await meural_resume(session, self.host)
+            except (aiohttp.ClientError, ValueError) as err:
+                _LOGGER.debug("Meural resume-before-send: %s", err)
+
         content_type = "image/jpeg"
-        # Detect PNG magic if raw upload path ever passes PNG.
         if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
             content_type = "image/png"
         await send_meural_postcard(
             session, self.host, image_bytes, content_type=content_type
         )
+        if self.data is not None:
+            self.data = {**self.data, "sleeping": False}
         return 200
 
     async def async_send_image_or_queue(
@@ -215,9 +277,19 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {"success": True, "queued": False}
 
     async def async_send_command(self, endpoint: str) -> int:
-        """Best-effort remote control path (suspend/resume etc.)."""
-        session = async_get_clientsession(self.hass)
-        url = f"http://{self.host}/remote/{endpoint.lstrip('/')}"
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            resp.raise_for_status()
-            return resp.status
+        """Map Fraimic-style service endpoints onto Meural local commands."""
+        key = (endpoint or "").strip()
+        action = _CMD_MAP.get(key) or _CMD_MAP.get(key.lstrip("/"))
+        if action == "suspend":
+            await self.async_suspend()
+            return 200
+        if action == "resume":
+            await self.async_resume()
+            return 200
+        if key in (API_RESTART, "/api/restart", "restart"):
+            raise HomeAssistantError(
+                "Restart is not supported on Meural Canvas (local API)"
+            )
+        raise HomeAssistantError(
+            f"Unsupported Meural command endpoint: {endpoint!r}"
+        )

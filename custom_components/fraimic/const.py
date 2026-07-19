@@ -48,7 +48,8 @@ MODE_ROTATION = "rotation"
 # Meural is NOT a FRAME_TYPES row — it is a separate driver (DRIVER_MEURAL).
 
 # HA platforms this integration provides
-PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.CAMERA]
+# LIGHT is Meural-only (backlight); Fraimic e-ink entries no-op in light.py.
+PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.CAMERA, Platform.LIGHT]
 
 # The "kind" marker (entry.data["kind"]) for the auto-created, device-less
 # config entry that hosts scene entities -- see scenes.py / scene.py for why

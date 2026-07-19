@@ -454,7 +454,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         if not remaining_frame_entries:
             # Remove services when the last frame entry is gone.
             for service in (
-                "send_image", "send_scene", "send_skill", "refresh", "sleep", "restart",
+                "send_image", "send_scene", "send_skill", "refresh",
+                "sleep", "wake", "restart",
             ):
                 hass.services.async_remove(DOMAIN, service)
             
@@ -705,6 +706,17 @@ def _register_services(hass: HomeAssistant) -> None:
         await coordinator.async_send_command(API_SLEEP)
         _LOGGER.info("Sleep command sent to frame %s", coordinator.host)
 
+    async def _handle_wake(call: ServiceCall) -> None:
+        coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
+        # Meural maps /api/wake → resume; Fraimic has no wake endpoint.
+        if hasattr(coordinator, "async_resume"):
+            await coordinator.async_resume()
+        else:
+            raise HomeAssistantError(
+                "Wake is only supported on Meural Canvas frames"
+            )
+        _LOGGER.info("Wake command sent to frame %s", coordinator.host)
+
     async def _handle_refresh(call: ServiceCall) -> None:
         coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
         await coordinator.async_send_command(API_REFRESH)
@@ -897,6 +909,9 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, "sleep", _handle_sleep, schema=_DEVICE_ID_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, "wake", _handle_wake, schema=_DEVICE_ID_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, "refresh", _handle_refresh, schema=_DEVICE_ID_SCHEMA

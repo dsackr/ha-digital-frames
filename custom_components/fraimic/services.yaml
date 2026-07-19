@@ -37,11 +37,27 @@ restart:
 
 sleep:
   name: Sleep Frame
-  description: Put a Fraimic frame into sleep mode.
+  description: >-
+    Put a frame to sleep. Fraimic Spectra → deep sleep; Meural Canvas →
+    suspend display (local backlight off / sleep).
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to put to sleep.
+      description: The frame to put to sleep.
+      required: true
+      selector:
+        device:
+          integration: fraimic
+
+wake:
+  name: Wake Frame
+  description: >-
+    Wake a Meural Canvas from display suspend (local resume). Not used by
+    Fraimic Spectra frames (they wake on their own schedule).
+  fields:
+    device_id:
+      name: Frame
+      description: The Meural frame to wake.
       required: true
       selector:
         device:
