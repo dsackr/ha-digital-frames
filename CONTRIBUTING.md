@@ -1,4 +1,4 @@
-# Contributing to Fraimic for Home Assistant
+# Contributing to Digital Frames for Home Assistant
 
 Thanks for your interest in contributing. This is a custom HACS integration for Fraimic e-ink frames — it talks to the frame's local HTTP API and converts images to Spectra 6 binary format on the fly.
 

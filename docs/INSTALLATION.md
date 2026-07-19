@@ -5,7 +5,8 @@
 1. In Home Assistant, go to **Settings → Integrations → HACS**
 2. Click the three-dot menu → **Custom repositories**
 3. Paste `https://github.com/dsackr/fraimic-homeassistant` and set category to **Integration**
-4. Click **Add**, then find **Fraimic** in HACS and install it
+4. Click **Add**, then find **Digital Frames** in HACS and install it
+   (repo is still `fraimic-homeassistant`; package path still `custom_components/fraimic/`)
 5. Restart Home Assistant
 
 ## Install manually
@@ -25,20 +26,20 @@ Restart Home Assistant.
 Frames must be awake to be discovered — tap the frame to wake it if needed.
 
 1. Go to **Settings → Integrations → Add Integration**
-2. Search for **Fraimic**
+2. Search for **Digital Frames**
 3. Follow the prompts; discovered frames will appear automatically
 
 If auto-discovery doesn't find a frame, you can enter its IP address manually from the same dialog.
 
 ## Requirements
 
-- Fraimic frames (or a supported community clone — see below) on the same WiFi network as Home Assistant
+- Supported frames on the same WiFi network as Home Assistant (see below)
 - Home Assistant 2024.1 or newer
 - [Pillow](https://pillow.readthedocs.io/) Python library (installed automatically)
 
 ## Supported hardware
 
-Official Fraimic panels:
+Official Fraimic panels (manufacturer **Fraimic** in the device registry):
 
 - Fraimic Canvas 13.3"
 - Fraimic Canvas 31.5"

@@ -1,10 +1,10 @@
 send_image:
   name: Send Image
-  description: Convert and send an image to a Fraimic e-ink frame.
+  description: Convert and send an image to a frame.
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to send the image to.
+      description: The frame to send the image to.
       required: true
       selector:
         device:
@@ -25,11 +25,11 @@ send_image:
 
 restart:
   name: Restart Frame
-  description: Restart a Fraimic frame.
+  description: Restart a frame.
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to restart.
+      description: The frame to restart.
       required: true
       selector:
         device:
@@ -65,11 +65,11 @@ wake:
 
 refresh:
   name: Refresh Display
-  description: Trigger a display refresh on a Fraimic frame.
+  description: Trigger a display refresh on a frame.
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to refresh.
+      description: The frame to refresh.
       required: true
       selector:
         device:
@@ -77,11 +77,11 @@ refresh:
 
 generate_ai_image:
   name: Generate AI Image
-  description: Generate an AI image from a text prompt and send it to a Fraimic frame. The image is uploaded to your configured library backend (tagged into the "GenAI" album) exactly like a manual upload, then sent.
+  description: Generate an AI image from a text prompt and send it to a frame. The image is uploaded to your configured library backend (tagged into the "GenAI" album) exactly like a manual upload, then sent.
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to send the generated image to.
+      description: The frame to send the generated image to.
       required: true
       selector:
         device:
@@ -103,29 +103,29 @@ generate_ai_image:
 
 send_scene:
   name: Send Scene
-  description: Send a Fraimic scene's mapped images to their assigned frames all at once.
+  description: Send a Digital Frames scene's mapped images to their assigned frames all at once.
   fields:
     name:
       name: Scene
-      description: The name of the scene to send (set up in the Fraimic panel's Scenes section).
+      description: The name of the scene to send (set up in the Digital Frames panel's Scenes section).
       required: true
       selector:
         text:
 
 send_skill:
   name: Send Skill
-  description: Render a Fraimic skill (e.g. Word of the Day) fresh and send it to a frame -- no prior mapping between the skill and the frame required.
+  description: Render a Digital Frames skill (e.g. Word of the Day) fresh and send it to a frame -- no prior mapping between the skill and the frame required.
   fields:
     device_id:
       name: Frame
-      description: The Fraimic frame to send the skill to.
+      description: The frame to send the skill to.
       required: true
       selector:
         device:
           integration: fraimic
     skill_id:
       name: Skill
-      description: The skill to render and send (set up in the Fraimic panel's Daily Content section).
+      description: The skill to render and send (set up in the Digital Frames panel's Daily Content section).
       required: true
       selector:
         text:

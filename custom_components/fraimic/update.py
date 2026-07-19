@@ -1,7 +1,7 @@
-"""Self-update helpers: check GitHub for a newer Fraimic release and install it.
+"""Self-update helpers: check GitHub for a newer Digital Frames release and install it.
 
 Keeps users off the HACS → Settings → Restart obstacle course when all they
-want is "is there a new Fraimic, and can I install it from here?".
+want is "is there a new release, and can I install it from here?".
 
 Install strategy (in order):
 
@@ -223,7 +223,7 @@ async def fetch_latest_release(
                     r2.raise_for_status()
                     items = await r2.json()
                 if not items:
-                    raise UpdateError("No GitHub releases found for Fraimic")
+                    raise UpdateError("No GitHub releases found for Digital Frames")
                 data = items[0]
             else:
                 resp.raise_for_status()
@@ -519,7 +519,7 @@ async def install_update(hass: HomeAssistant, *, version: str | None = None) -> 
             "needs_restart": needs,
             "hacs_sync": hacs_sync,
             "message": (
-                f"Fraimic {disk_now} was already on disk; "
+                f"Digital Frames {disk_now} was already on disk; "
                 + (
                     "HACS is now registered to that version."
                     if hacs_sync.get("synced")
@@ -569,7 +569,7 @@ async def install_update(hass: HomeAssistant, *, version: str | None = None) -> 
         "needs_restart": True,
         "hacs_sync": hacs_sync,
         "message": (
-            f"Fraimic {disk} is on disk"
+            f"Digital Frames {disk} is on disk"
             + (f" (Home Assistant is still running {running})" if running and running != disk else "")
             + f".{hacs_note} Restart Home Assistant to load it."
         ),
@@ -649,7 +649,7 @@ async def _try_hacs_install(
             "needs_restart": True,
             "hacs_sync": {"synced": True, "installed_version": ref, "persisted": True},
             "message": (
-                f"Fraimic {disk} installed via HACS"
+                f"Digital Frames {disk} installed via HACS"
                 + (
                     f" (Home Assistant is still running {running})"
                     if running and running != disk

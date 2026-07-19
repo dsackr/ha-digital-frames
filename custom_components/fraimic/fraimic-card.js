@@ -687,7 +687,7 @@
           </div>
 
           <div class="footer">
-            <span class="frame-name" id="frameName">Fraimic Frame</span>
+            <span class="frame-name" id="frameName">Frame</span>
             <span class="frame-status" id="frameStatus"></span>
             <button class="iconbtn" id="orientPortrait" title="Portrait (next send)" style="display:none">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>
@@ -695,7 +695,7 @@
             <button class="iconbtn" id="orientLandscape" title="Landscape (next send)" style="display:none">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
             </button>
-            <button class="iconbtn" id="gearBtn" title="Open Fraimic">⚙</button>
+            <button class="iconbtn" id="gearBtn" title="Open Digital Frames">⚙</button>
           </div>
 
           <div class="toolbar" id="toolbar">
@@ -842,7 +842,7 @@
         const st = this._hass.states[this._config.entity];
         name = st && (st.attributes.friendly_name || '').replace(/\s+battery$/i, '').trim();
       }
-      const finalName = name || 'Fraimic Frame';
+      const finalName = name || 'Frame';
       if (nameEl.textContent !== finalName) nameEl.textContent = finalName;
 
       // Status: battery entity when known; falls back to /frames "online".
@@ -1598,7 +1598,7 @@
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: 'fraimic-card',
-    name: 'Fraimic Frame Card',
+    name: 'Digital Frames Card',
     description: 'See what\'s on a Fraimic e-ink frame and manage it: send photos or daily content, change orientation, adjust cropping.',
     preview: true,
     documentationURL: 'https://github.com/dsackr/fraimic-homeassistant',

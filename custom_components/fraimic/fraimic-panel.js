@@ -1,6 +1,6 @@
 /**
- * Fraimic Panel
- * Sidebar panel that auto-discovers all Fraimic frames and lets you send
+ * Digital Frames Panel (web component: fraimic-panel)
+ * Sidebar panel that auto-discovers configured frames and lets you send
  * images to any of them — no manual card configuration required.
  */
 
@@ -2600,7 +2600,7 @@
                 <button class="btn-primary" id="lib-upload-btn" style="flex:0 0 auto">⬆ Upload to Library</button>
                 <button class="btn-ghost" id="album-create-btn" style="flex:0 0 auto">＋ Create Album</button>
                 <button class="btn-ghost" id="lib-discover-btn" style="display:none;flex:0 0 auto"
-                  title="Adopt photos dropped into the Fraimic Library/inbox folder in Dropbox">🔍 Discover</button>
+                  title="Adopt photos dropped into the Digital Frames Library/inbox folder in Dropbox">🔍 Discover</button>
                 <button class="btn-ghost" id="library-modal-close" style="flex:0 0 auto">✕ Close</button>
               </div>
             </div>
@@ -3855,7 +3855,7 @@
       banner.innerHTML = '';
       const text = document.createElement('span');
       text.className = 'update-banner-text';
-      text.innerHTML = `⬆ Fraimic <strong>v${this._esc(latest)}</strong> is available`
+      text.innerHTML = `⬆ Digital Frames <strong>v${this._esc(latest)}</strong> is available`
         + ` (you have v${this._esc(installed)})`;
       banner.appendChild(text);
       const installBtn = document.createElement('button');
@@ -4171,7 +4171,7 @@
             <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="white" stroke-width="1.5"><rect x="2" y="3" width="20" height="16" rx="2"/><rect x="5" y="6" width="6" height="10" rx="1"/><rect x="13" y="6" width="6" height="4" rx="1"/><rect x="13" y="12" width="6" height="4" rx="1"/></svg>
           </div>
           <div style="font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#03a9f4;margin-bottom:10px">Welcome to</div>
-          <div style="font-size:36px;font-weight:800;color:#111827;letter-spacing:-.03em;margin-bottom:14px">Fraimic</div>
+          <div style="font-size:36px;font-weight:800;color:#111827;letter-spacing:-.03em;margin-bottom:14px">Digital Frames</div>
           <div style="font-size:15px;color:#6b7280;line-height:1.75;max-width:400px;margin:0 auto 32px">Turn your e‑ink frames into a beautiful, voice-controlled gallery wall — managed directly from Home Assistant. No cloud, no account, no app.</div>
           <div style="display:flex;justify-content:center;gap:24px;margin-bottom:36px">
             <div style="text-align:center">
@@ -4232,7 +4232,7 @@
           </div>
           <div class="ob-eyebrow">Frames</div>
           <div class="ob-h1">Discover your frames</div>
-          <div class="ob-copy">Fraimic scans your local network and finds e‑ink frames automatically. When one appears in the discovery banner, hit <strong>＋ Add</strong>, give it a name, and it lands on your dashboard instantly.</div>
+          <div class="ob-copy">Digital Frames scans your local network and finds frames automatically. When one appears in the discovery banner, hit <strong>＋ Add</strong>, give it a name, and it lands on your dashboard instantly.</div>
           <div class="ob-tip">💡 You can also add a frame manually by IP address — handy if it sits on a network segment the scan can't reach. Make sure the frame is awake (tap it) when adding.</div>
           <div class="ob-actions">
             ${wizard.framesAdded > 0 ? `<p class="muted" style="margin:0 0 8px">✓ Frame added! It's waiting on your dashboard behind this tour.</p>` : ''}

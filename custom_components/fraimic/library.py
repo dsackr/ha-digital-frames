@@ -2106,7 +2106,7 @@ class LibraryManager:
                 "generate_data",
                 {
                     "entity_id": ai_task_entity,
-                    "task_name": "Fraimic auto-tagging",
+                    "task_name": "Digital Frames auto-tagging",
                     "instructions": prompt,
                     "attachments": [
                         {

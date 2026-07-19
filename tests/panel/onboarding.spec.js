@@ -73,7 +73,7 @@ test.describe('First-run onboarding', () => {
     // Step 1 (Welcome): no header Skip -- its own ghost button is the exit.
     let state = await wizardState(page);
     expect(state.step).toBe(1);
-    expect(state.body).toContain('Fraimic');
+    expect(state.body).toContain('Digital Frames');
     expect(state.skipVisible).toBe(false);
     expect(state.activeDots).toBe(1);
     await clickPanelButton(page, 'ob-next');

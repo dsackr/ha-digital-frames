@@ -1,4 +1,4 @@
-"""The Fraimic integration."""
+"""The Digital Frames integration (HA domain: fraimic)."""
 
 from __future__ import annotations
 
@@ -27,16 +27,18 @@ from .const import (
     HUB_PLATFORMS,
     KIND_SCENES_HUB,
     PLATFORMS,
+    PRODUCT_NAME,
 )
 from .coordinator import FraimicCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 # panel_custom is a built-in HA component; import lazily to avoid load-order issues.
-_PANEL_URL  = "/fraimic/fraimic-panel.js"
-_PANEL_PATH = "fraimic"          # URL path: /fraimic
-_PANEL_SIDEBAR_TITLE = "Frames"
-_PANEL_SIDEBAR_ICON  = "mdi:image-frame"
+# Product display name is PRODUCT_NAME; URL path stays /fraimic for stable bookmarks.
+_PANEL_URL = "/fraimic/fraimic-panel.js"
+_PANEL_PATH = "fraimic"  # URL path: /fraimic
+_PANEL_SIDEBAR_TITLE = PRODUCT_NAME
+_PANEL_SIDEBAR_ICON = "mdi:image-frame"
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -882,7 +884,7 @@ def _register_services(hass: HomeAssistant) -> None:
             "generate_image",
             {
                 "entity_id": ai_task_entity_id,
-                "task_name": "Fraimic AI-generated frame image",
+                "task_name": f"{PRODUCT_NAME} AI-generated frame image",
                 "instructions": prompt,
             },
             blocking=True,

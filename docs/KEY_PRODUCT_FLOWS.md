@@ -1,9 +1,10 @@
 # Key Product Flows
 
-This is the catalog of Fraimic's Key Product Flows (KPFs) — the user-facing
-capabilities the integration provides, kept current as the source of truth
-for what "the product doing its job" means. Each entry says what breaks for
-the end user if the flow silently fails, and where it's tested today.
+This is the catalog of **Digital Frames** Key Product Flows (KPFs) — the
+user-facing capabilities the integration provides, kept current as the
+source of truth for what "the product doing its job" means. (HA domain and
+package path remain `fraimic`.) Each entry says what breaks for the end
+user if the flow silently fails, and where it's tested today.
 
 **Maintenance rule (binding for all contributors, human or AI):** any change
 that adds or alters user-facing behavior must land together with (a) a new
@@ -648,6 +649,26 @@ banner does not hammer the API on every panel open.
   dismiss rules). **Panel-tested** — `tests/panel/update-banner.spec.js`
   (show / hide / dismiss / non-admin). Live GitHub check/install is
   admin-manual (**Gap** for CI; network + filesystem).
+
+## 34. Product branding as Digital Frames (display name)
+HACS, the integration list, the sidebar panel title, onboarding welcome,
+media browser root, Lovelace card name, and update banners identify the
+product as **Digital Frames**. Technical identifiers stay stable: HA
+domain `fraimic`, package `custom_components/fraimic/`, panel URL
+`/fraimic`, service domain `fraimic.*`. Official Spectra hardware still
+uses manufacturer **Fraimic** in the device registry; driver id `fraimic`
+is unchanged.
+- **Entry points**: `const.py` (`PRODUCT_NAME`), `manifest.json` /
+  `hacs.json` (`name`), `__init__.py` (`_PANEL_SIDEBAR_TITLE`),
+  `media_source.py`, `fraimic-panel.js` (onboarding + update banner),
+  `fraimic-card.js` (card name), `config_flow.py` (scenes hub title).
+- **If it silently breaks**: users still search HACS for "Fraimic" only
+  and miss the integration, or the sidebar still says something else and
+  feels like a different product from the integration list.
+- **Test status**: **Backend-tested** — `tests/python/unit/test_branding.py`
+  (`PRODUCT_NAME`, manifest/hacs name). **Panel-tested** — onboarding /
+  update-banner copy assertions for "Digital Frames". Domain/path rename
+  is **not** in scope (Gap by design until migration).
 
 ---
 

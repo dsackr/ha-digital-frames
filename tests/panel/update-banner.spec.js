@@ -45,6 +45,7 @@ test.describe('Update available banner', () => {
 
     await expect.poll(async () => (await bannerState(page)).display).toBe('flex');
     const state = await bannerState(page);
+    expect(state.text).toContain('Digital Frames');
     expect(state.text).toContain('v0.12.120');
     expect(state.text).toContain('v0.12.100');
     expect(state.hasInstall).toBe(true);

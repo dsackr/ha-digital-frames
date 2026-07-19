@@ -120,7 +120,7 @@
   "services": {
     "restart": {
       "name": "Restart",
-      "description": "Restart a Fraimic frame.",
+      "description": "Restart a Fraimic/e-ink frame.",
       "fields": {
         "entry_id": {
           "name": "Entry ID",
@@ -130,7 +130,7 @@
     },
     "sleep": {
       "name": "Sleep",
-      "description": "Put a Fraimic frame into deep sleep.",
+      "description": "Put a Fraimic/e-ink frame into deep sleep.",
       "fields": {
         "entry_id": {
           "name": "Entry ID",
@@ -140,7 +140,7 @@
     },
     "refresh": {
       "name": "Refresh Display",
-      "description": "Trigger a full display refresh on a Fraimic frame.",
+      "description": "Trigger a full display refresh on a Fraimic/e-ink frame.",
       "fields": {
         "entry_id": {
           "name": "Entry ID",
@@ -150,7 +150,7 @@
     },
     "send_image": {
       "name": "Send Image",
-      "description": "Convert and upload an image to a Fraimic frame.",
+      "description": "Convert and upload an image to a frame.",
       "fields": {
         "entry_id": {
           "name": "Entry ID",

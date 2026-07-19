@@ -1,8 +1,13 @@
-"""Constants for the Fraimic integration."""
+"""Constants for the Digital Frames integration (HA domain: fraimic)."""
 
 from homeassistant.const import Platform
 
 DOMAIN = "fraimic"
+
+# User-facing product name (HACS, sidebar, media browser, banners).
+# Technical domain, package path, and API prefix stay ``fraimic`` until a
+# future migration; official Spectra hardware is still manufacturer "Fraimic".
+PRODUCT_NAME = "Digital Frames"
 
 # Polling interval in seconds (5 minutes default)
 DEFAULT_SCAN_INTERVAL = 300

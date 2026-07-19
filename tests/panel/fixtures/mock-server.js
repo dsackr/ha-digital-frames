@@ -325,7 +325,7 @@ function createMockServer({
         disk: ver,
         running: updateState.running,
         needs_restart: true,
-        message: `Fraimic ${ver} is on disk. Restart Home Assistant to load it.`,
+        message: `Digital Frames ${ver} is on disk. Restart Home Assistant to load it.`,
       });
     }
     if (p === '/api/fraimic/update/restart' && req.method === 'POST') {

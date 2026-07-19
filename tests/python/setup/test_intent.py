@@ -34,7 +34,7 @@ def _make_device(hass, make_frame_entry, name: str, device_key: str):
 
 
 async def test_no_frames_configured_raises(hass):
-    with pytest.raises(HomeAssistantError, match="No Fraimic frames"):
+    with pytest.raises(HomeAssistantError, match="No frames"):
         _match_frame_device_id(hass, "office")
 
 
@@ -63,7 +63,7 @@ async def test_ambiguous_partial_match_raises(hass, make_frame_entry):
 async def test_no_match_raises_with_configured_list(hass, make_frame_entry):
     _make_device(hass, make_frame_entry, "Office Frame", "k1")
 
-    with pytest.raises(HomeAssistantError, match="No Fraimic frame matches"):
+    with pytest.raises(HomeAssistantError, match="No frame matches"):
         _match_frame_device_id(hass, "garage")
 
 
@@ -157,7 +157,7 @@ async def test_match_skill_id_exact_and_partial(hass):
 
 
 async def test_match_skill_id_no_skills_configured_raises(hass):
-    with pytest.raises(HomeAssistantError, match="No Fraimic skills"):
+    with pytest.raises(HomeAssistantError, match="No skills"):
         _match_skill_id(hass, "word of the day")
 
 

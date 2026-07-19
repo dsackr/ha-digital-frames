@@ -27,7 +27,7 @@ async def async_get_media_source(hass: HomeAssistant) -> FraimicMediaSource:
 class FraimicMediaSource(MediaSource):
     """Provide media from Fraimic's library."""
 
-    name = "Fraimic"
+    name = "Digital Frames"
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize Fraimic media source."""
@@ -116,7 +116,7 @@ class FraimicMediaSource(MediaSource):
                 identifier="",
                 media_class=MediaClass.DIRECTORY,
                 media_content_type=MediaType.ALBUM,
-                title="Fraimic Library",
+                title="Digital Frames Library",
                 can_play=False,
                 can_expand=True,
                 children=children,

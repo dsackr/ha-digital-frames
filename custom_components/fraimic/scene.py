@@ -84,8 +84,8 @@ class FraimicSceneEntity(SceneEntity):
     Deliberately has no device_info: HA's legacy naming always concatenates
     "{device_name} {entity_name}" for the displayed/spoken name whenever an
     entity belongs to a device and has no registry name override, regardless
-    of has_entity_name. Grouping these under a virtual "Fraimic Scenes"
-    device would turn "Countdown Wall" into "Fraimic Scenes Countdown Wall",
+    of has_entity_name. Grouping these under a virtual "Digital Frames Scenes"
+    device would turn "Countdown Wall" into "Digital Frames Scenes Countdown Wall",
     which breaks "Alexa, run Countdown Wall" voice matching.
     """
 

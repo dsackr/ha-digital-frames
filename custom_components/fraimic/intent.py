@@ -1,11 +1,11 @@
 """Custom Assist/LLM intents: generate an AI image, or send a skill (Word of
-the Day, Joke of the Day, ...), to a named Fraimic frame in a single voice
-command.
+the Day, Joke of the Day, ...), to a named frame in a single voice command.
 
 Registered once at domain setup (not per config entry) via
 async_register_intents, so they're available to any LLM-backed conversation
-agent (Google Generative AI, OpenAI, etc.) the moment Fraimic is installed --
-no user-authored script or manual "expose to Assist" step required.
+agent (Google Generative AI, OpenAI, etc.) the moment Digital Frames is
+installed -- no user-authored script or manual "expose to Assist" step
+required.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _match_by_name(
     ambiguous (>1) matches.
     """
     if not candidates:
-        raise HomeAssistantError(f"No Fraimic {kind}s are configured")
+        raise HomeAssistantError(f"No {kind}s are configured")
 
     target = _normalize(spoken_name)
     named = [(candidate, _normalize(get_name(candidate) or "")) for candidate in candidates]
@@ -66,7 +66,7 @@ def _match_by_name(
             f"'{spoken_name}' matches more than one {kind} ({options}) -- be more specific"
         )
     raise HomeAssistantError(
-        f"No Fraimic {kind} matches '{spoken_name}'. Configured {kind}s: {options}"
+        f"No {kind} matches '{spoken_name}'. Configured {kind}s: {options}"
     )
 
 
@@ -87,7 +87,7 @@ def _match_by_tag(spoken_name: str, images: list[dict[str, Any]]) -> list[dict[s
 
 
 def _match_frame_device_id(hass: HomeAssistant, frame_name: str) -> str:
-    """Resolve a spoken frame name to a Fraimic device_id.
+    """Resolve a spoken frame name to a Digital Frames device_id.
 
     Matches against the same device names shown in the "Frame" selector on
     fraimic.generate_ai_image -- exact match first, falling back to a single
@@ -122,7 +122,7 @@ class FraimicGenerateAIImageIntent(intent.IntentHandler):
     intent_type = INTENT_GENERATE_AI_IMAGE
     description = (
         "Generate an image from a text description and send it to a named "
-        "Fraimic e-ink photo frame."
+        "photo frame (Digital Frames)."
     )
 
     @property
@@ -132,7 +132,7 @@ class FraimicGenerateAIImageIntent(intent.IntentHandler):
                 "prompt", description="What image to generate"
             ): intent.non_empty_string,
             vol.Required(
-                "frame", description="Name of the Fraimic frame to send it to"
+                "frame", description="Name of the frame to send it to"
             ): intent.non_empty_string,
         }
 
@@ -178,8 +178,8 @@ class FraimicSendSkillIntent(intent.IntentHandler):
 
     intent_type = INTENT_SEND_SKILL
     description = (
-        "Send a Fraimic skill (like Word of the Day or Joke of the Day) to "
-        "a named Fraimic e-ink photo frame."
+        "Send a Digital Frames skill (like Word of the Day or Joke of the Day) "
+        "to a named photo frame."
     )
 
     @property
@@ -189,7 +189,7 @@ class FraimicSendSkillIntent(intent.IntentHandler):
                 "skill", description="Name of the skill to send"
             ): intent.non_empty_string,
             vol.Required(
-                "frame", description="Name of the Fraimic frame to send it to"
+                "frame", description="Name of the frame to send it to"
             ): intent.non_empty_string,
         }
 
@@ -235,7 +235,7 @@ class FraimicShowImageIntent(intent.IntentHandler):
     intent_type = INTENT_SHOW_IMAGE
     description = (
         "Show or display an existing image from the shared image library "
-        "by its name or filename on a named Fraimic e-ink photo frame."
+        "by its name or filename on a named photo frame (Digital Frames)."
     )
 
     @property
@@ -245,7 +245,7 @@ class FraimicShowImageIntent(intent.IntentHandler):
                 "image_name", description="Name or filename of the image in the library"
             ): intent.non_empty_string,
             vol.Required(
-                "frame", description="Name of the Fraimic frame to send it to"
+                "frame", description="Name of the frame to send it to"
             ): intent.non_empty_string,
         }
 
