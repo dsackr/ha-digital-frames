@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -45,7 +46,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_PREVIEW_STORE_VERSION = 1
+_PREVIEW_STORE_VERSION = 2
+# Cap persisted last-wire JPEG so Store stays reasonable (~2.5MB binary).
+_MAX_WIRE_STORE_BYTES = 2_500_000
 
 # Fraimic service endpoints → Meural local control_command paths.
 _CMD_MAP = {
@@ -65,6 +68,11 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     Duck-types the FraimicCoordinator surface used by scenes, library send,
     walls list, and preview storage so core product code stays driver-agnostic.
+
+    Orientation note: firmware keeps orientation-scoped galleries (e.g.
+    Recents). Physically rotating the Canvas swaps to the last *app/cloud*
+    image for that hang — not our postcard. When hang changes we re-push our
+    last library image (or last wire bytes) so HA content stays on screen.
     """
 
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
@@ -85,8 +93,10 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.last_image_id: str | None = None
         self.last_thumbnail: bytes | None = None
+        self._last_wire_bytes: bytes | None = None
         # Meural local postcard has no Fraimic-style sleep queue.
         self.pending_send: dict[str, Any] | None = None
+        self._redisplay_lock = asyncio.Lock()
 
         self._preview_store = Store(
             hass,
@@ -98,15 +108,21 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = await self._preview_store.async_load()
         if not isinstance(data, dict):
             return
+        import base64  # noqa: PLC0415
+
         self.last_image_id = data.get("image_id")
         thumb_b64 = data.get("thumbnail_b64")
         if thumb_b64:
-            import base64  # noqa: PLC0415
-
             try:
                 self.last_thumbnail = base64.b64decode(thumb_b64)
             except Exception:  # noqa: BLE001
                 self.last_thumbnail = None
+        wire_b64 = data.get("wire_b64")
+        if wire_b64:
+            try:
+                self._last_wire_bytes = base64.b64decode(wire_b64)
+            except Exception:  # noqa: BLE001
+                self._last_wire_bytes = None
 
     async def async_load_pending_send(self) -> None:
         """No-op: Meural driver does not queue sends on sleep."""
@@ -117,16 +133,26 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         image_id: str | None = None,
         thumbnail: bytes | None = None,
+        wire_bytes: bytes | None = None,
     ) -> None:
         import base64  # noqa: PLC0415
 
         self.last_image_id = image_id
         self.last_thumbnail = thumbnail
+        if wire_bytes is not None:
+            self._last_wire_bytes = (
+                wire_bytes if len(wire_bytes) <= _MAX_WIRE_STORE_BYTES else None
+            )
         await self._preview_store.async_save(
             {
                 "image_id": image_id,
                 "thumbnail_b64": (
                     base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+                ),
+                "wire_b64": (
+                    base64.b64encode(self._last_wire_bytes).decode("ascii")
+                    if self._last_wire_bytes
+                    else None
                 ),
             }
         )
@@ -150,7 +176,6 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(wifi_status, dict) and wifi_status.get("ip"):
                 wifi_ip = str(wifi_status["ip"])
 
-        # Prefer dedicated backlight endpoint when available.
         bl = await meural_get_backlight(session, self.host)
         if bl is not None:
             stats["backlight"] = bl
@@ -188,7 +213,11 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     async def _async_maybe_follow_device_orientation(self, device_orientation: str) -> None:
-        """When follow-device is on, mirror gsensor into entry.options.orientation."""
+        """Mirror gsensor into options and re-postcard our last image.
+
+        Canvas firmware swaps to orientation-scoped Recents (often last official
+        app content) on physical rotate. Re-push HA content for the new hang.
+        """
         entry = self.config_entry
         follow = entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
         if not follow:
@@ -203,6 +232,76 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 CONF_ORIENTATION_FOLLOW_DEVICE: True,
             },
         )
+        await self.async_redisplay_last()
+
+    async def async_redisplay_last(self) -> bool:
+        """Re-send last HA content for the current render_spec orientation.
+
+        Prefers library ``last_image_id`` (re-encode for new aspect). Falls
+        back to last wire JPEG if the send had no library id.
+
+        Returns True if a postcard was attempted successfully.
+        """
+        async with self._redisplay_lock:
+            image_id = self.last_image_id
+            if image_id:
+                library = self.hass.data.get(DOMAIN, {}).get("_library")
+                if library is None:
+                    _LOGGER.debug(
+                        "Meural redisplay: no library for image_id=%s", image_id
+                    )
+                else:
+                    try:
+                        from .helpers import render_spec_for_entry  # noqa: PLC0415
+                        from .panel_codec import panel_codec_for_entry  # noqa: PLC0415
+
+                        entry = self.config_entry
+                        spec = render_spec_for_entry(entry)
+                        try:
+                            codec_id = panel_codec_for_entry(entry).id
+                        except ValueError:
+                            codec_id = "jpeg_q90"
+                        wire = await library.async_get_bin_for_send(
+                            image_id, spec, codec_id=codec_id
+                        )
+                        await self.async_send_image(wire)
+                        await self.async_set_last_image(
+                            image_id=image_id,
+                            thumbnail=self.last_thumbnail,
+                            wire_bytes=wire,
+                        )
+                        _LOGGER.info(
+                            "Meural %s: redisplayed library image %s after orientation change",
+                            self.host,
+                            image_id,
+                        )
+                        return True
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.warning(
+                            "Meural %s: redisplay from library failed (%s); "
+                            "trying last wire bytes",
+                            self.host,
+                            err,
+                        )
+
+            if self._last_wire_bytes:
+                try:
+                    await self.async_send_image(self._last_wire_bytes)
+                    _LOGGER.info(
+                        "Meural %s: redisplayed last wire postcard after orientation change",
+                        self.host,
+                    )
+                    return True
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Meural %s: redisplay last wire failed: %s", self.host, err
+                    )
+                    return False
+
+            _LOGGER.debug(
+                "Meural %s: orientation changed but nothing to redisplay", self.host
+            )
+            return False
 
     async def async_config_entry_updated(
         self,
@@ -243,7 +342,6 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_send_image(self, image_bytes: bytes) -> int:
         """Upload JPEG (or other image) bytes as a Meural postcard."""
         session = async_get_clientsession(self.hass)
-        # Wake first if suspended so postcard isn't dropped.
         if self.data and self.data.get("sleeping"):
             try:
                 await meural_resume(session, self.host)
@@ -273,7 +371,9 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             _LOGGER.error("Meural send to %s failed: %s", self.host, err)
             return {"success": False, "queued": False, "message": str(err)}
-        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+        await self.async_set_last_image(
+            image_id=image_id, thumbnail=thumbnail, wire_bytes=image_bytes
+        )
         return {"success": True, "queued": False}
 
     async def async_send_command(self, endpoint: str) -> int:

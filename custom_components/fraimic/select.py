@@ -177,6 +177,9 @@ class MeuralOrientationSelect(CoordinatorEntity, SelectEntity):
             self.hass.config_entries.async_update_entry(
                 self._entry, options=new_options
             )
+            # Canvas may still show orientation-scoped Recents — re-postcard.
+            if hasattr(self.coordinator, "async_redisplay_last"):
+                await self.coordinator.async_redisplay_last()
         else:
             try:
                 await self.coordinator.async_set_device_orientation(value)
@@ -190,4 +193,6 @@ class MeuralOrientationSelect(CoordinatorEntity, SelectEntity):
                     CONF_ORIENTATION_FOLLOW_DEVICE: False,
                 },
             )
+            if hasattr(self.coordinator, "async_redisplay_last"):
+                await self.coordinator.async_redisplay_last()
         self.async_write_ha_state()

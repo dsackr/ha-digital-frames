@@ -14,6 +14,7 @@ from custom_components.fraimic.const import (
     CONF_HOST,
     CONF_ORIENTATION,
     CONF_ORIENTATION_FOLLOW_DEVICE,
+    DOMAIN,
     DRIVER_MEURAL,
     MEURAL_SIZE_LABEL,
     ORIENTATION_LANDSCAPE,
@@ -302,3 +303,70 @@ async def test_set_backlight():
         await coord.async_set_backlight(40)
     set_bl.assert_awaited_once()
     assert coord.data["backlight"] == 40
+
+
+@pytest.mark.asyncio
+async def test_orientation_change_redisplays_last_wire():
+    """Physical rotate must re-postcard HA content, not leave app Recents."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {}}
+    entry = MagicMock()
+    entry.entry_id = "meural_entry"
+    entry.data = {CONF_HOST: "192.168.1.32", CONF_DRIVER: DRIVER_MEURAL}
+    entry.options = {
+        CONF_ORIENTATION_FOLLOW_DEVICE: True,
+        CONF_ORIENTATION: ORIENTATION_LANDSCAPE,
+    }
+    coord = MeuralCoordinator(hass, entry)
+    coord._last_wire_bytes = b"\xff\xd8\xffwirejpeg"
+    coord.last_image_id = None
+
+    with (
+        patch.object(coord, "async_send_image", new=AsyncMock()) as send,
+        patch.object(coord, "async_redisplay_last", wraps=coord.async_redisplay_last),
+    ):
+        await coord._async_maybe_follow_device_orientation(ORIENTATION_PORTRAIT)
+
+    hass.config_entries.async_update_entry.assert_called_once()
+    send.assert_awaited_once_with(b"\xff\xd8\xffwirejpeg")
+
+
+@pytest.mark.asyncio
+async def test_redisplay_prefers_library_image_id():
+    hass = MagicMock()
+    library = MagicMock()
+    library.async_get_bin_for_send = AsyncMock(return_value=b"\xff\xd8\xfffromlib")
+    hass.data = {DOMAIN: {"_library": library}}
+    entry = MagicMock()
+    entry.entry_id = "meural_entry"
+    entry.data = {
+        CONF_HOST: "192.168.1.32",
+        CONF_DRIVER: DRIVER_MEURAL,
+        "width": 1920,
+        "height": 1080,
+        "size": "meural",
+    }
+    entry.options = {CONF_ORIENTATION: ORIENTATION_PORTRAIT}
+    coord = MeuralCoordinator(hass, entry)
+    coord.last_image_id = "img-1"
+    coord._last_wire_bytes = b"\xff\xd8\xffold"
+    coord.last_thumbnail = b"thumb"
+
+    with (
+        patch.object(coord, "async_send_image", new=AsyncMock()) as send,
+        patch.object(coord, "async_set_last_image", new=AsyncMock()) as set_last,
+        patch(
+            "custom_components.fraimic.panel_codec.panel_codec_for_entry",
+            return_value=SimpleNamespace(id="jpeg_q90"),
+        ),
+        patch(
+            "custom_components.fraimic.helpers.render_spec_for_entry",
+            return_value=SimpleNamespace(width=1080, height=1920, variant="_c", locked=True, rotation=90),
+        ),
+    ):
+        ok = await coord.async_redisplay_last()
+
+    assert ok is True
+    library.async_get_bin_for_send.assert_awaited_once()
+    send.assert_awaited_once_with(b"\xff\xd8\xfffromlib")
+    set_last.assert_awaited_once()
