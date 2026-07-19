@@ -49,7 +49,7 @@ _FAILURES_BEFORE_RESCAN = 3
 # thumbnail hint. One file per config entry, keyed on entry_id, so concurrent
 # sends to different frames never race on the same file. Deliberately not
 # entry.options -- that would trigger a full entry reload on every single
-# send (see FraimicOrientationSelect for why that reload is fine there but
+# send (see DigitalFramesOrientationSelect for why that reload is fine there but
 # not here).
 _PREVIEW_STORE_VERSION = 1
 
@@ -74,7 +74,7 @@ _PENDING_SCHEMA = 2
 _FAST_POLL_INTERVAL = timedelta(seconds=30)
 
 
-class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator that polls a single Fraimic frame for status data."""
 
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
@@ -113,7 +113,7 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Library image_id to hand -- currently the generic send_image
         # service and the raw-upload card path, both of which resolve
         # something other than a Library-managed image (see
-        # _handle_send_image in __init__.py and FraimicSendImageView in
+        # _handle_send_image in __init__.py and DigitalFramesSendImageView in
         # http_api.py). Mutually exclusive with last_image_id: whichever send
         # path ran most recently clears the other, so the Frames panel never
         # shows a stale thumbnail from a different source. Also persisted via

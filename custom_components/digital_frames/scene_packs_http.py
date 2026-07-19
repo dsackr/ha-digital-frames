@@ -28,7 +28,7 @@ def _get_manager(hass):
     return manager
 
 
-class FraimicScenePacksView(HomeAssistantView):
+class DigitalFramesScenePacksView(HomeAssistantView):
     """List every scene pack in the catalog, with install state."""
 
     url = "/api/digital_frames/scene_packs"
@@ -52,7 +52,7 @@ class FraimicScenePacksView(HomeAssistantView):
         return self.json({"packs": packs})
 
 
-class FraimicScenePackInstallView(HomeAssistantView):
+class DigitalFramesScenePackInstallView(HomeAssistantView):
     """Install a scene pack: import its images and build a scene."""
 
     url = "/api/digital_frames/scene_packs/{pack_id}/install"
@@ -82,7 +82,7 @@ class FraimicScenePackInstallView(HomeAssistantView):
         return self.json(result)
 
 
-class FraimicScenePackSyncView(HomeAssistantView):
+class DigitalFramesScenePackSyncView(HomeAssistantView):
     """Re-fetch whatever images an installed pack's catalog entry has that
     this install is missing -- repairs a broken/partial install and picks
     up new images a pack has grown since it was installed."""
@@ -108,7 +108,7 @@ class FraimicScenePackSyncView(HomeAssistantView):
         return self.json(result)
 
 
-class FraimicScenePackUninstallView(HomeAssistantView):
+class DigitalFramesScenePackUninstallView(HomeAssistantView):
     """Uninstall a scene pack: remove its scene and every image it added."""
 
     url = "/api/digital_frames/scene_packs/{pack_id}"

@@ -575,7 +575,7 @@ def convert_image_bytes_with_preview(
     Like :func:`convert_image_bytes`, but also returns a small PNG preview of
     the final quantized image. See :func:`convert_image_with_preview` for why
     this exists -- used here by the raw-upload HTTP view
-    (FraimicSendImageView), which also has no Library image_id to hand.
+    (DigitalFramesSendImageView), which also has no Library image_id to hand.
 
     :returns: ``(bin_bytes, preview_png_bytes)``.
     """
@@ -603,7 +603,7 @@ def make_thumbnail(raw_bytes: bytes, edge: int, quality: int = 82) -> bytes:
     """
     Downscale an original image to at most *edge* px on its longest side and
     encode it as JPEG. Serves the panel's grid/picker tiles (see
-    FraimicLibraryImageView's ?thumb= handling) so they never have to download
+    DigitalFramesLibraryImageView's ?thumb= handling) so they never have to download
     and decode multi-MB originals client-side.
     """
     image = _open_as_rgb(raw_bytes)

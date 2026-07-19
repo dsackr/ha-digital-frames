@@ -126,7 +126,7 @@ async def test_intent_handler_service_failure_surfaces_as_speech_error(
 
 
 # ---------------------------------------------------------------------------
-# FraimicSendSkill: "send the word of the day to [frame]" -- works even with
+# DigitalFramesSendSkill: "send the word of the day to [frame]" -- works even with
 # no prior mapping between the skill and the frame (that's the whole point).
 # ---------------------------------------------------------------------------
 
@@ -226,7 +226,7 @@ async def test_send_skill_intent_service_failure_surfaces_as_speech_error(
 
 
 # ---------------------------------------------------------------------------
-# FraimicShowImage: "show [image name] on [frame]"
+# DigitalFramesShowImage: "show [image name] on [frame]"
 # ---------------------------------------------------------------------------
 
 
@@ -275,8 +275,8 @@ async def test_show_image_intent_success_sends_image(
         calls.append((image_bytes, image_id))
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     response = await ha_intent.async_handle(
         hass,
@@ -318,8 +318,8 @@ async def test_show_image_intent_service_failure_surfaces_as_speech_error(
     async def _failing_send(self, image_bytes, *, image_id=None, thumbnail=None):
         raise HomeAssistantError("frame connection timed out")
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _failing_send)
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _failing_send)
 
     response = await ha_intent.async_handle(
         hass,
@@ -351,8 +351,8 @@ async def test_show_image_intent_matches_voice_name(
         calls.append((image_bytes, image_id))
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     response = await ha_intent.async_handle(
         hass,
@@ -386,8 +386,8 @@ async def test_show_image_intent_tag_match_sends_random_tagged_image(
         calls.append((image_bytes, image_id))
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     response = await ha_intent.async_handle(
         hass,

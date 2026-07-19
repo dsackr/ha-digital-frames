@@ -113,7 +113,7 @@
   // Visual config editor: a dropdown of frames (by name), not entities.
   // ------------------------------------------------------------------ //
 
-  class FraimicCardEditor extends HTMLElement {
+  class DigitalFramesCardEditor extends HTMLElement {
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
@@ -242,13 +242,13 @@
     }
   }
 
-  customElements.define('fraimic-card-editor', FraimicCardEditor);
+  customElements.define('fraimic-card-editor', DigitalFramesCardEditor);
 
   // ------------------------------------------------------------------ //
   // The card
   // ------------------------------------------------------------------ //
 
-  class FraimicCard extends HTMLElement {
+  class DigitalFramesCard extends HTMLElement {
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
@@ -1593,7 +1593,7 @@
     }
   }
 
-  customElements.define('digital-frames-card', FraimicCard);
+  customElements.define('digital-frames-card', DigitalFramesCard);
 
   window.customCards = window.customCards || [];
   window.customCards.push({
@@ -1601,7 +1601,7 @@
     name: 'Digital Frames Card',
     description: 'See what\'s on a Fraimic e-ink frame and manage it: send photos or daily content, change orientation, adjust cropping.',
     preview: true,
-    documentationURL: 'https://github.com/dsackr/fraimic-homeassistant',
+    documentationURL: 'https://github.com/dsackr/ha-digital-frames',
   });
 
   console.info(

@@ -29,7 +29,7 @@ library, schedules, skills). The **send path is not**:
 | Frame identity | HA config `entry_id` for domain `fraimic` | Fine if every frame is still an entry; wrong if we only key on Fraimic-shaped data |
 | “How to compose” | `helpers.render_spec_for_entry` → `RenderSpec` | Geometry/orientation is universal; Spectra assumptions creep in later |
 | Wire payload | Library `async_get_bin_for_send` → Spectra `.bin` | Library pre-assumes Spectra 6 packing |
-| Delivery | `FraimicCoordinator.async_send_image_or_queue` | Queue-if-asleep, `/api/info`, `.bin` POST are Fraimic-protocol-specific |
+| Delivery | `DigitalFramesCoordinator.async_send_image_or_queue` | Queue-if-asleep, `/api/info`, `.bin` POST are Fraimic-protocol-specific |
 | Panel catalog | `FRAME_TYPES` (size, resolution, byte layout, official/clone) | Collapses **codec** and **marketing origin** into one table; understates real send-pipeline differences (see §1.1) |
 
 ### 1.1 Three layers (not two)
@@ -290,8 +290,8 @@ async def async_command(name: str) -> None
 
 | Port concept | Current entry point |
 |--------------|---------------------|
-| Status / poll | `FraimicCoordinator._async_update_data`, sensors |
-| Transport deliver + sleep queue | `FraimicCoordinator.async_send_image_or_queue` → `async_send_image` |
+| Status / poll | `DigitalFramesCoordinator._async_update_data`, sensors |
+| Transport deliver + sleep queue | `DigitalFramesCoordinator.async_send_image_or_queue` → `async_send_image` |
 | Geometry | `helpers.render_spec_for_entry` |
 | Codec encode | `image_converter.convert_image*` + `frame_types.byte_layout` (split-half vs sequential) |
 | Multi-frame fan-out | `SceneManager.async_send_mappings` (must stay the single multi-send executor) |
@@ -371,18 +371,17 @@ it belongs in core and must use the port.
 | **0** | This document (incl. three-layer model + 7.3" as multi-codec proof) | Done |
 | **1 – Seam inside local Spectra stack** | Explicit PanelCodec (`panel_codec.py`); `codec_id` on `FrameType`; encode call sites via `encode_for_panel*`; send timeout from panel profile. 7.3" = `spectra6_sequential`, official = `spectra6_split_half`. | **Done** (behavior-preserving) |
 | **2 – Format-agnostic render cache** | Library `.bin` cache keyed by `codec_id` (`bin/<WxH[variant]>/<codec_id>/…`); legacy resolution-only paths still read as fallback; send/backfill pass codec from entry/resolution. | **Done** |
-| **3 – Second driver** | Local Meural (`driver=meural`): config-flow menu, `MeuralCoordinator`, JPEG `jpeg_q90` codec, postcard send; participates in walls/scenes/library. **No** Meural cloud/Cognito. | **Done** (experimental) |
-| **3b – Samsung MDC** | Local Samsung EM32DX (`driver=samsung`): MDC TLS content-download + HA token PNG URL; protocol from [fayep/Joyous](https://github.com/fayep/Joyous). **No live hardware in this repo.** | **Done** (experimental / untested) |
-| **3c – InkJoy** | Deferred: firmware control plane is **MQTT** (not optional). | Paused |
-| **4 – Branding** | Product + domain **Digital Frames** / `digital_frames` (package, panel, APIs, services). Library dir `fraimic_library` kept so albums survive. | **Done** |
+| **3 – Second driver** | Local Meural (`driver=meural`): config-flow menu, `MeuralCoordinator`, JPEG `jpeg_q90` codec, postcard send; walls/scenes/library. **Meural cloud is out of scope** (not deferred). | **Done** |
+| **3b – Samsung MDC** | Local Samsung EM32DX (`driver=samsung`): MDC TLS content-download + HA token PNG URL ([Joyous](https://github.com/fayep/Joyous)). | **Done** (experimental; volunteer hardware) |
+| **3c – InkJoy** | Out of scope for now (MQTT control plane). | Out of scope |
+| **4 – Branding** | Product + domain **Digital Frames** / `digital_frames`; repo `dsackr/ha-digital-frames`; library `digital_frames_library`; types `DigitalFrames*`. | **Done** |
 
-**Immediate next product step:** Hardware validation (Meural smoke, Samsung
-EM32DX if available). GitHub repo slug may stay `fraimic-homeassistant`
-until a separate rename. Ask Joyous maintainers to validate Samsung MDC
-if willing.
+**Immediate next:** Clean path on maintainer production HA; community
+volunteer testing for hardware we do not own (README call for
+volunteers). No heavy auto-migration of old `fraimic` config entries.
 
-**Hardware note:** Meural is local-LAN only. Samsung MDC is experimental
-and needs a real EM32DX (or equivalent) for end-to-end validation.
+**Hardware note:** Scope is **local LAN only**. Devices the maintainers
+do not own are validated via volunteer reports, not as a project gate.
 
 ---
 

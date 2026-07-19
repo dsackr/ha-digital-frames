@@ -66,7 +66,7 @@ _CMD_MAP = {
 class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator that polls a single local Meural and delivers JPEG postcards.
 
-    Duck-types the FraimicCoordinator surface used by scenes, library send,
+    Duck-types the DigitalFramesCoordinator surface used by scenes, library send,
     walls list, and preview storage so core product code stays driver-agnostic.
 
     Orientation note: firmware keeps orientation-scoped galleries (e.g.

@@ -1910,7 +1910,7 @@
   // Panel element
   // -------------------------------------------------------------------------
 
-  class FraimicPanel extends HTMLElement {
+  class DigitalFramesPanel extends HTMLElement {
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
@@ -2806,7 +2806,7 @@
         <!-- Per-frame management: rename / reconfigure / remove without
              leaving the panel. Rename writes entry.title directly via the
              config_entries/update WS command (never the options flow's
-             broken name field); Configure drives FraimicOptionsFlow through
+             broken name field); Configure drives DigitalFramesOptionsFlow through
              the flow modal above. -->
         <div class="modal-overlay" id="frame-settings-overlay">
           <div class="modal-box" style="max-width:440px">
@@ -3065,7 +3065,7 @@
           );
           // Send target entity: Fraimic frames use the battery sensor; Meural
           // has no battery and only exposes IP (+ firmware). Match
-          // library_http FraimicFramesView (battery_entity_id or ip).
+          // library_http DigitalFramesFramesView (battery_entity_id or ip).
           const batteryEntity = entities.find(e =>
             device && e.device_id === device.id &&
             (e.unique_id || '').endsWith('_battery')
@@ -8807,7 +8807,7 @@
     // Renders one add-on config_schema field to HTML. This is the entire
     // contract between a pack manifest (frame-addons/scene_packs/index.json)
     // and the install modal -- add a field type here once, and every add-on
-    // manifest can use it without another fraimic-homeassistant release.
+    // manifest can use it without another ha-digital-frames release.
     // Also reused by the xOTD instance modal (_openXotdModal) for both the
     // xotd catalog pack's own fields and its synthetic image-mode-only
     // fields, passing idPrefix='xotd' so its DOM ids (xotd-field-<name>,
@@ -10613,7 +10613,7 @@
     }
   }
 
-  customElements.define('digital-frames-panel', FraimicPanel);
+  customElements.define('digital-frames-panel', DigitalFramesPanel);
 
   console.info(
     '%c FRAIMIC-PANEL %c v' + PANEL_VERSION + ' ',

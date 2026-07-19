@@ -138,9 +138,9 @@ async def test_send_mappings_all_succeed(
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {e.entry_id: f"img-{i}" for i, e in enumerate(entries)}
     result = await scene_manager.async_send_mappings(hass, mappings)
@@ -157,9 +157,9 @@ async def test_send_mappings_partial_failure_does_not_block_others(
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {entries[0].entry_id: "missing-image", entries[1].entry_id: "img-ok"}
     result = await scene_manager.async_send_mappings(hass, mappings)
@@ -190,9 +190,9 @@ async def test_send_mappings_queued_reported_not_as_failure_shape(
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": False, "queued": True}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     result = await scene_manager.async_send_mappings(hass, {entries[0].entry_id: "img-1"})
     assert result["results"] == [{"entry_id": entries[0].entry_id, "success": False, "queued": True}]
@@ -252,9 +252,9 @@ async def test_send_mappings_skill_bin_kind_sent_without_image_id(
         sent_calls.append((image_bytes, image_id, thumbnail))
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {entries[0].entry_id: {"type": "skill", "skill_id": "word_of_the_day"}}
     result = await scene_manager.async_send_mappings(hass, mappings)
@@ -276,9 +276,9 @@ async def test_send_mappings_skill_image_kind_routes_through_library(
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {entries[0].entry_id: {"type": "skill", "skill_id": "image-skill"}}
     result = await scene_manager.async_send_mappings(hass, mappings)
@@ -295,9 +295,9 @@ async def test_send_mappings_skill_render_failure_does_not_block_other_mappings(
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {
         entries[0].entry_id: {"type": "skill", "skill_id": "broken-skill"},
@@ -320,9 +320,9 @@ async def test_send_mappings_skill_without_skill_manager_fails_that_mapping_only
     async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
         return {"success": True, "queued": False}
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
-    monkeypatch.setattr(FraimicCoordinator, "async_send_image_or_queue", _fake_send)
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
 
     mappings = {
         entries[0].entry_id: {"type": "skill", "skill_id": "word_of_the_day"},

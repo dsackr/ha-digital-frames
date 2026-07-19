@@ -19,12 +19,12 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_get_media_source(hass: HomeAssistant) -> FraimicMediaSource:
+async def async_get_media_source(hass: HomeAssistant) -> DigitalFramesMediaSource:
     """Set up the Fraimic media source."""
-    return FraimicMediaSource(hass)
+    return DigitalFramesMediaSource(hass)
 
 
-class FraimicMediaSource(MediaSource):
+class DigitalFramesMediaSource(MediaSource):
     """Provide media from Fraimic's library."""
 
     name = "Digital Frames"

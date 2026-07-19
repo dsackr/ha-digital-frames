@@ -20,9 +20,9 @@
       "macaddress": "3CDC75*"
     }
   ],
-  "documentation": "https://github.com/dsackr/fraimic-homeassistant",
+  "documentation": "https://github.com/dsackr/ha-digital-frames",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/dsackr/fraimic-homeassistant/issues",
+  "issue_tracker": "https://github.com/dsackr/ha-digital-frames/issues",
   "requirements": [
     "Pillow>=10.0.0"
   ],

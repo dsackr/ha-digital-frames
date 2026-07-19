@@ -75,7 +75,7 @@ raise HomeAssistantError(
 
 Two listeners are registered on the same entry: `coordinator.async_config_entry_updated` (whose docstring says it exists specifically to *"pick up a new host without restarting the integration"*) and `_async_update_listener`, which unconditionally calls `hass.config_entries.async_reload(entry.entry_id)`. `hass.config_entries.async_update_entry()` fires **every** registered listener regardless of which field changed — so the three legitimate `entry.data`-only writes (DHCP IP change via `_async_try_find_new_host`, subnet-rescan self-heal, and dimension sync when a frame reports new width/height) all also trigger the full reload the coordinator's own listener was written to avoid. The coordinator even has a comment (lines 40-46) explaining they deliberately avoided `entry.options` for the preview store *"that would trigger a full entry reload on every single send"* — the same hazard was missed for `entry.data`.
 
-**Fix**: only reload from `_async_update_listener` when option keys that actually require a reload changed, or drop the blanket listener and reload explicitly from the call sites that need it (e.g. `FraimicOptionsFlow`).
+**Fix**: only reload from `_async_update_listener` when option keys that actually require a reload changed, or drop the blanket listener and reload explicitly from the call sites that need it (e.g. `DigitalFramesOptionsFlow`).
 
 ### 5. ~~Blocking `socket.connect()` still runs directly on the event loop in the config flow~~ — RESOLVED
 
@@ -134,9 +134,9 @@ The original finding (raw image uploads) is still open, and the same unbounded-b
 
 ### 14. ~~Options-flow "name" field is silently ignored~~ — RESOLVED
 
-**Resolved** by the dashboard-consolidation work: the dead `CONF_NAME` field was removed from `FraimicOptionsFlow`'s schema entirely. Renaming now happens through the panel's frame-settings menu, which calls the `config_entries/update {title}` WS command — the mechanism that actually propagates to the entry title and device name.
+**Resolved** by the dashboard-consolidation work: the dead `CONF_NAME` field was removed from `DigitalFramesOptionsFlow`'s schema entirely. Renaming now happens through the panel's frame-settings menu, which calls the `config_entries/update {title}` WS command — the mechanism that actually propagates to the entry title and device name.
 
-### 15. `FraimicChargingSensor` is still a plain `SensorEntity`, not `BinarySensorEntity` (`sensor.py:183-208`) — unfixed since the v0.1.6 review
+### 15. `DigitalFramesChargingSensor` is still a plain `SensorEntity`, not `BinarySensorEntity` (`sensor.py:183-208`) — unfixed since the v0.1.6 review
 
 `native_value` still returns the strings `"True"`/`"False"`, blocking `binary_sensor.is_on` automations and polluting history.
 
@@ -168,7 +168,7 @@ Imported but no `if TYPE_CHECKING:` block exists anywhere in the file — new si
 
 Confirmed via repo-wide search — port 80 is assumed implicitly everywhere host URLs are built. (`CONF_MODE`/`MODE_*` at lines 26-32 are intentionally forward-looking per CLAUDE.md — not flagged.)
 
-### 23. Missing blank line before `__init__` in `FraimicBatterySensor` (`sensor.py:120` area) — unfixed since the v0.1.6 review
+### 23. Missing blank line before `__init__` in `DigitalFramesBatterySensor` (`sensor.py:120` area) — unfixed since the v0.1.6 review
 
 Every other sensor class in the file has the blank line; this one doesn't.
 

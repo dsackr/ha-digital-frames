@@ -17,7 +17,7 @@ from .helpers import render_spec_for_hass_entry
 _LOGGER = logging.getLogger(__name__)
 
 
-class FraimicSamsungContentView(HomeAssistantView):
+class DigitalFramesSamsungContentView(HomeAssistantView):
     """Unauthenticated token URL for Samsung MDC content-download pulls.
 
     The panel fetches PNG without HA cookies; security is the unguessable
@@ -50,7 +50,7 @@ _ONBOARDING_STORE_KEY = f"{DOMAIN}_onboarding"
 _ONBOARDING_STORE_VERSION = 1
 
 
-class FraimicOnboardingView(HomeAssistantView):
+class DigitalFramesOnboardingView(HomeAssistantView):
     """GET/POST /api/digital_frames/onboarding — the first-run wizard's flag.
 
     Server-side (an HA Store, not localStorage) so completing or skipping
@@ -199,7 +199,7 @@ def resolve_frame_by_entity(
     )
 
 
-class FraimicFrameStatusView(HomeAssistantView):
+class DigitalFramesFrameStatusView(HomeAssistantView):
     """GET /api/digital_frames/frame_status?entity_id=... — resolve any Fraimic
     entity to its frame's on-frame preview info, for the standalone Lovelace
     card (digital-frames-card.js). The sidebar panel resolves this itself via
@@ -234,7 +234,7 @@ class FraimicFrameStatusView(HomeAssistantView):
         )
 
 
-class FraimicSendImageView(HomeAssistantView):
+class DigitalFramesSendImageView(HomeAssistantView):
     """Handle POST /api/digital_frames/send_image.
 
     Accepts a multipart form with:

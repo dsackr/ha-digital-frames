@@ -46,7 +46,7 @@ def _parse_wall_body(body: Any) -> tuple[str | None, dict, list | None]:
     return name, placements, excluded
 
 
-class FraimicWallsView(HomeAssistantView):
+class DigitalFramesWallsView(HomeAssistantView):
     """List (GET) or create (POST) walls."""
 
     url = "/api/digital_frames/walls"
@@ -83,7 +83,7 @@ class FraimicWallsView(HomeAssistantView):
         return self.json({"success": True, "wall": wall})
 
 
-class FraimicWallView(HomeAssistantView):
+class DigitalFramesWallView(HomeAssistantView):
     """Update (POST) or delete (DELETE) a single wall."""
 
     url = "/api/digital_frames/walls/{wall_id}"

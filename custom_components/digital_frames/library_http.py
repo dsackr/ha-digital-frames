@@ -21,7 +21,7 @@ Endpoints:
     GET  /api/digital_frames/frames                              list frames with their configured width/height
     GET  /api/digital_frames/frame/{entry_id}/thumbnail          last-sent-image preview for sends with no
                                                             Library image_id (send_image service / raw
-                                                            upload) -- see FraimicCoordinator.last_thumbnail
+                                                            upload) -- see DigitalFramesCoordinator.last_thumbnail
     GET  /api/digital_frames/library/settings                    current backend name
     POST /api/digital_frames/library/settings                    change backend (validates first;
                                                             used directly by Local + Dropbox)
@@ -77,7 +77,7 @@ def _get_manager(hass):
     return manager
 
 
-class FraimicLibraryListView(HomeAssistantView):
+class DigitalFramesLibraryListView(HomeAssistantView):
     """List every image currently in the library."""
 
     url = "/api/digital_frames/library/list"
@@ -94,7 +94,7 @@ class FraimicLibraryListView(HomeAssistantView):
         return self.json({"images": images, "backend": manager.backend_name})
 
 
-class FraimicLibraryUploadView(HomeAssistantView):
+class DigitalFramesLibraryUploadView(HomeAssistantView):
     """Upload one or more original images into the library, into a single
     target album (new or existing; defaults to the "Images" album).
 
@@ -151,7 +151,7 @@ class FraimicLibraryUploadView(HomeAssistantView):
         return self.json({"success": bool(records), "images": records, "errors": errors})
 
 
-class FraimicLibraryImageView(HomeAssistantView):
+class DigitalFramesLibraryImageView(HomeAssistantView):
     """Stream a stored original (GET; add ?thumb=<edge> for a small cached
     JPEG -- what the panel's grids use) or remove it (DELETE)."""
 
@@ -210,7 +210,7 @@ class FraimicLibraryImageView(HomeAssistantView):
         return self.json({"success": True})
 
 
-class FraimicLibraryImageAlbumsView(HomeAssistantView):
+class DigitalFramesLibraryImageAlbumsView(HomeAssistantView):
     """Replace the full set of album tags on one library image."""
 
     url = "/api/digital_frames/library/image/{image_id}/albums"
@@ -243,7 +243,7 @@ class FraimicLibraryImageAlbumsView(HomeAssistantView):
         return self.json({"success": True, "image": record})
 
 
-class FraimicLibraryImageVoiceNameView(HomeAssistantView):
+class DigitalFramesLibraryImageVoiceNameView(HomeAssistantView):
     """Update the voice name on one library image."""
 
     url = "/api/digital_frames/library/image/{image_id}/voice_name"
@@ -276,7 +276,7 @@ class FraimicLibraryImageVoiceNameView(HomeAssistantView):
         return self.json({"success": True, "image": record})
 
 
-class FraimicLibraryImageTagsView(HomeAssistantView):
+class DigitalFramesLibraryImageTagsView(HomeAssistantView):
     """Update the tags on one library image."""
 
     url = "/api/digital_frames/library/image/{image_id}/tags"
@@ -310,7 +310,7 @@ class FraimicLibraryImageTagsView(HomeAssistantView):
 
 
 
-class FraimicLibrarySendView(HomeAssistantView):
+class DigitalFramesLibrarySendView(HomeAssistantView):
     """Send an existing library image to a frame.
 
     Reuses a cached .bin for that frame's resolution if one exists; otherwise
@@ -413,7 +413,7 @@ class FraimicLibrarySendView(HomeAssistantView):
         return self.json(result)
 
 
-class FraimicLibraryCropView(HomeAssistantView):
+class DigitalFramesLibraryCropView(HomeAssistantView):
     """Save (POST) or clear (DELETE) a manual crop rectangle for one
     library image at one resolution.
 
@@ -508,7 +508,7 @@ class FraimicLibraryCropView(HomeAssistantView):
         return self.json({"success": True, "image": record})
 
 
-class FraimicLibraryAlbumsView(HomeAssistantView):
+class DigitalFramesLibraryAlbumsView(HomeAssistantView):
     """List, rename, or delete albums.
 
     Renaming/deleting an album never touches the underlying photos -- it
@@ -577,7 +577,7 @@ class FraimicLibraryAlbumsView(HomeAssistantView):
         return self.json({"success": True, "count": count})
 
 
-class FraimicLibraryAlbumImagesView(HomeAssistantView):
+class DigitalFramesLibraryAlbumImagesView(HomeAssistantView):
     """Add a batch of existing images to an album in one call. Doubles as
     "create an album" -- a fresh (not-yet-used) name is all that takes."""
 
@@ -611,7 +611,7 @@ class FraimicLibraryAlbumImagesView(HomeAssistantView):
         return self.json({"success": True, "count": count})
 
 
-class FraimicFramesView(HomeAssistantView):
+class DigitalFramesFramesView(HomeAssistantView):
     """List every configured Fraimic frame's entry_id plus its fixed
     width/height, physical size label, origin (official/clone), and host.
     entry.data isn't exposed via the generic config_entries/get WS command
@@ -724,32 +724,32 @@ class FraimicFramesView(HomeAssistantView):
                         ),
                         # Library image_id of the last Library/Scene send to
                         # this frame -- UI-only preview hint, not persisted
-                        # (see FraimicCoordinator.last_image_id). None until
+                        # (see DigitalFramesCoordinator.last_image_id). None until
                         # the first send of this HA session, or if the last
                         # send came from the raw-upload card path.
                         "last_image_id": getattr(coordinator, "last_image_id", None),
                         # True when last_image_id is unset but a same-session
                         # send still left a preview to show (send_image
                         # service / raw upload) -- see
-                        # FraimicCoordinator.last_thumbnail and
-                        # FraimicFrameThumbnailView below.
+                        # DigitalFramesCoordinator.last_thumbnail and
+                        # DigitalFramesFrameThumbnailView below.
                         "has_thumbnail": getattr(coordinator, "last_thumbnail", None) is not None,
                         # True while a send to this frame is queued awaiting
                         # delivery (frame asleep/unreachable) -- see
-                        # FraimicCoordinator.pending_send.
+                        # DigitalFramesCoordinator.pending_send.
                         "queued": getattr(coordinator, "pending_send", None) is not None,
                     }
                 )
         return self.json({"frames": frames})
 
 
-class FraimicFrameThumbnailView(HomeAssistantView):
-    """Serve the cached preview PNG (FraimicCoordinator.last_thumbnail) for a
+class DigitalFramesFrameThumbnailView(HomeAssistantView):
+    """Serve the cached preview PNG (DigitalFramesCoordinator.last_thumbnail) for a
     frame's last-sent image, for send paths that have no Library image_id to
-    reuse FraimicLibraryImageView for (the generic send_image service and the
+    reuse DigitalFramesLibraryImageView for (the generic send_image service and the
     raw-upload card path). 404 until the first such send this session, or
     whenever the last send instead came from the Library/Scene path (which
-    uses last_image_id + FraimicLibraryImageView instead)."""
+    uses last_image_id + DigitalFramesLibraryImageView instead)."""
 
     url = "/api/digital_frames/frame/{entry_id}/thumbnail"
     name = "api:digital_frames:frame:thumbnail"
@@ -773,7 +773,7 @@ class FraimicFrameThumbnailView(HomeAssistantView):
         )
 
 
-class FraimicLibrarySettingsView(HomeAssistantView):
+class DigitalFramesLibrarySettingsView(HomeAssistantView):
     """Get/set which storage backend the library uses and AI auto-tagging options."""
 
     url = "/api/digital_frames/library/settings"
@@ -823,7 +823,7 @@ class FraimicLibrarySettingsView(HomeAssistantView):
         })
 
 
-class FraimicLibraryDiscoverView(HomeAssistantView):
+class DigitalFramesLibraryDiscoverView(HomeAssistantView):
     """Adopt files added to the active backend outside of Fraimic (only
     supported by the Dropbox backend today -- see
     LibraryBackend.supports_discovery)."""
@@ -849,7 +849,7 @@ class FraimicLibraryDiscoverView(HomeAssistantView):
         return self.json(result)
 
 
-class FraimicLibraryGoogleRedirectUriView(HomeAssistantView):
+class DigitalFramesLibraryGoogleRedirectUriView(HomeAssistantView):
     """Tell the panel which redirect URI to register in Google Cloud Console."""
 
     url = "/api/digital_frames/library/oauth/google/redirect_uri"
@@ -862,7 +862,7 @@ class FraimicLibraryGoogleRedirectUriView(HomeAssistantView):
         return self.json({"redirect_uri": manager.google_redirect_uri()})
 
 
-class FraimicLibraryGoogleOAuthStartView(HomeAssistantView):
+class DigitalFramesLibraryGoogleOAuthStartView(HomeAssistantView):
     """Begin the Google consent flow: stash the client id/secret the user
     just entered, return the URL to open so they can sign in."""
 
@@ -906,7 +906,7 @@ class FraimicLibraryGoogleOAuthStartView(HomeAssistantView):
         return self.json({"auth_url": auth_url, "redirect_uri": redirect_uri})
 
 
-class FraimicLibraryGoogleOAuthCallbackView(HomeAssistantView):
+class DigitalFramesLibraryGoogleOAuthCallbackView(HomeAssistantView):
     """Google redirects the user's browser here after they grant (or deny)
     consent. This is a plain top-level navigation -- no Authorization header
     -- so it must stay unauthenticated. It's protected instead by the
@@ -1001,7 +1001,7 @@ class FraimicLibraryGoogleOAuthCallbackView(HomeAssistantView):
         return web.Response(text=html, content_type="text/html", status=200 if ok else 400)
 
 
-class FraimicFrameReloadView(HomeAssistantView):
+class DigitalFramesFrameReloadView(HomeAssistantView):
     """Reload the config entry for a specific frame."""
 
     url = "/api/digital_frames/frame/reload"

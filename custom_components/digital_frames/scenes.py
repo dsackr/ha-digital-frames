@@ -337,7 +337,7 @@ class SceneManager:
         ) -> dict[str, Any]:
             # async_send_image_or_queue queues (rather than raising) if the
             # frame is asleep/unreachable, and already updates last_image_id
-            # on immediate success -- see FraimicCoordinator.
+            # on immediate success -- see DigitalFramesCoordinator.
             return await coordinator.async_send_image_or_queue(
                 bin_bytes, image_id=image_id, thumbnail=thumbnail
             )

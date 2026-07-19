@@ -5,7 +5,7 @@ want is "is there a new release, and can I install it from here?".
 
 Install strategy (in order):
 
-1. If HACS has ``dsackr/fraimic-homeassistant`` installed, call HACS's
+1. If HACS has ``dsackr/ha-digital-frames`` installed, call HACS's
    ``async_download_repository`` / ``async_install`` so files **and** HACS
    bookkeeping (``installed_version``, HA update entity) stay in sync.
 2. Otherwise download the GitHub tag zipball and replace
@@ -58,8 +58,10 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 GITHUB_OWNER = "dsackr"
-GITHUB_REPO = "fraimic-homeassistant"
+GITHUB_REPO = "ha-digital-frames"
 GITHUB_FULL = f"{GITHUB_OWNER}/{GITHUB_REPO}"
+# Pre-rename HACS installs may still track the old full name.
+GITHUB_FULL_LEGACY = f"{GITHUB_OWNER}/fraimic-homeassistant"
 GITHUB_API_LATEST = (
     f"https://api.github.com/repos/{GITHUB_FULL}/releases/latest"
 )
@@ -205,7 +207,7 @@ async def fetch_latest_release(
     session = async_get_clientsession(hass)
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": f"fraimic-homeassistant/{DOMAIN}",
+        "User-Agent": f"ha-digital-frames/{DOMAIN}",
     }
     try:
         async with session.get(
@@ -320,11 +322,13 @@ def _find_hacs_repo(hass: HomeAssistant) -> Any | None:
     repos = getattr(hacs, "repositories", None)
     if repos is None:
         return None
+    wanted = {GITHUB_FULL.lower(), GITHUB_FULL_LEGACY.lower()}
     getter = getattr(repos, "get_by_full_name", None)
     if callable(getter):
-        repo = getter(GITHUB_FULL)
-        if repo is not None:
-            return repo
+        for name in (GITHUB_FULL, GITHUB_FULL_LEGACY):
+            repo = getter(name)
+            if repo is not None:
+                return repo
     # Fallback: scan list_all / list_downloaded
     for attr in ("list_downloaded", "list_all"):
         listing = getattr(repos, attr, None)
@@ -332,7 +336,7 @@ def _find_hacs_repo(hass: HomeAssistant) -> Any | None:
         for r in items or []:
             data = getattr(r, "data", None)
             full = getattr(data, "full_name", None) or getattr(r, "full_name", "")
-            if str(full).lower() == GITHUB_FULL.lower():
+            if str(full).lower() in wanted:
                 return r
     return None
 
@@ -667,7 +671,7 @@ async def _install_from_zipball(
     hass: HomeAssistant, zip_url: str, *, expected_version: str
 ) -> None:
     session = async_get_clientsession(hass)
-    headers = {"User-Agent": f"fraimic-homeassistant/{DOMAIN}"}
+    headers = {"User-Agent": f"ha-digital-frames/{DOMAIN}"}
     try:
         async with session.get(
             zip_url,

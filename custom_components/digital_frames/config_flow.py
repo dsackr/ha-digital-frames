@@ -77,7 +77,7 @@ _MANUAL_DEVICE = "__manual__"
 # ---------------------------------------------------------------------------
 
 
-class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
+class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Fraimic."""
 
     VERSION = 1
@@ -519,7 +519,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Return the options flow handler for this entry."""
-        return FraimicOptionsFlow()
+        return DigitalFramesOptionsFlow()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -552,7 +552,7 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
-class FraimicOptionsFlow(OptionsFlow):
+class DigitalFramesOptionsFlow(OptionsFlow):
     """Allow changing the frame name, scan interval, and (for entries set up
     before physical size was tracked) backfilling the size after setup."""
 

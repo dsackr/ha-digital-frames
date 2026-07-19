@@ -23,7 +23,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .coordinator import FraimicCoordinator
+from .coordinator import DigitalFramesCoordinator
 
 from .const import CONF_NAME, CONF_SIZE, DOMAIN
 from .frame_types import FRAME_TYPES, ORIGIN_OFFICIAL
@@ -46,8 +46,8 @@ async def async_setup_entry(
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
         async_add_entities(
             [
-                FraimicFirmwareSensor(coordinator, entry),
-                FraimicIpAddressSensor(coordinator, entry),
+                DigitalFramesFirmwareSensor(coordinator, entry),
+                DigitalFramesIpAddressSensor(coordinator, entry),
                 MeuralDeviceOrientationSensor(coordinator, entry),
                 MeuralAmbientLightSensor(coordinator, entry),
                 MeuralFreeSpaceSensor(coordinator, entry),
@@ -62,7 +62,7 @@ async def async_setup_entry(
     if entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG:
         async_add_entities(
             [
-                FraimicIpAddressSensor(coordinator, entry),
+                DigitalFramesIpAddressSensor(coordinator, entry),
                 SamsungMdcReachableSensor(coordinator, entry),
             ]
         )
@@ -70,12 +70,12 @@ async def async_setup_entry(
 
     async_add_entities(
         [
-            FraimicBatterySensor(coordinator, entry),
-            FraimicWifiRssiSensor(coordinator, entry),
-            FraimicChargingSensor(coordinator, entry),
-            FraimicFirmwareSensor(coordinator, entry),
-            FraimicIpAddressSensor(coordinator, entry),
-            FraimicQueuedSendSensor(coordinator, entry),
+            DigitalFramesBatterySensor(coordinator, entry),
+            DigitalFramesWifiRssiSensor(coordinator, entry),
+            DigitalFramesChargingSensor(coordinator, entry),
+            DigitalFramesFirmwareSensor(coordinator, entry),
+            DigitalFramesIpAddressSensor(coordinator, entry),
+            DigitalFramesQueuedSendSensor(coordinator, entry),
         ]
     )
 
@@ -135,14 +135,14 @@ def frame_device_info(
     return DeviceInfo(**info)
 
 
-class FraimicBaseSensor(CoordinatorEntity, SensorEntity):
+class DigitalFramesBaseSensor(CoordinatorEntity, SensorEntity):
     """Base class shared by all Fraimic sensors."""
 
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         """Initialise."""
@@ -160,7 +160,7 @@ class FraimicBaseSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class FraimicBatterySensor(FraimicBaseSensor):
+class DigitalFramesBatterySensor(DigitalFramesBaseSensor):
     """Battery level sensor (%)."""
 
     _attr_device_class = SensorDeviceClass.BATTERY
@@ -168,7 +168,7 @@ class FraimicBatterySensor(FraimicBaseSensor):
     _attr_native_unit_of_measurement = PERCENTAGE
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -195,7 +195,7 @@ class FraimicBatterySensor(FraimicBaseSensor):
             return None
 
 
-class FraimicWifiRssiSensor(FraimicBaseSensor):
+class DigitalFramesWifiRssiSensor(DigitalFramesBaseSensor):
     """WiFi signal strength sensor (dBm)."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
@@ -205,7 +205,7 @@ class FraimicWifiRssiSensor(FraimicBaseSensor):
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -223,12 +223,12 @@ class FraimicWifiRssiSensor(FraimicBaseSensor):
             return None
 
 
-class FraimicChargingSensor(FraimicBaseSensor):
+class DigitalFramesChargingSensor(DigitalFramesBaseSensor):
     """Charging state sensor (True / False)."""
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -251,14 +251,14 @@ class FraimicChargingSensor(FraimicBaseSensor):
         return str(raw).capitalize()
 
 
-class FraimicFirmwareSensor(FraimicBaseSensor):
+class DigitalFramesFirmwareSensor(DigitalFramesBaseSensor):
     """Firmware version diagnostic sensor."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -273,14 +273,14 @@ class FraimicFirmwareSensor(FraimicBaseSensor):
         return self.coordinator.data.get("firmware_version")
 
 
-class FraimicIpAddressSensor(FraimicBaseSensor):
+class DigitalFramesIpAddressSensor(DigitalFramesBaseSensor):
     """Current IP address diagnostic sensor."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -304,14 +304,14 @@ class FraimicIpAddressSensor(FraimicBaseSensor):
         return data.get("ip_address")
 
 
-class SamsungMdcReachableSensor(FraimicBaseSensor):
+class SamsungMdcReachableSensor(DigitalFramesBaseSensor):
     """Whether the Samsung MDC port answered on the last poll (often false while asleep)."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -330,7 +330,7 @@ class SamsungMdcReachableSensor(FraimicBaseSensor):
         return None
 
 
-class MeuralDeviceOrientationSensor(FraimicBaseSensor):
+class MeuralDeviceOrientationSensor(DigitalFramesBaseSensor):
     """Physical hang orientation from the Meural gsensor (portrait/landscape).
 
     Read-only mirror of what the frame reports. The Orientation *select*
@@ -339,7 +339,7 @@ class MeuralDeviceOrientationSensor(FraimicBaseSensor):
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -355,7 +355,7 @@ class MeuralDeviceOrientationSensor(FraimicBaseSensor):
         return value if isinstance(value, str) else None
 
 
-class MeuralAmbientLightSensor(FraimicBaseSensor):
+class MeuralAmbientLightSensor(DigitalFramesBaseSensor):
     """Ambient light (lux) from the Meural ALS."""
 
     _attr_device_class = SensorDeviceClass.ILLUMINANCE
@@ -364,7 +364,7 @@ class MeuralAmbientLightSensor(FraimicBaseSensor):
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -382,7 +382,7 @@ class MeuralAmbientLightSensor(FraimicBaseSensor):
             return None
 
 
-class MeuralFreeSpaceSensor(FraimicBaseSensor):
+class MeuralFreeSpaceSensor(DigitalFramesBaseSensor):
     """Free storage on the Canvas (MB), diagnostic."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -394,7 +394,7 @@ class MeuralFreeSpaceSensor(FraimicBaseSensor):
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -412,7 +412,7 @@ class MeuralFreeSpaceSensor(FraimicBaseSensor):
             return None
 
 
-class MeuralWifiRssiSensor(FraimicBaseSensor):
+class MeuralWifiRssiSensor(DigitalFramesBaseSensor):
     """WiFi signal (dBm) from Meural system wifi_status."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
@@ -423,7 +423,7 @@ class MeuralWifiRssiSensor(FraimicBaseSensor):
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)
@@ -441,14 +441,14 @@ class MeuralWifiRssiSensor(FraimicBaseSensor):
             return None
 
 
-class FraimicQueuedSendSensor(FraimicBaseSensor):
+class DigitalFramesQueuedSendSensor(DigitalFramesBaseSensor):
     """Whether a send to this frame is queued awaiting delivery, because the
     frame was asleep/unreachable when it was sent -- see
-    FraimicCoordinator.pending_send."""
+    DigitalFramesCoordinator.pending_send."""
 
     def __init__(
         self,
-        coordinator: FraimicCoordinator,
+        coordinator: DigitalFramesCoordinator,
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, entry)

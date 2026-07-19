@@ -31,7 +31,7 @@ User chooses **Fraimic / e-ink clone** or **Meural Canvas (local)** from the
 add-frame menu. Fraimic path scans the LAN or takes an IP and auto-detects
 size/resolution; Meural path probes the local postcard API and stores a
 `driver=meural` config entry.
-- **Entry points**: `config_flow.py` (`FraimicConfigFlow.async_step_user` /
+- **Entry points**: `config_flow.py` (`DigitalFramesConfigFlow.async_step_user` /
   `add_fraimic` / `add_meural` / `pick_device` / `manual` / `name_device` /
   `dhcp` / `integration_discovery`), `helpers.py` (`probe_frame`,
   `probe_device_size`, `scan_subnet`, `detect_frame_type_from_info`),
@@ -47,7 +47,7 @@ size/resolution; Meural path probes the local postcard API and stores a
 ## 2. Options flow (scan interval, size, orientation edge, 180° flip)
 User edits a frame's scan interval, physical size, hanging edge, and
 180°-rotation flags via HA's Configure dialog.
-- **Entry points**: `config_flow.py` (`FraimicOptionsFlow.async_step_init`).
+- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`).
 - **If it silently breaks**: settings don't stick, or the orientation lock
   resets when saving an unrelated field.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`). **Backend-tested** —
@@ -57,7 +57,7 @@ User edits a frame's scan interval, physical size, hanging edge, and
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
 it goes silent for 3 polls, a subnet rescan finds its new IP (a DHCP-moved
 frame).
-- **Entry points**: `coordinator.py` (`FraimicCoordinator._async_update_data`,
+- **Entry points**: `coordinator.py` (`DigitalFramesCoordinator._async_update_data`,
   `_async_try_find_new_host`, `_maybe_persist_fingerprint`).
 - **If it silently breaks**: sensors go "unavailable" forever after a router
   reassigns the frame's IP; the user thinks the frame is dead.
@@ -97,8 +97,8 @@ a named scene, or issue restart/sleep/refresh commands.
 
 ## 6. Voice/AI: "generate an image of X...", "show [image name] on [frame]", and "put a picture of [tag name] on [frame]"
 Custom Assist/LLM intents to generate an AI image, display a specific library image on a named frame, or randomly select and display an image matching a custom tag by voice.
-- **Entry points**: `intent.py` (`FraimicGenerateAIImageIntent`,
-  `FraimicShowImageIntent`, `_match_frame_device_id`, `_match_by_tag`).
+- **Entry points**: `intent.py` (`DigitalFramesGenerateAIImageIntent`,
+  `DigitalFramesShowImageIntent`, `_match_frame_device_id`, `_match_by_tag`).
 - **If it silently breaks**: the voice command errors out, fails to find the
   image or tags, or resolves to the wrong frame.
 - **Test status**: **Backend-tested** — `tests/python/setup/test_intent.py` (covers exact voice name matches and random tag-based selections).
@@ -141,7 +141,7 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `list_images` / `get_original` / `get_thumbnail` / `async_get_bin_for_send` /
   `async_set_image_voice_name` / `async_set_image_tags`,
   `LocalLibraryBackend` / Dropbox / Drive `_bin_path` + `bin_file_ids`),
-  `library_http.py` (`FraimicLibraryImageVoiceNameView`, `FraimicLibraryImageTagsView`).
+  `library_http.py` (`DigitalFramesLibraryImageVoiceNameView`, `DigitalFramesLibraryImageTagsView`).
 - **If it silently breaks**: uploads silently fail per-file in a batch,
   thumbnails go stale/broken, voice name/tag edits fail to persist, or a
   7.3" send reuses 13.3"-layout bytes (wrong codec cache).
@@ -200,7 +200,7 @@ same editor pre-targeted at that frame), and the Lovelace card's own
 crop editor (KPF 29), whose "Save & Send" persists the crop then
 immediately re-sends so the physical frame updates.
 - **Entry points**: `library.py` (`async_set_crop`, `async_clear_crop`),
-  `library_http.py` (`FraimicLibraryCropView`), `digital-frames-panel.js`
+  `library_http.py` (`DigitalFramesLibraryCropView`), `digital-frames-panel.js`
   (`_openEditor`, `_cropFromWallPicker`), `digital-frames-card.js` (`_openCrop`,
   `_cropSaveSend`).
 - **If it silently breaks**: a saved crop doesn't apply on next send, or
@@ -232,14 +232,14 @@ tags, with rename/delete affecting every tagged image in one bulk write.
 ## 14. Send library image to a frame
 The panel's "Send to Canvas" — reuses/generates the cached `.bin` for that
 frame's resolution and delivers or queues it.
-- **Entry points**: `library_http.py` (`FraimicLibrarySendView`),
+- **Entry points**: `library_http.py` (`DigitalFramesLibrarySendView`),
   `library.py` (`async_get_bin_for_send`), `coordinator.async_send_image_or_queue`.
 - **If it silently breaks**: sends the wrong crop/orientation, or the
   packer A/B override leaks into the normal cache.
 - **Test status**: Panel-tested (`packtest.spec.js`, `dashboard.spec.js`).
   The underlying `async_get_bin_for_send` (KPF 11) and
   `async_send_image_or_queue` (KPF 4) are both backend-tested; the HTTP
-  view wrapper itself (`FraimicLibrarySendView`'s request/response
+  view wrapper itself (`DigitalFramesLibrarySendView`'s request/response
   marshaling) is still a **Gap**.
 
 ## 15. Direct upload-and-send (no library)
@@ -248,7 +248,7 @@ bypassing the library entirely (the Lovelace card's and wall picker's
 upload buttons). Note: because these bytes never enter the library, the
 sent photo can't be re-cropped afterwards (KPF 12's crop editors are
 deliberately disabled for it).
-- **Entry points**: `http_api.py` (`FraimicSendImageView`,
+- **Entry points**: `http_api.py` (`DigitalFramesSendImageView`,
   `resolve_frame_by_entity`), `digital-frames-card.js` (`_stageFile`/`_send`),
   `digital-frames-panel.js` (`_sendFromWallPicker`).
 - **If it silently breaks**: card sends silently fail, or the wrong frame
@@ -256,7 +256,7 @@ deliberately disabled for it).
 - **Test status**: Panel-tested (`fraimic-card.spec.js` — upload staging
   and the multipart `send_image` POST with the right `entity_id`;
   `walls-send-and-offwall.spec.js` for the wall picker side). The Python
-  view itself (`FraimicSendImageView`'s request/response marshaling) is
+  view itself (`DigitalFramesSendImageView`'s request/response marshaling) is
   still a **Gap** along with the rest of the `*_http.py` view layer (see
   the coverage summary below).
 
@@ -356,7 +356,7 @@ schedule to "broken" instead of erroring at fire time.
 ## 21. HA entities: sensors + Orientation select + Camera display
 Read-only device telemetry (battery/wifi/charging/firmware/IP/queued), a per-frame Orientation control that persists into config entry options, and a Camera entity representing the frame's dynamic canvas (active photo display).
 - **Entry points**: `sensor.py` (all `Fraimic*Sensor` classes), `select.py`
-  (`FraimicOrientationSelect`), `camera.py` (`FraimicCamera`).
+  (`DigitalFramesOrientationSelect`), `camera.py` (`DigitalFramesCamera`).
 - **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, or the camera entity fails to load or serve the active frame image.
 - **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`.
 
@@ -396,7 +396,7 @@ Library send/backfill and raw-upload encode go through
 ## 24. First-run onboarding wizard + server-side completion flag
 Six-step first-run tour; "skip"/"complete" retires the wizard for every
 admin, forever, via a server-side flag (not localStorage).
-- **Entry points**: `http_api.py` (`FraimicOnboardingView`).
+- **Entry points**: `http_api.py` (`DigitalFramesOnboardingView`).
 - **If it silently breaks**: the wizard reappears every session for every
   admin, or one admin's skip doesn't stick for others.
 - **Test status**: Panel-tested (`onboarding.spec.js`, full six-step tour
@@ -473,7 +473,7 @@ codec path. Previews prefer the RGB PNG so last-image thumbnails stay sharp.
   `async_render_for_entry` / `_async_render_text` /
   `_async_fetch_image_feed` / `_async_pick_image_album`),
   `panel_codec.py` (`text_skill_payload_for_codec`),
-  `skills_http.py` (CRUD + `FraimicSkillSendView`), fan-out via
+  `skills_http.py` (CRUD + `DigitalFramesSkillSendView`), fan-out via
   `scenes.py` (`async_send_mappings`).
 - **If it silently breaks**: daily content stops arriving (schedules
   no-op), a skill renders blank/stale content, fan-out to several frames
@@ -507,9 +507,9 @@ part of this flow: every send path must leave it describing what the
 frame actually shows.
 - **Entry points**: `digital-frames-card.js` (card + `fraimic-card-editor`),
   `coordinator.py` (`async_set_last_image`, `last_image_id` /
-  `last_thumbnail` persistence), `library_http.py` (`FraimicFramesView`
+  `last_thumbnail` persistence), `library_http.py` (`DigitalFramesFramesView`
   incl. `battery_entity_id`/`orientation_entity_id`/`online`,
-  `FraimicFrameThumbnailView`), `http_api.py` (`FraimicFrameStatusView`).
+  `DigitalFramesFrameThumbnailView`), `http_api.py` (`DigitalFramesFrameStatusView`).
 - **If it silently breaks**: the card shows a stale or blank image while
   the frame shows something else (exactly what text-skill sends did
   before July 2026 — see KPF 28), the card picker falls back to raw YAML,
@@ -525,7 +525,7 @@ frame actually shows.
 
 ## 30. Media Source integration
 Exposes the Fraimic photo library to Home Assistant's native media source system (browsable under the Media browser and playable/resolvable via `media-source://digital_frames/...` URIs) without copying files.
-- **Entry points**: `media_source.py` (`async_get_media_source`, `FraimicMediaSource`).
+- **Entry points**: `media_source.py` (`async_get_media_source`, `DigitalFramesMediaSource`).
 - **If it silently breaks**: Fraimic albums and photos do not appear in the Home Assistant Media tab, or resolving a `media-source://` URI fails.
 - **Test status**: **Backend-tested** — `tests/python/library/test_media_source_and_tagging.py`.
 
@@ -603,7 +603,7 @@ validated on real hardware in this repo** (Gap: live panel).
   `samsung.py` (`mdc_content_download_packet`, `send_mdc_content_download`,
   `send_wol`), `samsung_coordinator.py` (`SamsungCoordinator`),
   `panel_codec.py` (`CODEC_PNG`), `http_api.py`
-  (`FraimicSamsungContentView`), `sensor.py` (IP + MDC reachable).
+  (`DigitalFramesSamsungContentView`), `sensor.py` (IP + MDC reachable).
 - **If it silently breaks**: send fails (auth/PIN, URL >255 bytes, panel
   asleep without Network Standby/WoL), or panel never fetches the token
   URL (HA not reachable from the panel LAN).

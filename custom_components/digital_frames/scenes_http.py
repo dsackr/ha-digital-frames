@@ -43,7 +43,7 @@ def _parse_scene_body(body: Any) -> tuple[str | None, dict, str | None]:
     return name, mappings, album
 
 
-class FraimicScenesView(HomeAssistantView):
+class DigitalFramesScenesView(HomeAssistantView):
     """List (GET) or create (POST) scenes."""
 
     url = "/api/digital_frames/scenes"
@@ -80,7 +80,7 @@ class FraimicScenesView(HomeAssistantView):
         return self.json({"success": True, "scene": scene})
 
 
-class FraimicSceneView(HomeAssistantView):
+class DigitalFramesSceneView(HomeAssistantView):
     """Update (POST) or delete (DELETE) a single scene."""
 
     url = "/api/digital_frames/scenes/{scene_id}"
@@ -123,7 +123,7 @@ class FraimicSceneView(HomeAssistantView):
         return self.json({"success": True})
 
 
-class FraimicSceneSendView(HomeAssistantView):
+class DigitalFramesSceneSendView(HomeAssistantView):
     """Send every image in a scene to its assigned frame."""
 
     url = "/api/digital_frames/scenes/{scene_id}/send"

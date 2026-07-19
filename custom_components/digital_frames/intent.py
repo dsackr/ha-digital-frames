@@ -24,9 +24,9 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-INTENT_GENERATE_AI_IMAGE = "FraimicGenerateAIImage"
-INTENT_SEND_SKILL = "FraimicSendSkill"
-INTENT_SHOW_IMAGE = "FraimicShowImage"
+INTENT_GENERATE_AI_IMAGE = "DigitalFramesGenerateAIImage"
+INTENT_SEND_SKILL = "DigitalFramesSendSkill"
+INTENT_SHOW_IMAGE = "DigitalFramesShowImage"
 
 
 def _normalize(name: str) -> str:
@@ -116,7 +116,7 @@ def _match_skill_id(hass: HomeAssistant, skill_name: str) -> str:
     return skill.skill_id
 
 
-class FraimicGenerateAIImageIntent(intent.IntentHandler):
+class DigitalFramesGenerateAIImageIntent(intent.IntentHandler):
     """Generate an image from a text prompt and send it to a named frame."""
 
     intent_type = INTENT_GENERATE_AI_IMAGE
@@ -171,7 +171,7 @@ class FraimicGenerateAIImageIntent(intent.IntentHandler):
         return response
 
 
-class FraimicSendSkillIntent(intent.IntentHandler):
+class DigitalFramesSendSkillIntent(intent.IntentHandler):
     """Send a skill (Word of the Day, Joke of the Day, ...) to a named
     frame -- works even if that skill has never been mapped to that frame
     before, since the skill is rendered fresh at send time."""
@@ -229,7 +229,7 @@ class FraimicSendSkillIntent(intent.IntentHandler):
         return response
 
 
-class FraimicShowImageIntent(intent.IntentHandler):
+class DigitalFramesShowImageIntent(intent.IntentHandler):
     """Show an existing image from the library on a named frame."""
 
     intent_type = INTENT_SHOW_IMAGE
@@ -330,6 +330,6 @@ class FraimicShowImageIntent(intent.IntentHandler):
 
 async def async_setup_intents(hass: HomeAssistant) -> None:
     """Register Fraimic's custom Assist intents."""
-    intent.async_register(hass, FraimicGenerateAIImageIntent())
-    intent.async_register(hass, FraimicSendSkillIntent())
-    intent.async_register(hass, FraimicShowImageIntent())
+    intent.async_register(hass, DigitalFramesGenerateAIImageIntent())
+    intent.async_register(hass, DigitalFramesSendSkillIntent())
+    intent.async_register(hass, DigitalFramesShowImageIntent())

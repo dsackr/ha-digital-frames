@@ -5,7 +5,7 @@ photo feed/album) -- the frame-agnostic counterpart to a library image_id.
 A skill owns *what* content to generate, never *which* frame it goes to or
 *when* -- that's supplied by whoever asks for a render: a wall/scene mapping
 entry (see Scene.mappings in scenes.py), a schedule's "skill" action (see
-schedules.py), the fraimic.send_skill service, or the FraimicSendSkill voice
+schedules.py), the fraimic.send_skill service, or the DigitalFramesSendSkill voice
 intent. This mirrors how a library image_id works today, just with the bytes
 generated per-request instead of stored.
 

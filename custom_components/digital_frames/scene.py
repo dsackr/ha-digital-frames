@@ -28,7 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, SIGNAL_SCENES_UPDATED
 
 if TYPE_CHECKING:
-    from .scenes import Scene as FraimicScene
+    from .scenes import Scene as DigitalFramesScene
     from .scenes import SceneManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,14 +41,14 @@ async def async_setup_entry(
 ) -> None:
     """Set up Fraimic scene entities from the scenes hub config entry."""
     manager: SceneManager = hass.data[DOMAIN]["_scenes"]
-    entities: dict[str, FraimicSceneEntity] = {}
+    entities: dict[str, DigitalFramesSceneEntity] = {}
 
     @callback
     def _sync() -> None:
         current = manager.scenes  # {scene_id: Scene}, kept live by SceneManager
 
         new_entities = [
-            FraimicSceneEntity(manager, scene)
+            DigitalFramesSceneEntity(manager, scene)
             for scene_id, scene in current.items()
             if scene_id not in entities
         ]
@@ -78,7 +78,7 @@ async def async_setup_entry(
     )
 
 
-class FraimicSceneEntity(SceneEntity):
+class DigitalFramesSceneEntity(SceneEntity):
     """A Fraimic scene, exposed as a native scene.* entity for voice control.
 
     Deliberately has no device_info: HA's legacy naming always concatenates
@@ -94,7 +94,7 @@ class FraimicSceneEntity(SceneEntity):
     def __init__(
         self,
         manager: SceneManager,
-        scene: FraimicScene,
+        scene: DigitalFramesScene,
     ) -> None:
         """Initialise."""
         self._manager = manager
@@ -102,7 +102,7 @@ class FraimicSceneEntity(SceneEntity):
         self._attr_unique_id = f"digital_frames_scene_{scene.scene_id}"
         self._attr_name = scene.name
 
-    def refresh(self, scene: FraimicScene) -> None:
+    def refresh(self, scene: DigitalFramesScene) -> None:
         """Update this entity's displayed name after the scene was renamed."""
         if self._attr_name != scene.name:
             self._attr_name = scene.name

@@ -14,12 +14,12 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.digital_frames.const import CONF_ORIENTATION, DOMAIN
 from custom_components.digital_frames.sensor import (
-    FraimicBatterySensor,
-    FraimicChargingSensor,
-    FraimicFirmwareSensor,
-    FraimicIpAddressSensor,
-    FraimicQueuedSendSensor,
-    FraimicWifiRssiSensor,
+    DigitalFramesBatterySensor,
+    DigitalFramesChargingSensor,
+    DigitalFramesFirmwareSensor,
+    DigitalFramesIpAddressSensor,
+    DigitalFramesQueuedSendSensor,
+    DigitalFramesWifiRssiSensor,
     frame_device_info,
 )
 
@@ -35,21 +35,21 @@ def _fake_coordinator(data=None, pending_send=None):
 
 def test_battery_nested_shape(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicBatterySensor(_fake_coordinator({"battery": {"percent": 87}}), entry)
+    sensor = DigitalFramesBatterySensor(_fake_coordinator({"battery": {"percent": 87}}), entry)
     assert sensor.native_value == 87.0
 
 
 def test_battery_flat_eframe_shape(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicBatterySensor(_fake_coordinator({"battery_pct": 42}), entry)
+    sensor = DigitalFramesBatterySensor(_fake_coordinator({"battery_pct": 42}), entry)
     assert sensor.native_value == 42.0
 
 
 def test_battery_missing_data_returns_none(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicBatterySensor(_fake_coordinator(None), entry)
+    sensor = DigitalFramesBatterySensor(_fake_coordinator(None), entry)
     assert sensor.native_value is None
-    sensor2 = FraimicBatterySensor(_fake_coordinator({}), entry)
+    sensor2 = DigitalFramesBatterySensor(_fake_coordinator({}), entry)
     assert sensor2.native_value is None
 
 
@@ -60,13 +60,13 @@ def test_battery_missing_data_returns_none(make_frame_entry):
 
 def test_wifi_rssi_present(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicWifiRssiSensor(_fake_coordinator({"wifi": {"rssi": -55}}), entry)
+    sensor = DigitalFramesWifiRssiSensor(_fake_coordinator({"wifi": {"rssi": -55}}), entry)
     assert sensor.native_value == -55
 
 
 def test_wifi_rssi_missing_returns_none(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicWifiRssiSensor(_fake_coordinator({}), entry)
+    sensor = DigitalFramesWifiRssiSensor(_fake_coordinator({}), entry)
     assert sensor.native_value is None
 
 
@@ -81,7 +81,7 @@ def test_wifi_rssi_missing_returns_none(make_frame_entry):
 )
 def test_charging_bool_and_string_shapes(make_frame_entry, raw, expected):
     entry = make_frame_entry()
-    sensor = FraimicChargingSensor(
+    sensor = DigitalFramesChargingSensor(
         _fake_coordinator({"battery": {"charging": raw}}), entry
     )
     assert sensor.native_value == expected
@@ -89,7 +89,7 @@ def test_charging_bool_and_string_shapes(make_frame_entry, raw, expected):
 
 def test_charging_missing_returns_none(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicChargingSensor(_fake_coordinator({}), entry)
+    sensor = DigitalFramesChargingSensor(_fake_coordinator({}), entry)
     assert sensor.native_value is None
 
 
@@ -100,13 +100,13 @@ def test_charging_missing_returns_none(make_frame_entry):
 
 def test_firmware_present(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicFirmwareSensor(_fake_coordinator({"firmware_version": "1.2.3"}), entry)
+    sensor = DigitalFramesFirmwareSensor(_fake_coordinator({"firmware_version": "1.2.3"}), entry)
     assert sensor.native_value == "1.2.3"
 
 
 def test_ip_address_nested_shape(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicIpAddressSensor(
+    sensor = DigitalFramesIpAddressSensor(
         _fake_coordinator({"wifi": {"ip": "192.168.1.50"}}), entry
     )
     assert sensor.native_value == "192.168.1.50"
@@ -114,7 +114,7 @@ def test_ip_address_nested_shape(make_frame_entry):
 
 def test_ip_address_flat_eframe_shape(make_frame_entry):
     entry = make_frame_entry()
-    sensor = FraimicIpAddressSensor(
+    sensor = DigitalFramesIpAddressSensor(
         _fake_coordinator({"ip_address": "192.168.1.60"}), entry
     )
     assert sensor.native_value == "192.168.1.60"
@@ -127,9 +127,9 @@ def test_ip_address_flat_eframe_shape(make_frame_entry):
 
 def test_queued_send_sensor_reflects_pending_state(make_frame_entry):
     entry = make_frame_entry()
-    idle = FraimicQueuedSendSensor(_fake_coordinator(pending_send=None), entry)
+    idle = DigitalFramesQueuedSendSensor(_fake_coordinator(pending_send=None), entry)
     assert idle.native_value == "idle"
-    queued = FraimicQueuedSendSensor(_fake_coordinator(pending_send={"token": "x"}), entry)
+    queued = DigitalFramesQueuedSendSensor(_fake_coordinator(pending_send={"token": "x"}), entry)
     assert queued.native_value == "queued"
 
 
@@ -239,13 +239,13 @@ async def test_camera_entity_setup(hass, make_frame_entry):
 
 
 async def test_camera_image_returns_coordinator_thumbnail(hass, make_frame_entry):
-    from custom_components.digital_frames.camera import FraimicCamera
+    from custom_components.digital_frames.camera import DigitalFramesCamera
     entry = make_frame_entry()
     coordinator = _fake_coordinator(pending_send=None)
     coordinator.hass = hass
     coordinator.last_thumbnail = b"png-bytes"
     coordinator.last_image_id = None
 
-    camera = FraimicCamera(coordinator, entry)
+    camera = DigitalFramesCamera(coordinator, entry)
     img = await camera.async_camera_image()
     assert img == b"png-bytes"

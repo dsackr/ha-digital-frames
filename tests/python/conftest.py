@@ -122,7 +122,7 @@ def make_scenes_hub_entry():
 
 @pytest.fixture
 def make_coordinator(hass):
-    """Build a FraimicCoordinator the way real entry setup does, including
+    """Build a DigitalFramesCoordinator the way real entry setup does, including
     the `current_entry` ContextVar that HA's own DataUpdateCoordinator base
     class reads in this HA version when a coordinator subclass doesn't pass
     config_entry= explicitly to super().__init__() (this integration's
@@ -130,13 +130,13 @@ def make_coordinator(hass):
     up None outside of a real entry-setup call stack."""
     from homeassistant.config_entries import current_entry
 
-    from custom_components.digital_frames.coordinator import FraimicCoordinator
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
 
     def _make(entry):
         entry.add_to_hass(hass)
         token = current_entry.set(entry)
         try:
-            return FraimicCoordinator(hass, entry)
+            return DigitalFramesCoordinator(hass, entry)
         finally:
             current_entry.reset(token)
 

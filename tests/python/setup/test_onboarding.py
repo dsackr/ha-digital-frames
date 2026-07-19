@@ -10,7 +10,7 @@ import json
 from types import SimpleNamespace
 
 from custom_components.digital_frames.const import DOMAIN
-from custom_components.digital_frames.http_api import FraimicOnboardingView
+from custom_components.digital_frames.http_api import DigitalFramesOnboardingView
 
 
 class _FakeRequest:
@@ -29,13 +29,13 @@ def _body(response) -> dict:
 
 
 async def test_get_default_is_incomplete(hass):
-    view = FraimicOnboardingView()
+    view = DigitalFramesOnboardingView()
     response = await view.get(_FakeRequest(hass))
     assert _body(response) == {"complete": False}
 
 
 async def test_post_marks_complete(hass):
-    view = FraimicOnboardingView()
+    view = DigitalFramesOnboardingView()
     response = await view.post(_FakeRequest(hass, is_admin=True))
     assert response.status == 200
     assert _body(response) == {"success": True, "complete": True}
@@ -45,7 +45,7 @@ async def test_post_marks_complete(hass):
 
 
 async def test_post_rejected_for_non_admin(hass):
-    view = FraimicOnboardingView()
+    view = DigitalFramesOnboardingView()
     response = await view.post(_FakeRequest(hass, is_admin=False))
     assert response.status == 403
 
@@ -55,7 +55,7 @@ async def test_post_rejected_for_non_admin(hass):
 
 
 async def test_completion_persists_across_store_reload(hass):
-    view = FraimicOnboardingView()
+    view = DigitalFramesOnboardingView()
     await view.post(_FakeRequest(hass, is_admin=True))
 
     # Simulate a restart: drop the cached Store instance so the next call

@@ -28,7 +28,7 @@ def _get_schedule_manager(hass):
     return manager
 
 
-class FraimicSchedulesView(HomeAssistantView):
+class DigitalFramesSchedulesView(HomeAssistantView):
     """List (GET) or create (POST) schedules."""
 
     url = "/api/digital_frames/schedules"
@@ -81,7 +81,7 @@ class FraimicSchedulesView(HomeAssistantView):
         return self.json({"success": True, "schedule": schedule})
 
 
-class FraimicScheduleView(HomeAssistantView):
+class DigitalFramesScheduleView(HomeAssistantView):
     """Update (POST) or delete (DELETE) a single schedule."""
 
     url = "/api/digital_frames/schedules/{schedule_id}"

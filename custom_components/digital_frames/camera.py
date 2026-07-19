@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .coordinator import FraimicCoordinator
+from .coordinator import DigitalFramesCoordinator
 from .const import CONF_NAME, DOMAIN
 from .sensor import frame_device_info
 
@@ -24,15 +24,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Fraimic cameras from a config entry."""
-    coordinator: FraimicCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DigitalFramesCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities([FraimicCamera(coordinator, entry)])
+    async_add_entities([DigitalFramesCamera(coordinator, entry)])
 
 
-class FraimicCamera(CoordinatorEntity[FraimicCoordinator], Camera):
+class DigitalFramesCamera(CoordinatorEntity[DigitalFramesCoordinator], Camera):
     """Camera entity representing the Fraimic frame's photo display."""
 
-    def __init__(self, coordinator: FraimicCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: DigitalFramesCoordinator, entry: ConfigEntry) -> None:
         """Initialise the camera."""
         super().__init__(coordinator)
         Camera.__init__(self)

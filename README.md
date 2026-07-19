@@ -1,45 +1,55 @@
 # Digital Frames for Home Assistant
 
-Turn your digital photo frames into a gallery wall that Home Assistant actually controls — no vendor app, no cloud account required for the local drivers. Point it at your frames and start sending photos in minutes.
+Turn your digital photo frames into a gallery wall that Home Assistant actually controls — no vendor app, no cloud account required. Point it at your frames and start sending photos in minutes.
 
-**Digital Frames** is the product name and HA domain (`digital_frames`, package `custom_components/digital_frames/`). Official Spectra e‑ink panels remain manufacturer **Fraimic** in the device registry. **Your photo library and albums** live under `config/digital_frames_library/` (first load renames a leftover `config/fraimic_library/` automatically). Re-add frames after upgrading from the old `fraimic` domain — walls/scenes/entries are not auto-migrated.
+**Digital Frames** is the product name and HA domain (`digital_frames`, package `custom_components/digital_frames/`). Official Spectra e‑ink panels remain manufacturer **Fraimic** in the device registry. The photo library lives under `config/digital_frames_library/` (a leftover `config/fraimic_library/` is renamed on first load).
+
+**Scope is local LAN only.** Meural cloud / Cognito is **out of scope** — use [HA-meural](https://github.com/GuySie/ha-meural) if you need cloud playlists. Drivers talk to devices on your network.
 
 ## Why you'll want this
 
-- **No cloud in the loop (local drivers).** Talk to frames over your own WiFi. No account to create for Fraimic, Meural local, or experimental Samsung MDC.
-- **One tap turns a wall into a scene.** Match photos to frames — say, four frames each showing a different shot — and flip the whole wall at once from a dashboard, a voice command, or an automation.
-- **Your library, not a photo dump.** Upload once, organize into albums, reuse the same photo across frames and scenes without duplicating files.
-- **A gallery wall out of the box.** Install a curated public-domain art pack (Monet, da Vinci, van Gogh, and more) with one click — Home Assistant imports it, matches pieces to your frames by orientation, and builds a ready-to-send scene automatically.
-- **Set it and forget it.** Daily agenda mode turns your calendar into a frame display; rotation mode cycles albums. Once configured, it just runs.
-- **Multi-vendor.** Fraimic / community e‑ink, Meural Canvas (local), and experimental Samsung EM32DX — one walls/scenes/library core.
+- **No cloud in the loop.** Talk to frames over your own WiFi.
+- **One tap turns a wall into a scene.** Match photos to frames and flip the whole wall from a dashboard, voice, or automation.
+- **Your library, not a photo dump.** Upload once, organize into albums, reuse across frames and scenes.
+- **A gallery wall out of the box.** Curated public-domain art packs install with one click.
+- **Set it and forget it.** Daily agenda, skills, schedules.
+- **Multi-vendor local drivers.** Fraimic / community e‑ink, Meural Canvas (local), experimental Samsung EM32DX.
 
 ## Quick start
 
-1. Install through HACS: add `https://github.com/dsackr/fraimic-homeassistant` as a custom repository (category: Integration), then install **Digital Frames**.
+1. Install through HACS: add [`https://github.com/dsackr/ha-digital-frames`](https://github.com/dsackr/ha-digital-frames) as a custom repository (category: Integration), then install **Digital Frames**.
 2. Restart Home Assistant.
-3. Go to **Settings → Integrations → Add Integration**, search **Digital Frames**, and follow the prompts. Wake your frame first so it's discoverable.
+3. **Settings → Integrations → Add Integration**, search **Digital Frames**, add a frame. Wake the frame first so it's discoverable.
 
-That's it — your frame shows up as a device, ready to receive photos. The sidebar panel is **Digital Frames** at `/digital_frames`.
+Sidebar panel: **Digital Frames** at `/digital_frames` (legacy `/fraimic` still opens the same panel).
 
-Manual install, troubleshooting, and full hardware requirements: see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+More detail: [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+## Hardware & testing
+
+We develop against hardware the maintainers own. Other vendors (and panel sizes we don't have) are **community-validated**.
+
+**If you run Digital Frames on real hardware — especially Meural, Samsung EM32DX, or community e‑ink clones — please volunteer a smoke test and file an issue or PR with results.** That is the primary path for “does this work on device X?” coverage; CI cannot replace it.
+
+| Driver | Status |
+|--------|--------|
+| Fraimic / Spectra e‑ink (official + common clones) | Primary development target |
+| Meural Canvas **local** LAN | Implemented; volunteer reports welcome |
+| Samsung EM32DX (MDC local) | Experimental; **needs volunteer hardware** |
+| InkJoy | Out of scope for now (MQTT control plane) |
+| Meural **cloud** | **Out of scope** (use HA-meural) |
 
 ## Credits
 
 **Meural Canvas local protocol** — endpoint inventory for the on-device
-`/remote/` HTTP API (identify, system check, backlight, suspend/resume,
-postcard upload, galleries JSON, etc.) was published by **Guy Sie** in
-[HA-meural](https://github.com/GuySie/ha-meural) (MIT License,
-Copyright © 2020 Guy Sie). Our Meural support is a **local-only** FramePort
-driver inspired by that documentation; we do not use Meural cloud/Cognito and
-do not vendor HA-meural code. If you want full Meural cloud playlists and
-media-player UX in Home Assistant, use HA-meural.
+`/remote/` HTTP API was published by **Guy Sie** in
+[HA-meural](https://github.com/GuySie/ha-meural) (MIT). Our driver is
+**local-only**, inspired by that documentation; we do not use Meural cloud
+and do not vendor HA-meural code.
 
-**Samsung EM32DX (experimental)** — MDC content-download packet layout, TLS
-PIN auth, and WoL/SSDP workflow are documented in
-[fayep/Joyous](https://github.com/fayep/Joyous) (`Samsung/samsung_serve.py`
-and hub MDC code). Our driver is an independent HA reimplementation; it has
-**not been validated on real Samsung hardware** in this project. InkJoy is
-**not** integrated here (vendor control plane is MQTT — deferred).
+**Samsung EM32DX (experimental)** — MDC layout and WoL notes from
+[fayep/Joyous](https://github.com/fayep/Joyous). Independent HA reimplementation;
+not validated on real Samsung hardware in this project.
 
 ## License
 
@@ -47,13 +57,12 @@ MIT — see [LICENSE](LICENSE).
 
 ## Get involved
 
-- ⭐ Star the repo if this is useful to you
-- 🐛 [Report an issue](https://github.com/dsackr/fraimic-homeassistant/issues) if a frame misbehaves
+- ⭐ Star the repo if this is useful
+- 🧪 **Volunteer hardware testing** — open an issue with device model + what worked
+- 🐛 [Report an issue](https://github.com/dsackr/ha-digital-frames/issues)
 - 🤝 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## How this project tests itself
 
-See [docs/KEY_PRODUCT_FLOWS.md](docs/KEY_PRODUCT_FLOWS.md) for the catalog
-of what the integration does and how each flow is tested, and
-[TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the overall testing
-strategy and coverage roadmap.
+See [docs/KEY_PRODUCT_FLOWS.md](docs/KEY_PRODUCT_FLOWS.md) and
+[TESTING_STRATEGY.md](TESTING_STRATEGY.md).

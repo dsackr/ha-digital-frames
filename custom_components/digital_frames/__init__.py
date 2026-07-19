@@ -29,7 +29,7 @@ from .const import (
     PLATFORMS,
     PRODUCT_NAME,
 )
-from .coordinator import FraimicCoordinator
+from .coordinator import DigitalFramesCoordinator
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -130,15 +130,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Register the image-upload HTTP endpoint and the first-run wizard's
     # server-side completion flag.
     from .http_api import (  # noqa: PLC0415
-        FraimicFrameStatusView,
-        FraimicOnboardingView,
-        FraimicSamsungContentView,
-        FraimicSendImageView,
+        DigitalFramesFrameStatusView,
+        DigitalFramesOnboardingView,
+        DigitalFramesSamsungContentView,
+        DigitalFramesSendImageView,
     )
-    hass.http.register_view(FraimicSendImageView())
-    hass.http.register_view(FraimicOnboardingView())
-    hass.http.register_view(FraimicFrameStatusView())
-    hass.http.register_view(FraimicSamsungContentView())
+    hass.http.register_view(DigitalFramesSendImageView())
+    hass.http.register_view(DigitalFramesOnboardingView())
+    hass.http.register_view(DigitalFramesFrameStatusView())
+    hass.http.register_view(DigitalFramesSamsungContentView())
 
     from .update_http import async_register_update_views  # noqa: PLC0415
 
@@ -161,44 +161,44 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.async_create_task(async_setup_intents(hass))
 
     from .library_http import (  # noqa: PLC0415
-        FraimicFramesView,
-        FraimicFrameThumbnailView,
-        FraimicLibraryAlbumImagesView,
-        FraimicLibraryAlbumsView,
-        FraimicLibraryCropView,
-        FraimicLibraryDiscoverView,
-        FraimicLibraryGoogleOAuthCallbackView,
-        FraimicLibraryGoogleOAuthStartView,
-        FraimicLibraryGoogleRedirectUriView,
-        FraimicLibraryImageAlbumsView,
-        FraimicLibraryImageVoiceNameView,
-        FraimicLibraryImageTagsView,
-        FraimicLibraryImageView,
-        FraimicLibraryListView,
-        FraimicLibrarySendView,
-        FraimicLibrarySettingsView,
-        FraimicLibraryUploadView,
-        FraimicFrameReloadView,
+        DigitalFramesFramesView,
+        DigitalFramesFrameThumbnailView,
+        DigitalFramesLibraryAlbumImagesView,
+        DigitalFramesLibraryAlbumsView,
+        DigitalFramesLibraryCropView,
+        DigitalFramesLibraryDiscoverView,
+        DigitalFramesLibraryGoogleOAuthCallbackView,
+        DigitalFramesLibraryGoogleOAuthStartView,
+        DigitalFramesLibraryGoogleRedirectUriView,
+        DigitalFramesLibraryImageAlbumsView,
+        DigitalFramesLibraryImageVoiceNameView,
+        DigitalFramesLibraryImageTagsView,
+        DigitalFramesLibraryImageView,
+        DigitalFramesLibraryListView,
+        DigitalFramesLibrarySendView,
+        DigitalFramesLibrarySettingsView,
+        DigitalFramesLibraryUploadView,
+        DigitalFramesFrameReloadView,
     )
 
-    hass.http.register_view(FraimicLibraryListView())
-    hass.http.register_view(FraimicLibraryUploadView())
-    hass.http.register_view(FraimicLibraryImageView())
-    hass.http.register_view(FraimicLibraryImageAlbumsView())
-    hass.http.register_view(FraimicLibraryImageVoiceNameView())
-    hass.http.register_view(FraimicLibraryImageTagsView())
-    hass.http.register_view(FraimicLibrarySendView())
-    hass.http.register_view(FraimicLibraryCropView())
-    hass.http.register_view(FraimicLibraryAlbumsView())
-    hass.http.register_view(FraimicLibraryAlbumImagesView())
-    hass.http.register_view(FraimicFramesView())
-    hass.http.register_view(FraimicFrameThumbnailView())
-    hass.http.register_view(FraimicLibrarySettingsView())
-    hass.http.register_view(FraimicLibraryDiscoverView())
-    hass.http.register_view(FraimicLibraryGoogleRedirectUriView())
-    hass.http.register_view(FraimicLibraryGoogleOAuthStartView())
-    hass.http.register_view(FraimicLibraryGoogleOAuthCallbackView())
-    hass.http.register_view(FraimicFrameReloadView())
+    hass.http.register_view(DigitalFramesLibraryListView())
+    hass.http.register_view(DigitalFramesLibraryUploadView())
+    hass.http.register_view(DigitalFramesLibraryImageView())
+    hass.http.register_view(DigitalFramesLibraryImageAlbumsView())
+    hass.http.register_view(DigitalFramesLibraryImageVoiceNameView())
+    hass.http.register_view(DigitalFramesLibraryImageTagsView())
+    hass.http.register_view(DigitalFramesLibrarySendView())
+    hass.http.register_view(DigitalFramesLibraryCropView())
+    hass.http.register_view(DigitalFramesLibraryAlbumsView())
+    hass.http.register_view(DigitalFramesLibraryAlbumImagesView())
+    hass.http.register_view(DigitalFramesFramesView())
+    hass.http.register_view(DigitalFramesFrameThumbnailView())
+    hass.http.register_view(DigitalFramesLibrarySettingsView())
+    hass.http.register_view(DigitalFramesLibraryDiscoverView())
+    hass.http.register_view(DigitalFramesLibraryGoogleRedirectUriView())
+    hass.http.register_view(DigitalFramesLibraryGoogleOAuthStartView())
+    hass.http.register_view(DigitalFramesLibraryGoogleOAuthCallbackView())
+    hass.http.register_view(DigitalFramesFrameReloadView())
 
     # Scenes: named (frame, image) assignment lists sendable all at once.
     # Pure local state -- config entry_ids are meaningless off this HA
@@ -210,14 +210,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})["_scenes"] = scene_manager
 
     from .scenes_http import (  # noqa: PLC0415
-        FraimicSceneSendView,
-        FraimicSceneView,
-        FraimicScenesView,
+        DigitalFramesSceneSendView,
+        DigitalFramesSceneView,
+        DigitalFramesScenesView,
     )
 
-    hass.http.register_view(FraimicScenesView())
-    hass.http.register_view(FraimicSceneView())
-    hass.http.register_view(FraimicSceneSendView())
+    hass.http.register_view(DigitalFramesScenesView())
+    hass.http.register_view(DigitalFramesSceneView())
+    hass.http.register_view(DigitalFramesSceneSendView())
 
     # Scheduled events: send a scene or a single image at a future time
     # (one-shot or daily/weekly/monthly). Built on the scene manager's
@@ -230,12 +230,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await schedule_manager.async_load()
 
     from .schedules_http import (  # noqa: PLC0415
-        FraimicSchedulesView,
-        FraimicScheduleView,
+        DigitalFramesSchedulesView,
+        DigitalFramesScheduleView,
     )
 
-    hass.http.register_view(FraimicSchedulesView())
-    hass.http.register_view(FraimicScheduleView())
+    hass.http.register_view(DigitalFramesSchedulesView())
+    hass.http.register_view(DigitalFramesScheduleView())
 
     # Walls: virtual layouts of a subset of the user's frames, positioned the
     # way they're physically hung. Pure panel-local state -- like scenes,
@@ -251,10 +251,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # configured frames (config entries are already loaded at this point).
     await wall_manager.async_ensure_default_wall()
 
-    from .walls_http import FraimicWallsView, FraimicWallView  # noqa: PLC0415
+    from .walls_http import DigitalFramesWallsView, DigitalFramesWallView  # noqa: PLC0415
 
-    hass.http.register_view(FraimicWallsView())
-    hass.http.register_view(FraimicWallView())
+    hass.http.register_view(DigitalFramesWallsView())
+    hass.http.register_view(DigitalFramesWallView())
 
     # Scene packs: curated bundles of public-domain images + an auto-built
     # scene, installable from the panel with no manual setup. Built on top
@@ -272,16 +272,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await scene_manager.async_mark_scene_source(scene_id, "addon")
 
     from .scene_packs_http import (  # noqa: PLC0415
-        FraimicScenePackInstallView,
-        FraimicScenePacksView,
-        FraimicScenePackSyncView,
-        FraimicScenePackUninstallView,
+        DigitalFramesScenePackInstallView,
+        DigitalFramesScenePacksView,
+        DigitalFramesScenePackSyncView,
+        DigitalFramesScenePackUninstallView,
     )
 
-    hass.http.register_view(FraimicScenePacksView())
-    hass.http.register_view(FraimicScenePackInstallView())
-    hass.http.register_view(FraimicScenePackSyncView())
-    hass.http.register_view(FraimicScenePackUninstallView())
+    hass.http.register_view(DigitalFramesScenePacksView())
+    hass.http.register_view(DigitalFramesScenePackInstallView())
+    hass.http.register_view(DigitalFramesScenePackSyncView())
+    hass.http.register_view(DigitalFramesScenePackUninstallView())
 
     # One-off cleanup: quote_of_the_day/scripture_of_the_day are retired in
     # favour of per-instance xOTD content (see xotd.py). Their widget
@@ -310,14 +310,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})["_skills"] = skill_manager
 
     from .skills_http import (  # noqa: PLC0415
-        FraimicSkillSendView,
-        FraimicSkillsView,
-        FraimicSkillView,
+        DigitalFramesSkillSendView,
+        DigitalFramesSkillsView,
+        DigitalFramesSkillView,
     )
 
-    hass.http.register_view(FraimicSkillsView())
-    hass.http.register_view(FraimicSkillView())
-    hass.http.register_view(FraimicSkillSendView())
+    hass.http.register_view(DigitalFramesSkillsView())
+    hass.http.register_view(DigitalFramesSkillView())
+    hass.http.register_view(DigitalFramesSkillSendView())
 
     # One-time migration: xOTD's old per-instance (content_mode, frame,
     # schedule) model is retired in favour of frame-agnostic skills
@@ -437,7 +437,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
 
         coordinator = SamsungCoordinator(hass, entry)
     else:
-        coordinator = FraimicCoordinator(hass, entry)
+        coordinator = DigitalFramesCoordinator(hass, entry)
 
     # Hydrate the Frames panel thumbnail hint from disk before anything else
     # can query it, so a restart doesn't drop back to the generic icon until

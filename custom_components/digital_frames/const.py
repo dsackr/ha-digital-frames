@@ -105,7 +105,7 @@ SIGNAL_SKILLS_UPDATED = f"{DOMAIN}_skills_updated"
 # install time. Content lives in a separate repository (dsackr/frame-addons)
 # under scene_packs/ so the integration stays lightweight. Deliberately
 # tracks `main` (not pinned) -- new art packs, image fixes, and widget
-# tweaks should show up without a fraimic-homeassistant release.
+# tweaks should show up without a ha-digital-frames release.
 SCENE_PACK_RAW_BASE = (
     "https://raw.githubusercontent.com/dsackr/frame-addons/main"
 )

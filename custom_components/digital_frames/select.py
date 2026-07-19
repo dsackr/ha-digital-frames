@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from homeassistant.helpers.device_registry import DeviceInfo
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-    from .coordinator import FraimicCoordinator
+    from .coordinator import DigitalFramesCoordinator
 
 _OPTION_LABELS = {
     ORIENTATION_AUTO: "Auto (any picture, Fraimic default)",
@@ -89,12 +89,12 @@ async def async_setup_entry(
         return
     if entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG:
         # Manual orientation lock for crop/send only (no gsensor follow yet).
-        async_add_entities([FraimicOrientationSelect(coordinator, entry)])
+        async_add_entities([DigitalFramesOrientationSelect(coordinator, entry)])
         return
-    async_add_entities([FraimicOrientationSelect(coordinator, entry)])
+    async_add_entities([DigitalFramesOrientationSelect(coordinator, entry)])
 
 
-class FraimicOrientationSelect(CoordinatorEntity, SelectEntity):
+class DigitalFramesOrientationSelect(CoordinatorEntity, SelectEntity):
     """Per-frame orientation lock, persisted to the config entry options."""
 
     _attr_has_entity_name = True
@@ -104,7 +104,7 @@ class FraimicOrientationSelect(CoordinatorEntity, SelectEntity):
     _attr_options = list(_OPTION_LABELS.values())
 
     def __init__(
-        self, coordinator: "FraimicCoordinator", entry: "ConfigEntry"
+        self, coordinator: "DigitalFramesCoordinator", entry: "ConfigEntry"
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
@@ -142,7 +142,7 @@ class MeuralOrientationSelect(CoordinatorEntity, SelectEntity):
     _attr_options = list(_MEURAL_OPTION_LABELS.values())
 
     def __init__(
-        self, coordinator: "FraimicCoordinator", entry: "ConfigEntry"
+        self, coordinator: "DigitalFramesCoordinator", entry: "ConfigEntry"
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry

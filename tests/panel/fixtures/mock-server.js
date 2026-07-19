@@ -136,9 +136,9 @@ function createMockServer({
   const updateDismisses = [];
 
   // --- Embedded config/options flow state machine -----------------------
-  // Mirrors FraimicConfigFlow: menu user → add_fraimic/add_meural →
+  // Mirrors DigitalFramesConfigFlow: menu user → add_fraimic/add_meural →
   // pick_device → name_device → create_entry (cannot_connect error branch)
-  // and FraimicOptionsFlow's single init step.
+  // and DigitalFramesOptionsFlow's single init step.
   const flowSubmissions = [];   // { flow_id, body } per step POST
   const flowDeletes = [];       // flow_id per flow DELETE
   const entryDeletes = [];      // entry_id per config entry DELETE
@@ -374,7 +374,7 @@ function createMockServer({
     }
 
     if (p === '/api/digital_frames/library/list') {
-      // Mirrors library_http.py's FraimicLibraryListView: `album` is an
+      // Mirrors library_http.py's DigitalFramesLibraryListView: `album` is an
       // optional filter over the full image list, not a required param.
       // The default album 'Images' includes all images.
       const album = url.searchParams.get('album');
@@ -383,7 +383,7 @@ function createMockServer({
     }
     if (p === '/api/digital_frames/library/settings') {
       if (req.method === 'POST') {
-        // Mirrors FraimicLibrarySettingsView: dropbox without a token is
+        // Mirrors DigitalFramesLibrarySettingsView: dropbox without a token is
         // the one validation failure the panel's inline connect can hit.
         const parsed = await readJsonBody(req);
         if (parsed.backend === 'dropbox' && !parsed.access_token) {
@@ -404,7 +404,7 @@ function createMockServer({
     }
 
     if (p === '/api/digital_frames/library/crop') {
-      // Mirrors FraimicLibraryCropView: save/clear a crop rect keyed by
+      // Mirrors DigitalFramesLibraryCropView: save/clear a crop rect keyed by
       // effective resolution, returning the updated image record.
       const parsed = await readJsonBody(req);
       const image = images.find((img) => img.image_id === parsed.image_id);
@@ -462,7 +462,7 @@ function createMockServer({
 
     if (p.match(/^\/api\/digital_frames\/frame\/[^/]+\/thumbnail$/)) {
       // The frame's own render preview (uploads, xOTD/skill text renders) --
-      // ETag'd like the real FraimicFrameThumbnailView.
+      // ETag'd like the real DigitalFramesFrameThumbnailView.
       const etag = '"tiny-png"';
       if (req.headers['if-none-match'] === etag) {
         res.writeHead(304, { ETag: etag });

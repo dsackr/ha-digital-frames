@@ -33,7 +33,7 @@ def _require_admin(request: web.Request) -> web.Response | None:
     return None
 
 
-class FraimicUpdateStatusView(HomeAssistantView):
+class DigitalFramesUpdateStatusView(HomeAssistantView):
     """GET current installed version + latest GitHub release comparison."""
 
     url = "/api/digital_frames/update"
@@ -55,7 +55,7 @@ class FraimicUpdateStatusView(HomeAssistantView):
         return self.json(status)
 
 
-class FraimicUpdateCheckView(HomeAssistantView):
+class DigitalFramesUpdateCheckView(HomeAssistantView):
     """POST force a fresh GitHub check (same payload as GET)."""
 
     url = "/api/digital_frames/update/check"
@@ -77,7 +77,7 @@ class FraimicUpdateCheckView(HomeAssistantView):
         return self.json(status)
 
 
-class FraimicUpdateInstallView(HomeAssistantView):
+class DigitalFramesUpdateInstallView(HomeAssistantView):
     """POST install a release (latest, or body.version)."""
 
     url = "/api/digital_frames/update/install"
@@ -106,7 +106,7 @@ class FraimicUpdateInstallView(HomeAssistantView):
         return self.json(result)
 
 
-class FraimicUpdateRestartView(HomeAssistantView):
+class DigitalFramesUpdateRestartView(HomeAssistantView):
     """POST restart Home Assistant after an install."""
 
     url = "/api/digital_frames/update/restart"
@@ -131,7 +131,7 @@ class FraimicUpdateRestartView(HomeAssistantView):
         )
 
 
-class FraimicUpdateDismissView(HomeAssistantView):
+class DigitalFramesUpdateDismissView(HomeAssistantView):
     """POST dismiss the dashboard update banner for a version."""
 
     url = "/api/digital_frames/update/dismiss"
@@ -170,8 +170,8 @@ class FraimicUpdateDismissView(HomeAssistantView):
 @callback
 def async_register_update_views(hass) -> None:
     """Register update HTTP views (called from domain setup)."""
-    hass.http.register_view(FraimicUpdateStatusView())
-    hass.http.register_view(FraimicUpdateCheckView())
-    hass.http.register_view(FraimicUpdateInstallView())
-    hass.http.register_view(FraimicUpdateRestartView())
-    hass.http.register_view(FraimicUpdateDismissView())
+    hass.http.register_view(DigitalFramesUpdateStatusView())
+    hass.http.register_view(DigitalFramesUpdateCheckView())
+    hass.http.register_view(DigitalFramesUpdateInstallView())
+    hass.http.register_view(DigitalFramesUpdateRestartView())
+    hass.http.register_view(DigitalFramesUpdateDismissView())

@@ -97,10 +97,10 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
     # single boot-time sweep goes stale fast -- the panel re-runs the sweep
     # whenever it opens, keeping its discovery banner current.
     domain_data["_discovery_scan"] = _async_scan
-    hass.http.register_view(FraimicDiscoveryScanView())
+    hass.http.register_view(DigitalFramesDiscoveryScanView())
 
 
-class FraimicDiscoveryScanView(HomeAssistantView):
+class DigitalFramesDiscoveryScanView(HomeAssistantView):
     """POST /api/digital_frames/discovery/scan — run one discovery sweep now."""
 
     url = "/api/digital_frames/discovery/scan"

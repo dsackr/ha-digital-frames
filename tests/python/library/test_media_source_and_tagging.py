@@ -14,7 +14,7 @@ from homeassistant.components.media_player import MediaClass, MediaType
 
 from custom_components.digital_frames.library import LibraryManager
 from custom_components.digital_frames.const import DOMAIN
-from custom_components.digital_frames.media_source import FraimicMediaSource
+from custom_components.digital_frames.media_source import DigitalFramesMediaSource
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +140,7 @@ async def test_media_source_resolve_and_browse(
         "photo.jpg", sample_image_bytes(200, 200)
     )
 
-    media_source = FraimicMediaSource(hass)
+    media_source = DigitalFramesMediaSource(hass)
 
     # 1. Resolve media item
     from homeassistant.components.media_source import MediaSourceItem

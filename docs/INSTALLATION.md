@@ -4,14 +4,14 @@
 
 1. In Home Assistant, go to **Settings → Integrations → HACS**
 2. Click the three-dot menu → **Custom repositories**
-3. Paste `https://github.com/dsackr/fraimic-homeassistant` and set category to **Integration**
+3. Paste `https://github.com/dsackr/ha-digital-frames` and set category to **Integration**
 4. Click **Add**, then find **Digital Frames** in HACS and install it
-   (GitHub repo may still be `fraimic-homeassistant`; package is
-   `custom_components/digital_frames/`)
-5. If upgrading from the old **Fraimic** domain, remove
+   (package: `custom_components/digital_frames/`)
+5. If upgrading from the old **Fraimic** integration, remove
    `custom_components/fraimic/` so only Digital Frames loads. Library and
    albums move to `config/digital_frames_library/` on first load (legacy
-   `config/fraimic_library/` is renamed automatically); re-add frames.
+   `config/fraimic_library/` is renamed automatically). Re-add frames —
+   old-domain config entries are not auto-migrated.
 6. Restart Home Assistant
 
 ## Install manually
@@ -56,8 +56,8 @@ Community clone builds:
 
 ## Image format notes
 
-Images are converted to Spectra 6 raw `.bin` format before being sent to frames. The conversion pipeline is based on the [Fraimic bin converter](https://github.com/Fraimic/fraimic_bin_converter) reference implementation. See also the [REST API guide](https://github.com/Fraimic/Fraimic_eink_canvas_home_assistant_restAPI_guide) for documentation on the endpoints this integration uses. E-ink panels can vary — test with your frame and [open an issue](https://github.com/dsackr/fraimic-homeassistant/issues) if the display looks wrong.
+Images are converted to Spectra 6 raw `.bin` format before being sent to frames. The conversion pipeline is based on the [Fraimic bin converter](https://github.com/Fraimic/fraimic_bin_converter) reference implementation. See also the [REST API guide](https://github.com/Fraimic/Fraimic_eink_canvas_home_assistant_restAPI_guide) for documentation on the endpoints this integration uses. E-ink panels can vary — test with your frame and [open an issue](https://github.com/dsackr/ha-digital-frames/issues) if the display looks wrong.
 
 ## Issues & support
 
-[https://github.com/dsackr/fraimic-homeassistant/issues](https://github.com/dsackr/fraimic-homeassistant/issues)
+[https://github.com/dsackr/ha-digital-frames/issues](https://github.com/dsackr/ha-digital-frames/issues)

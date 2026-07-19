@@ -41,7 +41,7 @@ def _parse_skill_body(body: Any) -> tuple[str | None, str | None, dict]:
     return name, content_mode, config
 
 
-class FraimicSkillsView(HomeAssistantView):
+class DigitalFramesSkillsView(HomeAssistantView):
     """List (GET) or create (POST) skills."""
 
     url = "/api/digital_frames/skills"
@@ -78,7 +78,7 @@ class FraimicSkillsView(HomeAssistantView):
         return self.json({"success": True, "skill": skill})
 
 
-class FraimicSkillView(HomeAssistantView):
+class DigitalFramesSkillView(HomeAssistantView):
     """Update (POST) or delete (DELETE) a single skill."""
 
     url = "/api/digital_frames/skills/{skill_id}"
@@ -122,7 +122,7 @@ class FraimicSkillView(HomeAssistantView):
         return self.json({"success": True})
 
 
-class FraimicSkillSendView(HomeAssistantView):
+class DigitalFramesSkillSendView(HomeAssistantView):
     """Send one skill to one frame now (ad hoc, no scene/schedule needed)."""
 
     url = "/api/digital_frames/skills/{skill_id}/send"
