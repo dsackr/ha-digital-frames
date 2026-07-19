@@ -63,12 +63,15 @@ frame).
 ## 4. Send image now (queue-if-asleep) — the core send primitive
 Every "send to frame" path (service, raw upload, library send, scene send,
 schedule fire) funnels through one send-or-queue mechanism so a sleeping
-frame gets the image on wake instead of losing it or double-sending. A
-generous 240-second timeout is used to ensure slow ESP32-based clone frames
-finish their e-ink redraw before the connection is aborted, preventing
-spurious delivery failure reports and double-refreshes.
+frame gets the image on wake instead of losing it or double-sending. Image
+upload timeout comes from the panel profile
+(`FrameType.send_timeout_s` / `send_timeout_for_entry`) — default 240s so
+slow ESP32 sequential panels (7.3") finish their e-ink redraw before the
+connection is aborted, preventing spurious delivery failure reports and
+double-refreshes.
 - **Entry points**: `coordinator.py` (`async_send_image_or_queue`,
-  `_async_flush_pending_send`, `_set_pending`, `_clear_pending_if_current`).
+  `async_send_image`, `_async_flush_pending_send`, `_set_pending`,
+  `_clear_pending_if_current`), `frame_types.send_timeout_for_entry`.
 - **If it silently breaks**: images sent to a sleeping frame vanish, or a
   wake causes a duplicate redraw.
 - **Test status**: **Backend-tested** —
@@ -98,19 +101,25 @@ Custom Assist/LLM intents to generate an AI image, display a specific library im
 ## 7. Image conversion pipeline (Spectra 6 .bin encoding + decoding)
 Converts any Pillow-readable image into the frame's proprietary packed-
 nibble binary format: auto-rotate, cover-crop, manual crop, canvas
-rotation, dithering, and two byte layouts (split-half vs. sequential).
-Also the reverse direction: unpacking a `.bin` back into an image, used to
-build a preview thumbnail for sends that only ever see packed bytes (the
-xOTD/skill text renderer — see KPF 28/29).
-- **Entry points**: `image_converter.py` (`convert_image*`, `_process`,
-  `_process_cropped`, `_pack_to_spectra6_bin` / `_pack_p_image_fast`,
-  `default_cover_crop_box`, `unpack_spectra6_bin`, `preview_png_from_bin`).
+rotation, dithering, and two PanelCodecs (split-half vs. sequential).
+Call sites that produce wire payload for a send should use
+`panel_codec.encode_for_panel*` (codec selection by panel geometry);
+packing primitives remain in `image_converter.py`. Also the reverse
+direction: unpacking a `.bin` back into an image, used to build a preview
+thumbnail for sends that only ever see packed bytes (the xOTD/skill text
+renderer — see KPF 28/29).
+- **Entry points**: `panel_codec.py` (`encode_for_panel`,
+  `encode_for_panel_with_preview`, `encode_path_for_panel_with_preview`),
+  `image_converter.py` (`convert_image*`, `_process`, `_process_cropped`,
+  `_pack_to_spectra6_bin` / `_pack_p_image_fast`, `default_cover_crop_box`,
+  `unpack_spectra6_bin`, `preview_png_from_bin`).
 - **If it silently breaks**: this is the "garbled/duplicated image on the
   physical frame" failure the module's own docstring calls out — no
   exception, just a wrong picture on real hardware. A broken unpacker is
   the softer cousin: wrong/blank card and panel thumbnails after xOTD sends.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_image_converter.py`, including pack→unpack
+  `tests/python/unit/test_image_converter.py`,
+  `tests/python/unit/test_panel_codec.py`, including pack→unpack
   byte-exact round-trips against both byte layouts. Flagged as the riskiest
   silent-failure surface in the codebase in the initial gap analysis; also
   has a standalone byte-identity script (`scripts/verify_packing.py`) run
@@ -351,15 +360,25 @@ into one `RenderSpec` every send path consults.
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_helpers_render_spec.py`.
 
-## 23. Frame-type registry & byte-layout dispatch
-Declares every supported physical panel (resolution, byte layout,
-official/clone origin) and validates no two types sharing a resolution
-disagree on layout.
-- **Entry points**: `frame_types.py` (`FRAME_TYPES`, `_validate_registry`,
-  `byte_layout_for_resolution`).
+## 23. Frame-type registry, PanelCodec ids & byte-layout dispatch
+Declares every supported physical panel (resolution, **codec_id** /
+byte layout, send timeout, official/community origin) and validates no
+two types sharing a resolution disagree on codec. The 7.3" panel is a
+second **PanelCodec** (`spectra6_sequential`) under the local Spectra
+HTTP driver, not identical wire bytes to official split-half panels.
+Library send/backfill and raw-upload encode go through
+`panel_codec.encode_for_panel*` so codec selection is one seam.
+- **Entry points**: `frame_types.py` (`FRAME_TYPES`, `codec_id`,
+  `frame_type_for_resolution`, `codec_id_for_resolution`,
+  `byte_layout_for_resolution`, `send_timeout_for_entry`,
+  `_validate_registry`), `panel_codec.py` (`PanelCodec`, `CODECS`,
+  `encode_for_panel`, `encode_for_panel_with_preview`,
+  `panel_codec_for_resolution` / `_entry`).
 - **If it silently breaks**: garbled image on an unregistered/misregistered
-  panel size (same failure mode as image conversion, one layer up).
-- **Test status**: **Backend-tested** — `tests/python/unit/test_frame_types.py`.
+  panel size (same failure mode as image conversion, one layer up), or
+  7.3" vs 13.3" packing cross-wired.
+- **Test status**: **Backend-tested** — `tests/python/unit/test_frame_types.py`,
+  `tests/python/unit/test_panel_codec.py`.
 
 ## 24. First-run onboarding wizard + server-side completion flag
 Six-step first-run tour; "skip"/"complete" retires the wizard for every

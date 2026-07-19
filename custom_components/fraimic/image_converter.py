@@ -77,7 +77,7 @@ try:  # Optional: makes the "fast" packer fully vectorized. Not required.
 except ImportError:  # pragma: no cover
     _np = None
 
-from .frame_types import LAYOUT_SPLIT_HALF, byte_layout_for_resolution
+from .frame_types import LAYOUT_SPLIT_HALF, frame_type_for_resolution
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +300,8 @@ def _pack_row_half(
 def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     """
     Pack a quantized RGB image into the raw Spectra 6 binary format, using
-    the byte ordering declared for a registered frame type at this image's
-    resolution (see frame_types.py and the module docstring).
+    the PanelCodec declared for a registered frame type at this image's
+    resolution (see frame_types.py / panel_codec.py and the module docstring).
 
     :param quantized_image: RGB image whose pixels are restricted to the six
         entries of :data:`SPECTRA6_REAL_WORLD_RGB`.
@@ -310,7 +310,13 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
         (indicates a bug in the quantization step), or if no registered
         frame type has this image's resolution.
     """
-    layout = byte_layout_for_resolution(quantized_image.width, quantized_image.height)
+    # Codec selection: resolution → FrameType → byte_layout (split_half for
+    # official panels, sequential for 7.3"). Callers that only have geometry
+    # land here; library paths should prefer panel_codec.encode_for_panel so
+    # the seam is obvious at the call site.
+    layout = frame_type_for_resolution(
+        quantized_image.width, quantized_image.height
+    ).byte_layout
     if layout == LAYOUT_SPLIT_HALF:
         return _pack_split_halves(quantized_image)
     return _pack_sequential(quantized_image)
@@ -418,7 +424,7 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
     _pack_to_spectra6_bin."""
     width, height = p_image.size
     nibbles = p_image.tobytes().translate(_P_INDEX_TO_NIBBLE)
-    layout = byte_layout_for_resolution(width, height)
+    layout = frame_type_for_resolution(width, height).byte_layout
     if layout == LAYOUT_SPLIT_HALF:
         half = width // 2
         return (
@@ -684,7 +690,7 @@ def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Ima
             f"bin is {len(bin_bytes)} bytes, expected {expected} for {width}x{height}"
         )
     try:
-        layout = byte_layout_for_resolution(width, height)
+        layout = frame_type_for_resolution(width, height).byte_layout
     except ValueError:
         layout = LAYOUT_SPLIT_HALF
 

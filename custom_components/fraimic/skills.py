@@ -61,7 +61,7 @@ from .const import (
     XOTD_RENDERER_PINNED_BASE,
     XOTD_RENDERER_SCRIPT_PATH,
 )
-from .frame_types import byte_layout_for_resolution
+from .panel_codec import panel_codec_for_resolution
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -384,7 +384,7 @@ class SkillManager:
 
         spec = render_spec_for_entry(entry)
         try:
-            layout = byte_layout_for_resolution(spec.width, spec.height)
+            layout = panel_codec_for_resolution(spec.width, spec.height).byte_layout
         except ValueError:
             layout = "split_half"
 

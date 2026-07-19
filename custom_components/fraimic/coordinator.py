@@ -536,20 +536,25 @@ class FraimicCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_send_image(self, image_bytes: bytes) -> int:
         """Upload a binary image to the frame."""
+        from .frame_types import send_timeout_for_entry  # noqa: PLC0415
+
         session = async_get_clientsession(self.hass)
         url = self._base_url(API_IMAGE)
         headers = {"Content-Type": "application/octet-stream"}
+        # Timeout comes from the panel profile (FrameType.send_timeout_s).
+        # ESP32 sequential panels (7.3") write the body then block on the
+        # ~30s e-ink redraw BEFORE answering; a short budget expires after
+        # the frame already displayed the image and used to requeue a
+        # duplicate. See docs/FRAME_PORT.md transport policy.
+        send_timeout = aiohttp.ClientTimeout(
+            total=send_timeout_for_entry(self.config_entry)
+        )
         try:
             async with session.post(
                 url,
                 data=image_bytes,
                 headers=headers,
-                # Generous on purpose: ESP32-based clone frames write the
-                # ~190KB body to flash and then block on the ~30s e-ink
-                # redraw BEFORE answering, so a 60s budget can expire after
-                # the frame already accepted (and displayed) the image --
-                # which used to read as a failure and requeue a duplicate.
-                timeout=aiohttp.ClientTimeout(total=240),
+                timeout=send_timeout,
             ) as response:
                 response.raise_for_status()
                 status: int = response.status

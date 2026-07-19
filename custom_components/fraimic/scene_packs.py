@@ -495,9 +495,9 @@ class ScenePackManager:
         from .helpers import render_spec_for_entry  # noqa: PLC0415
         spec = render_spec_for_entry(entry)
         
-        from .frame_types import byte_layout_for_resolution  # noqa: PLC0415
+        from .panel_codec import panel_codec_for_resolution  # noqa: PLC0415
         try:
-            layout = byte_layout_for_resolution(spec.width, spec.height)
+            layout = panel_codec_for_resolution(spec.width, spec.height).byte_layout
         except Exception:
             layout = "split_half"
             

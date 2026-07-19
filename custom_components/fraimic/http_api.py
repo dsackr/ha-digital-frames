@@ -182,12 +182,12 @@ class FraimicSendImageView(HomeAssistantView):
 
         spec = render_spec_for_entry(entry)
 
-        # Convert image in a thread-pool (CPU-bound Pillow work).
-        from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415
+        # PanelCodec seam — resolution selects split-half vs sequential packing.
+        from .panel_codec import encode_for_panel_with_preview  # noqa: PLC0415
 
         try:
             bin_bytes, preview_bytes = await hass.async_add_executor_job(
-                convert_image_bytes_with_preview, raw_bytes, spec.width, spec.height,
+                encode_for_panel_with_preview, raw_bytes, spec.width, spec.height,
                 spec.rotation, spec.locked,
             )
         except Exception as err:  # noqa: BLE001

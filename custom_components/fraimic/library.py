@@ -1526,13 +1526,17 @@ class LibraryManager:
             )
             return
 
-        from .image_converter import convert_image_bytes  # noqa: PLC0415
+        from .panel_codec import encode_for_panel  # noqa: PLC0415
 
         for spec in missing:
             try:
                 bin_bytes = await self.hass.async_add_executor_job(
-                    convert_image_bytes, raw_bytes, spec.width, spec.height,
-                    spec.rotation, spec.locked,
+                    encode_for_panel,
+                    raw_bytes,
+                    spec.width,
+                    spec.height,
+                    spec.rotation,
+                    spec.locked,
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error(
@@ -1579,20 +1583,21 @@ class LibraryManager:
             crop_box = record.crops.get(fallback_key)
         effective_method = pack_method or "fast"
 
-        if crop_box:
-            from .image_converter import convert_image_bytes_cropped  # noqa: PLC0415
+        # PanelCodec seam: resolution selects split-half vs sequential (7.3")
+        # packing. Do not call image_converter from here — encode_for_panel is
+        # the single library encode entry (docs/FRAME_PORT.md Phase 1).
+        from .panel_codec import encode_for_panel  # noqa: PLC0415
 
-            bin_bytes = await self.hass.async_add_executor_job(
-                convert_image_bytes_cropped, raw_bytes, width, height,
-                tuple(crop_box), spec.rotation, effective_method,
-            )
-        else:
-            from .image_converter import convert_image_bytes  # noqa: PLC0415
-
-            bin_bytes = await self.hass.async_add_executor_job(
-                convert_image_bytes, raw_bytes, width, height,
-                spec.rotation, spec.locked, effective_method,
-            )
+        bin_bytes = await self.hass.async_add_executor_job(
+            encode_for_panel,
+            raw_bytes,
+            width,
+            height,
+            spec.rotation,
+            spec.locked,
+            effective_method,
+            tuple(crop_box) if crop_box else None,
+        )
         if pack_method is None:
             await self._backend.async_save_bin(image_id, width, height, bin_bytes, spec.variant)
         return bin_bytes

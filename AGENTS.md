@@ -59,6 +59,10 @@ it, the work is not done.
 
 - `docs/KEY_PRODUCT_FLOWS.md` — the KPF catalog (read it before changing
   behavior; your change almost certainly touches one).
+- `docs/FRAME_PORT.md` — design note for the multi-driver FramePort
+  contract (core vs Fraimic driver, capabilities, conversion ownership).
+  Design-only until implemented; read before generalizing beyond the
+  Fraimic protocol family.
 - `docs/TEST_LEDGER.md` — the durable, append-only record of test runs on
   `main`. CI appends rows automatically on push; if you run a suite by hand
   for a change that CI's path filters won't cover, append a `local` row

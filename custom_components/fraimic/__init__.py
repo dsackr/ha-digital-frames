@@ -717,13 +717,13 @@ def _register_services(hass: HomeAssistant) -> None:
         if not os.path.isfile(abs_path):
             raise HomeAssistantError(f"Media file not found: {abs_path}")
 
-        from .image_converter import convert_image_with_preview  # noqa: PLC0415
+        from .panel_codec import encode_path_for_panel_with_preview  # noqa: PLC0415
 
         try:
             try:
                 image_bytes, preview_bytes = await hass.async_add_executor_job(
-                    convert_image_with_preview, abs_path, spec.width, spec.height,
-                    spec.rotation, spec.locked,
+                    encode_path_for_panel_with_preview, abs_path, spec.width,
+                    spec.height, spec.rotation, spec.locked,
                 )
             except Exception as err:  # noqa: BLE001
                 raise HomeAssistantError(
