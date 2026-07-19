@@ -55,7 +55,11 @@ from .const import (
     ORIENTATION_AUTO,
 )
 from .frame_types import FRAME_TYPES
-from .helpers import render_spec_for_entry
+from .helpers import (
+    orientation_for_hass_entry,
+    render_spec_for_entry,
+    render_spec_for_hass_entry,
+)
 from .http_api import resolve_frame_by_entity
 
 _LOGGER = logging.getLogger(__name__)
@@ -349,7 +353,7 @@ class FraimicLibrarySendView(HomeAssistantView):
         except ValueError as err:
             return self.json_message(str(err), status_code=404)
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(hass, entry)
 
         if packer is not None:
             _LOGGER.info(
@@ -635,7 +639,7 @@ class FraimicFramesView(HomeAssistantView):
                 is_meural = entry.data.get(CONF_DRIVER) == DRIVER_MEURAL or (
                     entry.data.get(CONF_SIZE) == MEURAL_SIZE_LABEL
                 )
-                spec = render_spec_for_entry(entry)
+                spec = render_spec_for_hass_entry(hass, entry)
                 coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
                 # The frame's own entity_ids, resolved server-side so
                 # non-admin clients (the Lovelace card) don't need the
@@ -668,9 +672,7 @@ class FraimicFramesView(HomeAssistantView):
                         # Native (frame-reported) panel dimensions.
                         "native_width": width,
                         "native_height": height,
-                        "orientation": entry.options.get(
-                            CONF_ORIENTATION, ORIENTATION_AUTO
-                        ),
+                        "orientation": orientation_for_hass_entry(hass, entry),
                         # Live gsensor hang (Meural); None for Fraimic.
                         "device_orientation": (
                             (coordinator.data or {}).get("device_orientation")

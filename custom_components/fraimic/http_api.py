@@ -12,7 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .helpers import render_spec_for_entry
+from .helpers import render_spec_for_hass_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ class FraimicSendImageView(HomeAssistantView):
         except ValueError as err:
             return self.json_message(str(err), status_code=404)
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(hass, entry)
 
         # PanelCodec seam — Spectra layout or Meural JPEG from entry driver.
         from .panel_codec import (  # noqa: PLC0415

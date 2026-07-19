@@ -252,11 +252,11 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                 else:
                     try:
-                        from .helpers import render_spec_for_entry  # noqa: PLC0415
+                        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
                         from .panel_codec import panel_codec_for_entry  # noqa: PLC0415
 
                         entry = self.config_entry
-                        spec = render_spec_for_entry(entry)
+                        spec = render_spec_for_hass_entry(self.hass, entry)
                         try:
                             codec_id = panel_codec_for_entry(entry).id
                         except ValueError:

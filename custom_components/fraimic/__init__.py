@@ -731,9 +731,9 @@ def _register_services(hass: HomeAssistant) -> None:
         if entry is None:
             raise HomeAssistantError(f"Config entry '{entry_id}' not found")
 
-        from .helpers import render_spec_for_entry  # noqa: PLC0415
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(hass, entry)
 
         abs_path, is_temp = await _resolve_media_path(hass, media_content_id)
 
@@ -803,9 +803,9 @@ def _register_services(hass: HomeAssistant) -> None:
         if entry is None:
             raise HomeAssistantError(f"Config entry '{entry_id}' not found")
 
-        from .helpers import render_spec_for_entry  # noqa: PLC0415
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(hass, entry)
 
         if not ai_task_entity_id:
             ai_task_entity_id = _find_ai_task_image_entity(hass)

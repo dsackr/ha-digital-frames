@@ -240,7 +240,7 @@ class SceneManager:
         if library_manager is None:
             raise SceneError("Library manager not initialised")
 
-        from .helpers import render_spec_for_entry  # noqa: PLC0415
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
 
         prepared: dict[str, tuple[Any, bytes, str | None, bytes | None]] = {}
         results: list[dict[str, Any]] = []
@@ -313,7 +313,7 @@ class SceneManager:
                     codec_id = None
                 bin_bytes = await library_manager.async_get_bin_for_send(
                     image_id,
-                    render_spec_for_entry(entry),
+                    render_spec_for_hass_entry(hass, entry),
                     codec_id=codec_id,
                 )
             except Exception as err:  # noqa: BLE001

@@ -389,9 +389,9 @@ class SkillManager:
         script_content = await self._async_script_bytes()
         content_fields = await self._async_fetch_content_fields(skill)
 
-        from .helpers import render_spec_for_entry  # noqa: PLC0415
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(self.hass, entry)
         try:
             layout = panel_codec_for_resolution(spec.width, spec.height).byte_layout
         except ValueError:
@@ -578,13 +578,13 @@ class SkillManager:
 
         # Re-encode for the target panel codec: Spectra .bin as-is, or JPEG
         # from full RGB xotd_preview.png for Meural (not Spectra-unpack).
-        from .helpers import render_spec_for_entry  # noqa: PLC0415
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
         from .panel_codec import (  # noqa: PLC0415
             panel_codec_for_entry,
             text_skill_payload_for_codec,
         )
 
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(self.hass, entry)
         try:
             codec_id = panel_codec_for_entry(entry).id
         except ValueError:

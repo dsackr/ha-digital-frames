@@ -14,19 +14,25 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.fraimic.const import (
+    CONF_DRIVER,
     CONF_HEIGHT,
     CONF_ORIENTATION,
+    CONF_ORIENTATION_FOLLOW_DEVICE,
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATE_PORTRAIT_180,
     CONF_ROTATION_EDGE,
     CONF_WIDTH,
+    DRIVER_MEURAL,
     EDGE_LEFT,
     EDGE_RIGHT,
     ORIENTATION_AUTO,
     ORIENTATION_LANDSCAPE,
     ORIENTATION_PORTRAIT,
 )
-from custom_components.fraimic.helpers import render_spec_for_entry
+from custom_components.fraimic.helpers import (
+    orientation_for_entry,
+    render_spec_for_entry,
+)
 
 
 def _entry(width: int, height: int, **options) -> SimpleNamespace:
@@ -34,6 +40,17 @@ def _entry(width: int, height: int, **options) -> SimpleNamespace:
     reads entry.data[...] and entry.options.get(...)."""
     return SimpleNamespace(
         data={CONF_WIDTH: width, CONF_HEIGHT: height},
+        options=options,
+    )
+
+
+def _meural_entry(width: int = 1920, height: int = 1080, **options) -> SimpleNamespace:
+    return SimpleNamespace(
+        data={
+            CONF_WIDTH: width,
+            CONF_HEIGHT: height,
+            CONF_DRIVER: DRIVER_MEURAL,
+        },
         options=options,
     )
 
@@ -54,6 +71,45 @@ def test_locked_portrait_on_landscape_native_rotates_90_left_edge():
     assert (spec.width, spec.height) == (1440, 2560)
     assert spec.rotation == 90
     assert spec.locked is True
+
+
+def test_meural_portrait_on_landscape_native_no_buffer_rotation():
+    """Meural JPEG is hang-sized; crop keys are 1080x1920 / portrait, not rotated."""
+    spec = render_spec_for_entry(
+        _meural_entry(**{CONF_ORIENTATION: ORIENTATION_PORTRAIT})
+    )
+    assert (spec.width, spec.height) == (1080, 1920)
+    assert spec.rotation == 0
+    assert spec.locked is True
+
+
+def test_meural_follow_device_orientation_override_selects_portrait_crop_geometry():
+    entry = _meural_entry(
+        **{
+            CONF_ORIENTATION: ORIENTATION_LANDSCAPE,  # stale options
+            CONF_ORIENTATION_FOLLOW_DEVICE: True,
+        }
+    )
+    assert (
+        orientation_for_entry(entry, device_orientation=ORIENTATION_PORTRAIT)
+        == ORIENTATION_PORTRAIT
+    )
+    spec = render_spec_for_entry(entry, orientation=ORIENTATION_PORTRAIT)
+    assert (spec.width, spec.height) == (1080, 1920)
+    assert spec.locked is True
+
+
+def test_meural_manual_lock_ignores_device_orientation():
+    entry = _meural_entry(
+        **{
+            CONF_ORIENTATION: ORIENTATION_LANDSCAPE,
+            CONF_ORIENTATION_FOLLOW_DEVICE: False,
+        }
+    )
+    assert (
+        orientation_for_entry(entry, device_orientation=ORIENTATION_PORTRAIT)
+        == ORIENTATION_LANDSCAPE
+    )
 
 
 def test_locked_portrait_on_landscape_native_rotates_270_right_edge():

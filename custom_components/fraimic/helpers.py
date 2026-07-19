@@ -15,14 +15,18 @@ import aiohttp
 from .const import (
     API_INFO,
     CONF_DEVICE_KEY,
+    CONF_DRIVER,
     CONF_HEIGHT,
     CONF_HOST,
     CONF_MAC,
     CONF_ORIENTATION,
+    CONF_ORIENTATION_FOLLOW_DEVICE,
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATE_PORTRAIT_180,
     CONF_ROTATION_EDGE,
     CONF_WIDTH,
+    DOMAIN,
+    DRIVER_MEURAL,
     EDGE_LEFT,
     ORIENTATION_AUTO,
     ORIENTATION_LANDSCAPE,
@@ -75,18 +79,60 @@ class RenderSpec:
         return parts
 
 
-def render_spec_for_entry(entry: "ConfigEntry") -> RenderSpec:
+def orientation_for_entry(
+    entry: "ConfigEntry",
+    *,
+    device_orientation: str | None = None,
+) -> str:
+    """Orientation lock used for crop selection and composition.
+
+    Meural with follow-device (default): prefer live gsensor
+    (*device_orientation*) so library portrait/landscape crops match the hang
+    even if entry.options is briefly stale between polls.
+    """
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        follow = entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
+        if follow and device_orientation in (
+            ORIENTATION_PORTRAIT,
+            ORIENTATION_LANDSCAPE,
+        ):
+            return device_orientation
+    return entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
+
+
+def orientation_for_hass_entry(
+    hass: "HomeAssistant", entry: "ConfigEntry"
+) -> str:
+    """Like :func:`orientation_for_entry` using the frame coordinator's gsensor."""
+    device_orientation = None
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    data = getattr(coordinator, "data", None) if coordinator is not None else None
+    if isinstance(data, dict):
+        device_orientation = data.get("device_orientation")
+    return orientation_for_entry(entry, device_orientation=device_orientation)
+
+
+def render_spec_for_entry(
+    entry: "ConfigEntry",
+    *,
+    orientation: str | None = None,
+) -> RenderSpec:
     """Resolve a frame config entry to its RenderSpec.
 
     entry.data's width/height always hold the panel's native (frame-reported)
     dimensions. The orientation lock and 180-degree flips live in
     entry.options and are applied here, at render time.
+
+    *orientation* overrides entry.options when provided (e.g. live Meural
+    gsensor). Use :func:`render_spec_for_hass_entry` when *hass* is available.
     """
     native_w: int = entry.data[CONF_WIDTH]
     native_h: int = entry.data[CONF_HEIGHT]
 
-    orientation: str = entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
+    if orientation is None:
+        orientation = entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
     edge: str = entry.options.get(CONF_ROTATION_EDGE, EDGE_LEFT)
+    is_meural = entry.data.get(CONF_DRIVER) == DRIVER_MEURAL
 
     eff_w, eff_h = native_w, native_h
     rotation = 0
@@ -96,15 +142,14 @@ def render_spec_for_entry(entry: "ConfigEntry") -> RenderSpec:
         want_portrait = orientation == ORIENTATION_PORTRAIT
         native_portrait = native_h >= native_w
         if want_portrait != native_portrait:
-            # Compose in the locked orientation, then rotate the finished
-            # canvas back onto the native buffer. "Left edge up" (the frame's
-            # native-left edge physically on top, i.e. the frame was turned
-            # clockwise -- how official Fraimic frames hang) needs a 90-degree
-            # CCW canvas rotation so composed-top lands on native-left;
-            # "right edge up" needs 270. If images come out upside down on a
-            # clone, the edge option is the thing to flip.
+            # Compose in the locked orientation. Official Fraimic Spectra
+            # then rotates the finished canvas back onto the native buffer
+            # (left/right edge up). Meural JPEG postcards are displayed at
+            # hang size as-is — no native-buffer remapping — so rotation
+            # stays 0 and crop keys use swapped width×height only.
             eff_w, eff_h = native_h, native_w
-            rotation = 90 if edge == EDGE_LEFT else 270
+            if not is_meural:
+                rotation = 90 if edge == EDGE_LEFT else 270
 
     # 180-degree flip is keyed off the *effective* orientation the viewer
     # sees, and composes with any lock rotation above.
@@ -115,6 +160,15 @@ def render_spec_for_entry(entry: "ConfigEntry") -> RenderSpec:
         rotation = (rotation + 180) % 360
 
     return RenderSpec(width=eff_w, height=eff_h, rotation=rotation, locked=locked)
+
+
+def render_spec_for_hass_entry(
+    hass: "HomeAssistant", entry: "ConfigEntry"
+) -> RenderSpec:
+    """RenderSpec using live Meural gsensor when follow-device is on."""
+    return render_spec_for_entry(
+        entry, orientation=orientation_for_hass_entry(hass, entry)
+    )
 
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=5)
 _SCAN_TIMEOUT = aiohttp.ClientTimeout(total=0.5)

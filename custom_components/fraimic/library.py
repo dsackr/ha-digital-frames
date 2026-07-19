@@ -32,7 +32,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN
-from .helpers import RenderSpec, render_spec_for_entry
+from .helpers import RenderSpec, render_spec_for_entry, render_spec_for_hass_entry
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -114,7 +114,7 @@ def _all_render_specs(hass: "HomeAssistant") -> set[RenderSpec]:
         width = entry.data.get(CONF_WIDTH)
         height = entry.data.get(CONF_HEIGHT)
         if isinstance(width, int) and isinstance(height, int):
-            specs.add(render_spec_for_entry(entry))
+            specs.add(render_spec_for_hass_entry(hass, entry))
     return specs
 
 
@@ -139,7 +139,7 @@ def _all_render_targets(hass: "HomeAssistant") -> list[tuple[RenderSpec, str]]:
             codec_id = panel_codec_for_entry(entry).id
         except ValueError:
             continue
-        spec = render_spec_for_entry(entry)
+        spec = render_spec_for_hass_entry(hass, entry)
         key = (spec, codec_id)
         if key in seen:
             continue

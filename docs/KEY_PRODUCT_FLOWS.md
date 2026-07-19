@@ -549,10 +549,14 @@ frame by its `_ip` sensor (same fallback as `battery_entity_id` on
 - **Orientation (gsensor):** identify / system report hang; Device
   orientation sensor; follow-device default for crop/send; Orientation
   select Follow / Portrait / Landscape (manual pin also calls
-  `set_orientation` on the Canvas). On hang change the Canvas firmware
-  switches to orientation-scoped **Recents** (often last official-app
-  image); we **re-postcard** the last HA library image (or last wire
-  bytes) via `async_redisplay_last` so our content stays on screen.
+  `set_orientation` on the Canvas). Sends use
+  `render_spec_for_hass_entry` so **live gsensor** picks portrait vs
+  landscape library crops (not stale options alone). Meural composition
+  is hang-sized JPEG (no Spectra native-buffer rotation). On hang change
+  the Canvas firmware switches to orientation-scoped **Recents** (often
+  last official-app image); we **re-postcard** the last HA library image
+  (or last wire bytes) via `async_redisplay_last` so our content stays on
+  screen.
 - **Backlight light entity:** brightness 0–100; off = suspend, on =
   resume (+ optional brightness).
 - **Ambient light (lux)** from ALS; diagnostic free space + WiFi RSSI.
