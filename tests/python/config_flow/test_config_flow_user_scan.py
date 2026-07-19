@@ -12,6 +12,7 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.fraimic.const import (
     CONF_DEVICE_KEY,
+    CONF_DRIVER,
     CONF_HEIGHT,
     CONF_HOST,
     CONF_MAC,
@@ -19,6 +20,8 @@ from custom_components.fraimic.const import (
     CONF_SIZE,
     CONF_WIDTH,
     DOMAIN,
+    DRIVER_MEURAL,
+    MEURAL_SIZE_LABEL,
 )
 
 FRAME_INFO = {
@@ -40,6 +43,19 @@ def _no_real_network(monkeypatch):
     )
 
 
+async def _start_fraimic_path(hass):
+    """User source now opens a driver menu; choose Fraimic / clone."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "user"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "add_fraimic"}
+    )
+    return result
+
+
 async def test_manual_host_entry_success_creates_entry(hass, monkeypatch):
     async def _probe(session, host, timeout=None):
         return FRAME_INFO if host == "192.168.1.50" else None
@@ -54,15 +70,12 @@ async def test_manual_host_entry_success_creates_entry(hass, monkeypatch):
         lambda info: None,
     )
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "user"
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_HOST: "192.168.1.50"}
-    )
+    result = await _start_fraimic_path(hass)
+    # add_fraimic auto-scans first; empty scan falls through to form.
+    if result["step_id"] == "add_fraimic":
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "192.168.1.50"}
+        )
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "name_device"
 
@@ -82,16 +95,19 @@ async def test_manual_host_entry_cannot_connect(hass, monkeypatch):
     async def _probe(session, host, timeout=None):
         return None
 
-    monkeypatch.setattr("custom_components.fraimic.config_flow.probe_frame", _probe)
+    async def _scan(local_ip, session, **kwargs):
+        return []
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    monkeypatch.setattr("custom_components.fraimic.config_flow.probe_frame", _probe)
+    monkeypatch.setattr("custom_components.fraimic.config_flow.scan_subnet", _scan)
+
+    result = await _start_fraimic_path(hass)
+    assert result["step_id"] == "add_fraimic"
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_HOST: "192.168.1.99"}
     )
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "add_fraimic"
     assert result["errors"] == {CONF_HOST: "cannot_connect"}
 
 
@@ -103,10 +119,8 @@ async def test_auto_scan_no_host_finds_devices_and_proceeds_to_pick_device(
 
     monkeypatch.setattr("custom_components.fraimic.config_flow.scan_subnet", _scan)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    # First visit auto-scans (user_input is None).
+    result = await _start_fraimic_path(hass)
+    # add_fraimic first visit auto-scans (user_input is None).
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "pick_device"
 
@@ -117,11 +131,9 @@ async def test_auto_scan_no_devices_found_shows_error(hass, monkeypatch):
 
     monkeypatch.setattr("custom_components.fraimic.config_flow.scan_subnet", _scan)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await _start_fraimic_path(hass)
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "add_fraimic"
     assert result["errors"] == {"base": "no_devices_found"}
 
 
@@ -131,9 +143,7 @@ async def test_pick_device_manual_sentinel_goes_to_manual_step(hass, monkeypatch
 
     monkeypatch.setattr("custom_components.fraimic.config_flow.scan_subnet", _scan)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await _start_fraimic_path(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"device": "__manual__"}
     )
@@ -154,9 +164,7 @@ async def test_pick_device_selects_discovered_frame(hass, monkeypatch):
         lambda info: None,
     )
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await _start_fraimic_path(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"device": "192.168.1.50"}
     )
@@ -167,15 +175,17 @@ async def test_size_auto_detected_skips_resolution_field(hass, monkeypatch):
     async def _probe(session, host, timeout=None):
         return FRAME_INFO
 
+    async def _scan(local_ip, session, **kwargs):
+        return []
+
     monkeypatch.setattr("custom_components.fraimic.config_flow.probe_frame", _probe)
+    monkeypatch.setattr("custom_components.fraimic.config_flow.scan_subnet", _scan)
     monkeypatch.setattr(
         "custom_components.fraimic.config_flow.probe_device_size",
         lambda session, host: _async_value("13.3"),
     )
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await _start_fraimic_path(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_HOST: "192.168.1.50"}
     )
@@ -187,6 +197,63 @@ async def test_size_auto_detected_skips_resolution_field(hass, monkeypatch):
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_SIZE] == "13.3"
+
+
+async def test_meural_local_add_creates_entry(hass, monkeypatch):
+    async def _probe_meural(session, host):
+        return {"serial": "MEURAL123", "alias": "Living Room"} if host == "192.168.1.80" else None
+
+    monkeypatch.setattr(
+        "custom_components.fraimic.config_flow.probe_meural", _probe_meural
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.MENU
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "add_meural"}
+    )
+    assert result["step_id"] == "add_meural"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_HOST: "192.168.1.80",
+            CONF_NAME: "Meural Living",
+            CONF_WIDTH: 1920,
+            CONF_HEIGHT: 1080,
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_DRIVER] == DRIVER_MEURAL
+    assert result["data"][CONF_HOST] == "192.168.1.80"
+    assert result["data"][CONF_SIZE] == MEURAL_SIZE_LABEL
+    assert result["data"][CONF_WIDTH] == 1920
+    assert result["data"][CONF_HEIGHT] == 1080
+    assert result["data"][CONF_DEVICE_KEY] == "meural:MEURAL123"
+
+
+async def test_meural_cannot_connect(hass, monkeypatch):
+    async def _probe_meural(session, host):
+        return None
+
+    monkeypatch.setattr(
+        "custom_components.fraimic.config_flow.probe_meural", _probe_meural
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "add_meural"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HOST: "192.168.1.81", CONF_NAME: "Nope"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "add_meural"
+    assert result["errors"] == {CONF_HOST: "cannot_connect"}
 
 
 async def test_dhcp_discovery_matches_existing_entry_aborts(

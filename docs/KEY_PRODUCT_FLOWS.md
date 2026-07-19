@@ -26,18 +26,22 @@ Test status legend:
 ---
 
 ## 1. Frame discovery & add-frame wizard
-User points HA at their local network (or an IP) and the config flow finds
-or adds a Fraimic frame, auto-detecting its size/resolution.
+User chooses **Fraimic / e-ink clone** or **Meural Canvas (local)** from the
+add-frame menu. Fraimic path scans the LAN or takes an IP and auto-detects
+size/resolution; Meural path probes the local postcard API and stores a
+`driver=meural` config entry.
 - **Entry points**: `config_flow.py` (`FraimicConfigFlow.async_step_user` /
-  `pick_device` / `manual` / `name_device` / `dhcp` / `integration_discovery`),
-  `helpers.py` (`probe_frame`, `probe_device_size`, `scan_subnet`,
-  `detect_frame_type_from_info`), `discovery.py`.
+  `add_fraimic` / `add_meural` / `pick_device` / `manual` / `name_device` /
+  `dhcp` / `integration_discovery`), `helpers.py` (`probe_frame`,
+  `probe_device_size`, `scan_subnet`, `detect_frame_type_from_info`),
+  `meural.py` (`probe_meural`), `discovery.py`.
 - **If it silently breaks**: users can't add frames at all, or duplicate
   entries get created for the same physical frame.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
-  `tests/python/config_flow/test_config_flow_user_scan.py` (user/manual/
-  pick_device/DHCP steps, size auto-detect, dedup).
+  `tests/python/config_flow/test_config_flow_user_scan.py` (menu,
+  Fraimic user/manual/pick_device/DHCP steps, Meural local add, size
+  auto-detect, dedup).
 
 ## 2. Options flow (scan interval, size, orientation edge, 180° flip)
 User edits a frame's scan interval, physical size, hanging edge, and
@@ -522,6 +526,26 @@ Automatically analyzes uploaded or discovered images using Home Assistant's conf
 - **Entry points**: `library.py` (`LibraryManager.async_upload`, `async_discover`, `async_auto_tag_image`).
 - **If it silently breaks**: Photos are uploaded or discovered but no tags are generated even when an AI Task entity is active and the option is enabled.
 - **Test status**: **Backend-tested** — `tests/python/library/test_media_source_and_tagging.py`.
+
+## 32. Meural Canvas (local) as a second FramePort driver
+User adds a NETGEAR Meural by LAN IP (no Meural cloud account). The frame
+gets a `driver=meural` config entry, JPEG codec (`jpeg_q90`), and
+participates in walls, scenes, library send, and raw upload like Fraimic
+frames. Images are delivered via the local `/remote/postcard` multipart
+API. Sleep-queue and Spectra orientation lock do not apply.
+- **Entry points**: `config_flow.py` (`async_step_add_meural`),
+  `meural.py` (`probe_meural`, `send_meural_postcard`),
+  `meural_coordinator.py` (`MeuralCoordinator.async_send_image_or_queue`),
+  `panel_codec.py` (`CODEC_JPEG_Q90`, `panel_codec_for_entry`),
+  `__init__.py` (`async_setup_entry` driver branch),
+  `library_http.py` frames list (`driver` / `origin=meural`).
+- **If it silently breaks**: Meural cannot be added, sends fail or send
+  Spectra `.bin` bytes the Meural cannot display, or the frame never
+  appears on walls/scenes.
+- **Test status**: **Backend-tested** —
+  `tests/python/unit/test_meural.py` (JPEG encode, probe/postcard mocks),
+  `tests/python/config_flow/test_config_flow_user_scan.py` (Meural add
+  flow). Live Canvas hardware send is manual (**Gap** for CI).
 
 ---
 

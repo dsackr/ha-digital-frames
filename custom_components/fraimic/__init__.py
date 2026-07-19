@@ -380,7 +380,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
             _register_services(hass)
         return True
 
-    coordinator = FraimicCoordinator(hass, entry)
+    from .const import CONF_DRIVER, DRIVER_MEURAL  # noqa: PLC0415
+
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        from .meural_coordinator import MeuralCoordinator  # noqa: PLC0415
+
+        coordinator = MeuralCoordinator(hass, entry)
+    else:
+        coordinator = FraimicCoordinator(hass, entry)
 
     # Hydrate the Frames panel thumbnail hint from disk before anything else
     # can query it, so a restart doesn't drop back to the generic icon until
@@ -389,7 +396,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
 
     # Hydrate any send that was still queued (frame asleep) when Home
     # Assistant last stopped, before the first refresh, so a restart never
-    # drops it.
+    # drops it. (MeuralCoordinator no-ops this.)
     await coordinator.async_load_pending_send()
 
     # Perform the first data fetch; raises ConfigEntryNotReady on failure so
@@ -717,13 +724,26 @@ def _register_services(hass: HomeAssistant) -> None:
         if not os.path.isfile(abs_path):
             raise HomeAssistantError(f"Media file not found: {abs_path}")
 
-        from .panel_codec import encode_path_for_panel_with_preview  # noqa: PLC0415
+        from .panel_codec import (  # noqa: PLC0415
+            encode_path_for_panel_with_preview,
+            panel_codec_for_entry,
+        )
+
+        try:
+            codec_id = panel_codec_for_entry(entry).id
+        except ValueError:
+            codec_id = None
 
         try:
             try:
                 image_bytes, preview_bytes = await hass.async_add_executor_job(
-                    encode_path_for_panel_with_preview, abs_path, spec.width,
-                    spec.height, spec.rotation, spec.locked,
+                    encode_path_for_panel_with_preview,
+                    abs_path,
+                    spec.width,
+                    spec.height,
+                    spec.rotation,
+                    spec.locked,
+                    codec_id,
                 )
             except Exception as err:  # noqa: BLE001
                 raise HomeAssistantError(

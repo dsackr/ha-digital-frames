@@ -182,13 +182,26 @@ class FraimicSendImageView(HomeAssistantView):
 
         spec = render_spec_for_entry(entry)
 
-        # PanelCodec seam — resolution selects split-half vs sequential packing.
-        from .panel_codec import encode_for_panel_with_preview  # noqa: PLC0415
+        # PanelCodec seam — Spectra layout or Meural JPEG from entry driver.
+        from .panel_codec import (  # noqa: PLC0415
+            encode_for_panel_with_preview,
+            panel_codec_for_entry,
+        )
+
+        try:
+            codec_id = panel_codec_for_entry(entry).id
+        except ValueError:
+            codec_id = None
 
         try:
             bin_bytes, preview_bytes = await hass.async_add_executor_job(
-                encode_for_panel_with_preview, raw_bytes, spec.width, spec.height,
-                spec.rotation, spec.locked,
+                encode_for_panel_with_preview,
+                raw_bytes,
+                spec.width,
+                spec.height,
+                spec.rotation,
+                spec.locked,
+                codec_id,
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("Image conversion failed for %s: %s", coordinator.host, err)

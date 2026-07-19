@@ -24,10 +24,8 @@ from custom_components.fraimic.panel_codec import (
 
 
 def test_both_spectra_codecs_are_registered():
-    assert set(CODECS) == {
-        CODEC_SPECTRA6_SPLIT_HALF,
-        CODEC_SPECTRA6_SEQUENTIAL,
-    }
+    assert CODEC_SPECTRA6_SPLIT_HALF in CODECS
+    assert CODEC_SPECTRA6_SEQUENTIAL in CODECS
     assert CODECS[CODEC_SPECTRA6_SPLIT_HALF].byte_layout == LAYOUT_SPLIT_HALF
     assert CODECS[CODEC_SPECTRA6_SEQUENTIAL].byte_layout == LAYOUT_SEQUENTIAL
 

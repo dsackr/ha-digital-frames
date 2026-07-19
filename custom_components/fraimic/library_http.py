@@ -619,11 +619,22 @@ class FraimicFramesView(HomeAssistantView):
 
         registry = er.async_get(hass)
         frames = []
+        from .const import (  # noqa: PLC0415
+            CONF_DRIVER,
+            DRIVER_MEURAL,
+            MEURAL_SIZE_LABEL,
+        )
+
         for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.data.get("kind") == "scenes_hub":
+                continue
             width = entry.data.get(CONF_WIDTH)
             height = entry.data.get(CONF_HEIGHT)
             if isinstance(width, int) and isinstance(height, int):
                 frame_type = FRAME_TYPES.get(entry.data.get(CONF_SIZE))
+                is_meural = entry.data.get(CONF_DRIVER) == DRIVER_MEURAL or (
+                    entry.data.get(CONF_SIZE) == MEURAL_SIZE_LABEL
+                )
                 spec = render_spec_for_entry(entry)
                 coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
                 # The frame's own entity_ids, resolved server-side so
@@ -631,8 +642,10 @@ class FraimicFramesView(HomeAssistantView):
                 # admin-only entity-registry WS commands the panel uses:
                 # battery is the entity_id every send endpoint takes, and
                 # the orientation select is what orientation changes target.
+                # Meural has no battery sensor — fall back to IP sensor.
                 battery_entity_id = None
                 orientation_entity_id = None
+                ip_entity_id = None
                 for reg_entry in er.async_entries_for_config_entry(
                     registry, entry.entry_id
                 ):
@@ -640,6 +653,9 @@ class FraimicFramesView(HomeAssistantView):
                         battery_entity_id = reg_entry.entity_id
                     elif reg_entry.unique_id == f"{entry.entry_id}_orientation":
                         orientation_entity_id = reg_entry.entity_id
+                    elif reg_entry.unique_id == f"{entry.entry_id}_ip":
+                        ip_entity_id = reg_entry.entity_id
+                send_entity_id = battery_entity_id or ip_entity_id
                 frames.append(
                     {
                         "entry_id": entry.entry_id,
@@ -657,9 +673,18 @@ class FraimicFramesView(HomeAssistantView):
                         ),
                         "size": entry.data.get(CONF_SIZE),
                         "host": entry.data.get(CONF_HOST),
-                        "origin": frame_type.origin if frame_type else None,
-                        "platform": frame_type.platform if frame_type else None,
-                        "battery_entity_id": battery_entity_id,
+                        "driver": entry.data.get(CONF_DRIVER) or "fraimic",
+                        "origin": (
+                            "meural"
+                            if is_meural
+                            else (frame_type.origin if frame_type else None)
+                        ),
+                        "platform": (
+                            "Meural Canvas"
+                            if is_meural
+                            else (frame_type.platform if frame_type else None)
+                        ),
+                        "battery_entity_id": send_entity_id,
                         "orientation_entity_id": orientation_entity_id,
                         # Whether the last poll reached the frame -- what
                         # drives entity availability, exposed here so the

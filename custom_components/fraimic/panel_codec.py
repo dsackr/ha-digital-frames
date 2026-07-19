@@ -1,16 +1,12 @@
-"""PanelCodec: explicit encode boundary for local Spectra frames.
+"""PanelCodec: explicit encode boundary for frame wire payloads.
 
 Phase 1 FramePort seam (see docs/FRAME_PORT.md):
 
 - **Core** decides which image goes to which frame and at what geometry.
 - **PanelCodec** turns source pixels into wire payload bytes (Spectra 6
-  split-half vs sequential today).
+  split-half / sequential, or JPEG for Meural).
 - **Transport** (coordinator) delivers those bytes and applies sleep-queue /
   timeout policy from the panel profile.
-
-The 7.3" community panel is the worked example of multi-codec under one
-driver: same ``POST /api/image`` family as official Fraimic, different
-``codec_id`` (``spectra6_sequential``) and packing path.
 
 Library backfill and on-demand send encoding should call
 :func:`encode_for_panel` rather than importing ``image_converter`` directly,
@@ -19,9 +15,11 @@ so there is one named place where codec selection is owned.
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .const import CONF_DRIVER, DRIVER_MEURAL, MEURAL_SIZE_LABEL
 from .frame_types import (
     CODEC_SPECTRA6_SEQUENTIAL,
     CODEC_SPECTRA6_SPLIT_HALF,
@@ -35,19 +33,22 @@ from .frame_types import (
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
+# Full-color JPEG payload for Meural local postcard (and future RGB frames).
+CODEC_JPEG_Q90 = "jpeg_q90"
+LAYOUT_NONE = "none"
+
 
 @dataclass(frozen=True)
 class PanelCodec:
     """How pixels become wire bytes for one panel family."""
 
     id: str
-    byte_layout: str  # LAYOUT_* — what packers and external render scripts use
+    byte_layout: str  # LAYOUT_* — Spectra packers; LAYOUT_NONE for JPEG
     color_mode: str = "spectra6"
     preferred_payload: str = "spectra6_bin"
 
 
-# Registry of codecs this integration can produce. FrameType.codec_id must
-# resolve into this map.
+# Registry of codecs this integration can produce.
 CODECS: dict[str, PanelCodec] = {
     CODEC_SPECTRA6_SPLIT_HALF: PanelCodec(
         id=CODEC_SPECTRA6_SPLIT_HALF,
@@ -56,6 +57,12 @@ CODECS: dict[str, PanelCodec] = {
     CODEC_SPECTRA6_SEQUENTIAL: PanelCodec(
         id=CODEC_SPECTRA6_SEQUENTIAL,
         byte_layout=LAYOUT_SEQUENTIAL,
+    ),
+    CODEC_JPEG_Q90: PanelCodec(
+        id=CODEC_JPEG_Q90,
+        byte_layout=LAYOUT_NONE,
+        color_mode="rgb",
+        preferred_payload="jpeg",
     ),
 }
 
@@ -69,7 +76,7 @@ def panel_codec_for_id(codec_id: str) -> PanelCodec:
 
 
 def panel_codec_for_resolution(width: int, height: int) -> PanelCodec:
-    """Resolve codec from panel resolution (orientation-agnostic)."""
+    """Resolve codec from Spectra panel resolution (orientation-agnostic)."""
     return panel_codec_for_id(codec_id_for_resolution(width, height))
 
 
@@ -83,8 +90,13 @@ def panel_codec_for_frame_type_id(size: str) -> PanelCodec:
 
 
 def panel_codec_for_entry(entry: "ConfigEntry") -> PanelCodec:
-    """Resolve codec for a config entry (size first, then width/height)."""
+    """Resolve codec for a config entry (driver, then size, then geometry)."""
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        return panel_codec_for_id(CODEC_JPEG_Q90)
+
     size = entry.data.get("size")
+    if isinstance(size, str) and size == MEURAL_SIZE_LABEL:
+        return panel_codec_for_id(CODEC_JPEG_Q90)
     if isinstance(size, str) and size in FRAME_TYPES:
         return panel_codec_for_frame_type_id(size)
 
@@ -105,6 +117,48 @@ def byte_layout_for_codec(codec: PanelCodec | str) -> str:
     return panel_codec_for_id(codec).byte_layout
 
 
+def _encode_jpeg_bytes(
+    source_bytes: bytes,
+    width: int,
+    height: int,
+    rotation: int = 0,
+    locked: bool = False,
+    crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    quality: int = 90,
+) -> bytes:
+    """Compose *source_bytes* to *width*×*height* and encode JPEG."""
+    from .image_converter import (  # noqa: PLC0415
+        _auto_rotate,
+        _open_as_rgb,
+        _resize_cover_centered,
+    )
+    from PIL import Image as PILImage  # noqa: PLC0415
+
+    image = _open_as_rgb(source_bytes)
+    if crop_box is not None:
+        x0, y0, x1, y1 = [float(v) for v in crop_box]
+        w, h = image.size
+        box = (
+            int(round(x0 * w)),
+            int(round(y0 * h)),
+            int(round(x1 * w)),
+            int(round(y1 * h)),
+        )
+        image = image.crop(box)
+        image = image.resize((width, height), PILImage.LANCZOS)
+    else:
+        if not locked:
+            image = _auto_rotate(image, width, height)
+        image = _resize_cover_centered(image, width, height)
+    if rotation:
+        image = image.rotate(rotation, expand=True)
+        if image.size != (width, height):
+            image = image.resize((width, height), PILImage.LANCZOS)
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 def encode_for_panel(
     source_bytes: bytes,
     width: int,
@@ -113,25 +167,38 @@ def encode_for_panel(
     locked: bool = False,
     pack_method: str = "fast",
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    codec_id: str | None = None,
 ) -> bytes:
-    """Encode a source image into wire payload for the panel at *width*×*height*.
+    """Encode a source image into wire payload for a panel.
 
-    Codec selection is by resolution via the frame-type registry (split-half
-    for official 13.3"/31.5" and 13.1" community; sequential for 7.3").
-    Callers must not special-case 7.3" themselves.
-
-    This is the single high-level encode entry point for library send and
-    backfill. Packing still lives in image_converter; this module owns
-    *which* codec runs for a given panel geometry.
+    *codec_id* selects Spectra vs JPEG. When omitted, resolved from
+    resolution via the Fraimic FRAME_TYPES registry (Spectra panels only).
 
     Positional-friendly signature so callers can pass this to
-    ``hass.async_add_executor_job`` without kwargs.
+    ``hass.async_add_executor_job`` without kwargs (except trailing
+    *codec_id* should be passed positionally when using the executor with
+    all args).
     """
-    # Touch the registry so an unregistered resolution fails *here* with a
-    # codec-oriented error before the packer runs.
+    if codec_id is None:
+        # Spectra path: require a registered frame type at this geometry.
+        _ = frame_type_for_resolution(width, height)
+        codec_id = codec_id_for_resolution(width, height)
+
+    if codec_id == CODEC_JPEG_Q90:
+        return _encode_jpeg_bytes(
+            source_bytes,
+            width,
+            height,
+            rotation,
+            locked,
+            crop_box,
+            quality=90,
+        )
+
+    # Spectra 6 packing — layout from registered frame type.
     _ = frame_type_for_resolution(width, height)
 
-    from .image_converter import (  # noqa: PLC0415 — avoid import cycle at load
+    from .image_converter import (  # noqa: PLC0415
         convert_image_bytes,
         convert_image_bytes_cropped,
     )
@@ -161,13 +228,32 @@ def encode_for_panel_with_preview(
     height: int,
     rotation: int = 0,
     locked: bool = False,
+    codec_id: str | None = None,
 ) -> tuple[bytes, bytes]:
-    """Like :func:`encode_for_panel`, plus a small PNG of the quantized image.
+    """Like :func:`encode_for_panel`, plus a small PNG of the composed image."""
+    if codec_id is None:
+        _ = frame_type_for_resolution(width, height)
+        codec_id = codec_id_for_resolution(width, height)
 
-    Used by raw-upload / media-service paths that have no library image_id
-    for a thumbnail.
-    """
-    _ = frame_type_for_resolution(width, height)
+    if codec_id == CODEC_JPEG_Q90:
+        from .image_converter import (  # noqa: PLC0415
+            _auto_rotate,
+            _encode_preview_png,
+            _open_as_rgb,
+            _resize_cover_centered,
+        )
+
+        image = _open_as_rgb(source_bytes)
+        if not locked:
+            image = _auto_rotate(image, width, height)
+        image = _resize_cover_centered(image, width, height)
+        if rotation:
+            image = image.rotate(rotation, expand=True)
+        jpeg = _encode_jpeg_bytes(
+            source_bytes, width, height, rotation, locked, None, 90
+        )
+        return jpeg, _encode_preview_png(image)
+
     from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415
 
     return convert_image_bytes_with_preview(
@@ -181,9 +267,11 @@ def encode_path_for_panel_with_preview(
     height: int,
     rotation: int = 0,
     locked: bool = False,
+    codec_id: str | None = None,
 ) -> tuple[bytes, bytes]:
     """Encode a filesystem path for the panel, with preview PNG."""
-    _ = frame_type_for_resolution(width, height)
-    from .image_converter import convert_image_with_preview  # noqa: PLC0415
-
-    return convert_image_with_preview(image_path, width, height, rotation, locked)
+    with open(image_path, "rb") as f:
+        raw = f.read()
+    return encode_for_panel_with_preview(
+        raw, width, height, rotation, locked, codec_id
+    )

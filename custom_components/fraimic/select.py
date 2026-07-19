@@ -58,7 +58,13 @@ async def async_setup_entry(
     async_add_entities: "AddEntitiesCallback",
 ) -> None:
     """Set up the Fraimic orientation select from a config entry."""
-    coordinator: "FraimicCoordinator" = hass.data[DOMAIN][entry.entry_id]
+    from .const import CONF_DRIVER, DRIVER_MEURAL  # noqa: PLC0415
+
+    # Meural local postcard path has no Spectra orientation-lock pipeline.
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        return
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([FraimicOrientationSelect(coordinator, entry)])
 
 

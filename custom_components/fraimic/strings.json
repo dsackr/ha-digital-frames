@@ -3,6 +3,14 @@
     "flow_title": "Fraimic Frame ({name})",
     "step": {
       "user": {
+        "title": "Add a frame",
+        "description": "Choose the kind of display to add. Meural uses the local LAN postcard API (no Meural cloud account).",
+        "menu_options": {
+          "add_fraimic": "Fraimic / e-ink clone",
+          "add_meural": "Meural Canvas (local)"
+        }
+      },
+      "add_fraimic": {
         "title": "Set up Fraimic Frame",
         "description": "No Fraimic frames were found automatically. Make sure your frame is awake (tap it first), then enter its IP address below — or leave blank to scan again.",
         "data": {
@@ -10,6 +18,22 @@
         },
         "data_description": {
           "host": "Your frame's local IP address (leave blank to re-scan)"
+        }
+      },
+      "add_meural": {
+        "title": "Add Meural Canvas (local)",
+        "description": "Point at your Meural's local IP. Images are sent as JPEG postcards over your LAN — no Meural account required.",
+        "data": {
+          "host": "IP Address",
+          "name": "Frame Name",
+          "width": "Width (pixels)",
+          "height": "Height (pixels)"
+        },
+        "data_description": {
+          "host": "Meural local IP on your network",
+          "name": "Friendly name for walls and scenes",
+          "width": "Panel width in pixels (default 1920)",
+          "height": "Panel height in pixels (default 1080)"
         }
       },
       "pick_device": {

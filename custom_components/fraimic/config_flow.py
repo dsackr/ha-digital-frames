@@ -15,6 +15,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_DEVICE_KEY,
+    CONF_DRIVER,
     CONF_HEIGHT,
     CONF_HOST,
     CONF_MAC,
@@ -23,7 +24,11 @@ from .const import (
     CONF_WIDTH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    DRIVER_MEURAL,
     KIND_SCENES_HUB,
+    MEURAL_DEFAULT_HEIGHT,
+    MEURAL_DEFAULT_WIDTH,
+    MEURAL_SIZE_LABEL,
     CONF_ORIENTATION,
     ORIENTATION_AUTO,
     CONF_ROTATION_EDGE,
@@ -44,6 +49,7 @@ from .helpers import (
     probe_frame,
     scan_subnet,
 )
+from .meural import probe_meural
 
 if TYPE_CHECKING:
     pass
@@ -163,13 +169,26 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self._async_use_device(ip, info)
 
     # ------------------------------------------------------------------
-    # Step 1 — user (manual IP or leave blank to scan)
+    # Step 1 — choose driver (Fraimic Spectra family vs Meural local)
     # ------------------------------------------------------------------
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Primary entry point. Auto-scan on first visit; fall back to manual IP."""
+        """Primary entry: pick Fraimic/clone or Meural Canvas (local)."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["add_fraimic", "add_meural"],
+        )
+
+    # ------------------------------------------------------------------
+    # Fraimic / API-compatible clone — scan or manual IP
+    # ------------------------------------------------------------------
+
+    async def async_step_add_fraimic(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Auto-scan for Fraimic frames; fall back to manual IP."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -222,7 +241,66 @@ class FraimicConfigFlow(ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({vol.Optional(CONF_HOST, default=""): str})
         return self.async_show_form(
-            step_id="user", data_schema=schema, errors=errors
+            step_id="add_fraimic", data_schema=schema, errors=errors
+        )
+
+    # ------------------------------------------------------------------
+    # Meural Canvas (local LAN postcard) — FramePort Phase 3
+    # ------------------------------------------------------------------
+
+    async def async_step_add_meural(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a Meural Canvas by local IP (no Meural cloud account)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            name = (user_input.get(CONF_NAME) or "").strip() or f"Meural {host}"
+            width = int(user_input.get(CONF_WIDTH) or MEURAL_DEFAULT_WIDTH)
+            height = int(user_input.get(CONF_HEIGHT) or MEURAL_DEFAULT_HEIGHT)
+
+            info = await probe_meural(async_get_clientsession(self.hass), host)
+            if info is None:
+                errors[CONF_HOST] = "cannot_connect"
+            else:
+                unique = f"meural:{host}"
+                # Prefer a stable serial from identify payload when present.
+                for key in ("serial", "serialNumber", "deviceId", "id", "mac"):
+                    if info.get(key):
+                        unique = f"meural:{info[key]}"
+                        break
+                await self.async_set_unique_id(str(unique))
+                self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+                return self.async_create_entry(
+                    title=name,
+                    data={
+                        CONF_DRIVER: DRIVER_MEURAL,
+                        CONF_HOST: host,
+                        CONF_NAME: name,
+                        CONF_WIDTH: width,
+                        CONF_HEIGHT: height,
+                        CONF_SIZE: MEURAL_SIZE_LABEL,
+                        CONF_DEVICE_KEY: str(unique),
+                        CONF_MAC: "",
+                    },
+                )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST): str,
+                vol.Optional(CONF_NAME, default=""): str,
+                vol.Optional(CONF_WIDTH, default=MEURAL_DEFAULT_WIDTH): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+                vol.Optional(CONF_HEIGHT, default=MEURAL_DEFAULT_HEIGHT): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="add_meural", data_schema=schema, errors=errors
         )
 
     # ------------------------------------------------------------------

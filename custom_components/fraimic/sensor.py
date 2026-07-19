@@ -33,7 +33,19 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Fraimic sensors from a config entry."""
-    coordinator: FraimicCoordinator = hass.data[DOMAIN][entry.entry_id]
+    from .const import CONF_DRIVER, DRIVER_MEURAL  # noqa: PLC0415
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    # Meural has no battery/charge/queue sensors; expose IP + firmware only.
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        async_add_entities(
+            [
+                FraimicFirmwareSensor(coordinator, entry),
+                FraimicIpAddressSensor(coordinator, entry),
+            ]
+        )
+        return
 
     async_add_entities(
         [
@@ -53,24 +65,30 @@ async def async_setup_entry(
 
 
 def frame_device_info(
-    hass: HomeAssistant, coordinator: FraimicCoordinator, entry: ConfigEntry
+    hass: HomeAssistant, coordinator: Any, entry: ConfigEntry
 ) -> DeviceInfo:
     """Device registry info for one frame -- shared by every entity platform
     (sensors, the orientation select) so they all land on the same device."""
+    from .const import CONF_DRIVER, DRIVER_MEURAL  # noqa: PLC0415
+
     fw: str | None = None
     if coordinator.data:
         fw = coordinator.data.get("firmware_version")
 
-    frame_type = FRAME_TYPES.get(entry.data.get(CONF_SIZE))
-    if frame_type is not None:
-        manufacturer = (
-            "Fraimic" if frame_type.origin == ORIGIN_OFFICIAL
-            else "Community (Fraimic-compatible)"
-        )
-        model = frame_type.display_name
+    if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
+        manufacturer = "NETGEAR Meural"
+        model = "Canvas (local)"
     else:
-        manufacturer = "Fraimic"
-        model = "E-Ink Canvas"
+        frame_type = FRAME_TYPES.get(entry.data.get(CONF_SIZE))
+        if frame_type is not None:
+            manufacturer = (
+                "Fraimic" if frame_type.origin == ORIGIN_OFFICIAL
+                else "Community (Fraimic-compatible)"
+            )
+            model = frame_type.display_name
+        else:
+            manufacturer = "Fraimic"
+            model = "E-Ink Canvas"
 
     info: dict[str, Any] = {
         "identifiers": {(DOMAIN, entry.entry_id)},

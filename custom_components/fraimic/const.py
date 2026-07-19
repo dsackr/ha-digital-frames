@@ -25,6 +25,18 @@ CONF_DEVICE_KEY = "device_key"  # persistent Fraimic device identifier
 CONF_MAC = "mac_address"         # WiFi MAC (normalised, no colons)
 CONF_MODE = "mode"
 CONF_SIZE = "size"                # diagonal panel size label, e.g. "13.3"
+CONF_DRIVER = "driver"            # FramePort driver id (see DRIVER_*)
+
+# FramePort driver ids (entry.data[CONF_DRIVER]). Default/absent = Fraimic
+# local Spectra HTTP family (official + API-compatible clones).
+DRIVER_FRAIMIC = "fraimic"
+DRIVER_MEURAL = "meural"
+
+# Meural Canvas common native resolution (landscape). User can override
+# in the Meural config flow when a panel reports differently.
+MEURAL_DEFAULT_WIDTH = 1920
+MEURAL_DEFAULT_HEIGHT = 1080
+MEURAL_SIZE_LABEL = "meural"
 
 # Frame display modes
 MODE_MANUAL = "manual"
@@ -33,6 +45,7 @@ MODE_ROTATION = "rotation"
 
 # Frame types (physical size, resolution, byte layout, official-vs-clone
 # origin) live in frame_types.py's FRAME_TYPES registry, not here.
+# Meural is NOT a FRAME_TYPES row — it is a separate driver (DRIVER_MEURAL).
 
 # HA platforms this integration provides
 PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.CAMERA]

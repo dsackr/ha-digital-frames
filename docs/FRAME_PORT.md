@@ -1,8 +1,8 @@
 # FramePort design note
 
-**Status:** Phase 0 design + **Phase 1 codec seam** + **Phase 2
-codec-keyed library cache** landed. Full FramePort ABC / second driver
-still open.  
+**Status:** Phases 0–3 landed: codec seam, codec-keyed cache, and a **local
+Meural driver** (JPEG postcard, no Meural cloud). Formal FramePort ABC /
+cloud Meural auth still open.  
 **Purpose:** freeze the contract that lets the gallery core (library, walls,
 scenes, schedules, skills, panel) treat every display the same way, while
 each hardware family keeps its own transport, pixel format, and discovery.
@@ -371,14 +371,14 @@ it belongs in core and must use the port.
 | **0** | This document (incl. three-layer model + 7.3" as multi-codec proof) | Done |
 | **1 – Seam inside local Spectra stack** | Explicit PanelCodec (`panel_codec.py`); `codec_id` on `FrameType`; encode call sites via `encode_for_panel*`; send timeout from panel profile. 7.3" = `spectra6_sequential`, official = `spectra6_split_half`. | **Done** (behavior-preserving) |
 | **2 – Format-agnostic render cache** | Library `.bin` cache keyed by `codec_id` (`bin/<WxH[variant]>/<codec_id>/…`); legacy resolution-only paths still read as fallback; send/backfill pass codec from entry/resolution. | **Done** |
-| **3 – Second driver** | e.g. Meural experimental: add, wall, send, scene. Proves a *new transport*, not just a new codec. | Yes — next |
-| **4 – Branding** | Product/panel naming (“Smart Art” or similar); optional domain migration only if still worth it | Yes |
+| **3 – Second driver** | Local Meural (`driver=meural`): config-flow menu, `MeuralCoordinator`, JPEG `jpeg_q90` codec, postcard send; participates in walls/scenes/library. **No** Meural cloud/Cognito. | **Done** (experimental) |
+| **4 – Branding** | Product/panel naming (“Smart Art” or similar); optional domain migration only if still worth it | Yes — next |
 
-**Immediate next implementation step:** Phase 3 — first foreign driver
-(Meural or similar), using FramePort + codec-keyed cache.
+**Immediate next product step:** Phase 4 branding, and/or Meural cloud
+auth if local postcard is insufficient for some firmware.
 
-**Do not start Phase 3 until Phase 1–2 stay green on pytest + Playwright
-and KPF 4/7/8/22/23 hold for both official and 7.3" panels.**
+**Hardware note:** Meural support is local-LAN only; validate on a real
+Canvas before treating cloud features as in-scope.
 
 ---
 

@@ -105,15 +105,47 @@ def _detect_content_type(raw_bytes: bytes) -> str:
 
 def _all_render_specs(hass: "HomeAssistant") -> set[RenderSpec]:
     """Distinct render specs (effective resolution + rotation + lock) across
-    every configured Fraimic frame. Two frames with identical settings
-    collapse to one spec (they share cached .bin files)."""
+    every configured frame. Two frames with identical settings collapse to
+    one spec (they share cached payload files *when codec also matches*)."""
     specs: set[RenderSpec] = set()
     for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get("kind") == "scenes_hub":
+            continue
         width = entry.data.get(CONF_WIDTH)
         height = entry.data.get(CONF_HEIGHT)
         if isinstance(width, int) and isinstance(height, int):
             specs.add(render_spec_for_entry(entry))
     return specs
+
+
+def _all_render_targets(hass: "HomeAssistant") -> list[tuple[RenderSpec, str]]:
+    """(RenderSpec, codec_id) pairs for every configured frame.
+
+    Distinct by (spec, codec_id) so Meural JPEG and Spectra at the same
+    geometry never share a cache slot incorrectly.
+    """
+    from .panel_codec import panel_codec_for_entry  # noqa: PLC0415
+
+    seen: set[tuple[RenderSpec, str]] = set()
+    out: list[tuple[RenderSpec, str]] = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get("kind") == "scenes_hub":
+            continue
+        width = entry.data.get(CONF_WIDTH)
+        height = entry.data.get(CONF_HEIGHT)
+        if not (isinstance(width, int) and isinstance(height, int)):
+            continue
+        try:
+            codec_id = panel_codec_for_entry(entry).id
+        except ValueError:
+            continue
+        spec = render_spec_for_entry(entry)
+        key = (spec, codec_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((spec, codec_id))
+    return out
 
 
 # Every cache-key suffix a .bin file can be stored under (see
@@ -1675,10 +1707,13 @@ class LibraryManager:
                 _LOGGER.error("Library backfill failed for '%s': %s", item, err)
 
     async def _backfill_one(self, record: LibraryImage) -> None:
-        """Generate whatever .bin renders `record` is missing for the
-        frames currently configured."""
+        """Generate whatever wire payloads `record` is missing for the
+        frames currently configured (Spectra .bin or Meural JPEG)."""
+        # has_resolution is still geometry-only (legacy manifest field);
+        # missing means we have no cached payload for that size yet.
         missing = [
-            spec for spec in _all_render_specs(self.hass)
+            (spec, codec_id)
+            for spec, codec_id in _all_render_targets(self.hass)
             if not record.has_resolution(spec.width, spec.height)
         ]
         if not missing:
@@ -1692,20 +1727,9 @@ class LibraryManager:
             )
             return
 
-        from .frame_types import codec_id_for_resolution  # noqa: PLC0415
         from .panel_codec import encode_for_panel  # noqa: PLC0415
 
-        for spec in missing:
-            try:
-                codec_id = codec_id_for_resolution(spec.width, spec.height)
-            except ValueError:
-                _LOGGER.error(
-                    "Backfill: no codec for %dx%d (image %s)",
-                    spec.width,
-                    spec.height,
-                    record.image_id,
-                )
-                continue
+        for spec, codec_id in missing:
             try:
                 bin_bytes = await self.hass.async_add_executor_job(
                     encode_for_panel,
@@ -1714,11 +1738,14 @@ class LibraryManager:
                     spec.height,
                     spec.rotation,
                     spec.locked,
+                    "fast",
+                    None,
+                    codec_id,
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error(
-                    "Failed converting library image %s to %dx%d: %s",
-                    record.image_id, spec.width, spec.height, err,
+                    "Failed converting library image %s to %dx%d (%s): %s",
+                    record.image_id, spec.width, spec.height, codec_id, err,
                 )
                 continue
             await self._backend.async_save_bin(
@@ -1761,11 +1788,17 @@ class LibraryManager:
         pollutes the cache) -- and the conversion packs with that method.
         None (the normal path) converts with the default packer and uses the
         cache as usual."""
-        from .frame_types import codec_id_for_resolution  # noqa: PLC0415
-
         width, height = spec.width, spec.height
         if not codec_id:
-            codec_id = codec_id_for_resolution(width, height)
+            from .frame_types import codec_id_for_resolution  # noqa: PLC0415
+
+            try:
+                codec_id = codec_id_for_resolution(width, height)
+            except ValueError as err:
+                raise LibraryBackendError(
+                    f"No panel codec for {width}x{height}; pass codec_id explicitly "
+                    f"(e.g. Meural JPEG frames)"
+                ) from err
 
         if pack_method is None:
             cached = await self._backend.async_get_bin(
@@ -1796,6 +1829,7 @@ class LibraryManager:
             spec.locked,
             effective_method,
             tuple(crop_box) if crop_box else None,
+            codec_id,
         )
         if pack_method is None:
             await self._backend.async_save_bin(
