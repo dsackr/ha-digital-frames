@@ -55,45 +55,58 @@ class FraimicOnboardingView(HomeAssistantView):
         return self.json({"success": True, "complete": True})
 
 
-def resolve_frame_by_entity(hass, entity_id: str):
-    """Resolve a Fraimic entity_id to (coordinator, config_entry).
+def _is_frame_coordinator(obj) -> bool:
+    """True for FraimicCoordinator / MeuralCoordinator (not domain helpers)."""
+    return (
+        obj is not None
+        and hasattr(obj, "async_send_image_or_queue")
+        and hasattr(obj, "host")
+    )
 
-    Shared by FraimicSendImageView and the library HTTP views so both the
-    direct upload-and-send flow and the library send-from-library flow agree
-    on how a frame is located. Raises ValueError with a user-facing message
-    on any resolution failure.
+
+def resolve_frame_by_entity(hass, entity_id: str):
+    """Resolve a frame entity_id to (coordinator, config_entry).
+
+    Shared by send/upload HTTP views. Prefers the entity registry's
+    ``config_entry_id`` (reliable for Meural IP sensors and Fraimic battery
+    sensors). Falls back to the device registry's config_entries set.
+
+    Raises ValueError with a user-facing message on any resolution failure.
     """
     ent_reg = er.async_get(hass)
     entity_entry = ent_reg.async_get(entity_id)
     if entity_entry is None:
         raise ValueError(f"Entity '{entity_id}' not found")
 
-    dev_reg = dr.async_get(hass)
-    device_entry = (
-        dev_reg.async_get(entity_entry.device_id)
-        if entity_entry.device_id
-        else None
-    )
-    if device_entry is None:
-        raise ValueError("No device found for entity")
-
     domain_data: dict = hass.data.get(DOMAIN, {})
-    coordinator = None
-    entry_id_found: str | None = None
-    for eid in device_entry.config_entries:
-        if eid in domain_data:
-            coordinator = domain_data[eid]
-            entry_id_found = eid
-            break
 
-    if coordinator is None or entry_id_found is None:
-        raise ValueError("No Fraimic coordinator found for this device")
+    # 1) Entity → config entry (Meural often fails path 2 if the device has
+    #    not fully linked config_entries after a multi-platform setup).
+    entry_id = getattr(entity_entry, "config_entry_id", None)
+    if entry_id:
+        coordinator = domain_data.get(entry_id)
+        if _is_frame_coordinator(coordinator):
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if entry is not None:
+                return coordinator, entry
 
-    entry = hass.config_entries.async_get_entry(entry_id_found)
-    if entry is None:
-        raise ValueError("Config entry not found")
+    # 2) Device registry → any domain entry with a frame coordinator
+    if entity_entry.device_id:
+        dev_reg = dr.async_get(hass)
+        device_entry = dev_reg.async_get(entity_entry.device_id)
+        if device_entry is not None:
+            for eid in device_entry.config_entries:
+                coordinator = domain_data.get(eid)
+                if not _is_frame_coordinator(coordinator):
+                    continue
+                entry = hass.config_entries.async_get_entry(eid)
+                if entry is not None:
+                    return coordinator, entry
 
-    return coordinator, entry
+    raise ValueError(
+        "No frame coordinator found for this device "
+        "(reload the Fraimic integration if you just added a Meural)"
+    )
 
 
 class FraimicFrameStatusView(HomeAssistantView):

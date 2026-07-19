@@ -7,7 +7,7 @@ import mimetypes
 import os
 import tempfile
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 
@@ -495,20 +495,23 @@ async def _async_update_listener(hass: HomeAssistant, entry: "ConfigEntry") -> N
 
 def _get_coordinator_by_device_id(
     hass: HomeAssistant, device_id: str
-) -> tuple[FraimicCoordinator, str]:
+) -> tuple[Any, str]:
     """Return (coordinator, entry_id) for the given device_id, or raise."""
+    from .http_api import _is_frame_coordinator  # noqa: PLC0415
+
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get(device_id)
     if device_entry is None:
         raise HomeAssistantError(f"Device '{device_id}' not found in device registry")
 
-    domain_data: dict[str, FraimicCoordinator] = hass.data.get(DOMAIN, {})
+    domain_data: dict = hass.data.get(DOMAIN, {})
     for entry_id in device_entry.config_entries:
-        if entry_id in domain_data:
-            return domain_data[entry_id], entry_id
+        coord = domain_data.get(entry_id)
+        if _is_frame_coordinator(coord):
+            return coord, entry_id
 
     raise HomeAssistantError(
-        f"No Fraimic coordinator found for device '{device_id}'"
+        f"No frame coordinator found for device '{device_id}'"
     )
 
 
