@@ -330,11 +330,14 @@ class FraimicLibrarySendView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return self.json_message(f"Invalid request body: {err}", status_code=400)
 
-        entity_id = body.get("entity_id")
+        entity_id = body.get("entity_id") or None
+        entry_id = body.get("entry_id") or None
         image_id = body.get("image_id")
 
-        if not entity_id:
-            return self.json_message("entity_id is required", status_code=400)
+        if not entity_id and not entry_id:
+            return self.json_message(
+                "entity_id or entry_id is required", status_code=400
+            )
         if not image_id:
             return self.json_message("image_id is required", status_code=400)
 
@@ -349,7 +352,9 @@ class FraimicLibrarySendView(HomeAssistantView):
             )
 
         try:
-            coordinator, entry = resolve_frame_by_entity(hass, entity_id)
+            coordinator, entry = resolve_frame_by_entity(
+                hass, entity_id, entry_id=entry_id
+            )
         except ValueError as err:
             return self.json_message(str(err), status_code=404)
 

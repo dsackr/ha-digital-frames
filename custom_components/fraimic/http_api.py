@@ -86,7 +86,7 @@ class FraimicOnboardingView(HomeAssistantView):
 
 
 def _is_frame_coordinator(obj) -> bool:
-    """True for FraimicCoordinator / MeuralCoordinator (not domain helpers)."""
+    """True for Fraimic / Meural / Samsung coordinators (not domain helpers)."""
     return (
         obj is not None
         and hasattr(obj, "async_send_image_or_queue")
@@ -94,48 +94,108 @@ def _is_frame_coordinator(obj) -> bool:
     )
 
 
-def resolve_frame_by_entity(hass, entity_id: str):
-    """Resolve a frame entity_id to (coordinator, config_entry).
+_ENTITY_UNIQUE_SUFFIXES = (
+    "_battery",
+    "_ip",
+    "_orientation",
+    "_camera",
+    "_firmware",
+    "_device_orientation",
+    "_ambient_light",
+    "_free_space",
+    "_wifi_rssi",
+    "_queued_send",
+    "_backlight",
+    "_mdc_reachable",
+    "_charging",
+)
 
-    Shared by send/upload HTTP views. Prefers the entity registry's
-    ``config_entry_id`` (reliable for Meural IP sensors and Fraimic battery
-    sensors). Falls back to the device registry's config_entries set.
+
+def _coordinator_for_entry_id(hass, entry_id: str | None):
+    """Return (coordinator, config_entry) or None."""
+    if not entry_id:
+        return None
+    domain_data: dict = hass.data.get(DOMAIN, {})
+    coordinator = domain_data.get(entry_id)
+    if not _is_frame_coordinator(coordinator):
+        return None
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        return None
+    return coordinator, entry
+
+
+def resolve_frame_by_entity(
+    hass, entity_id: str | None = None, *, entry_id: str | None = None
+):
+    """Resolve a frame entity_id and/or config entry_id to (coordinator, entry).
+
+    Shared by send/upload HTTP views. Tries, in order:
+
+    1. *entry_id* (preferred — panel always knows it)
+    2. *entity_id* if it is itself a config entry id
+    3. entity registry ``config_entry_id``
+    4. entity ``unique_id`` prefix (``{entry_id}_ip`` / ``_battery`` / …)
+    5. device registry identifiers / config_entries
 
     Raises ValueError with a user-facing message on any resolution failure.
     """
-    ent_reg = er.async_get(hass)
-    entity_entry = ent_reg.async_get(entity_id)
-    if entity_entry is None:
-        raise ValueError(f"Entity '{entity_id}' not found")
+    hit = _coordinator_for_entry_id(hass, entry_id)
+    if hit is not None:
+        return hit
 
-    domain_data: dict = hass.data.get(DOMAIN, {})
+    if entity_id:
+        hit = _coordinator_for_entry_id(hass, entity_id)
+        if hit is not None:
+            return hit
 
-    # 1) Entity → config entry (Meural often fails path 2 if the device has
-    #    not fully linked config_entries after a multi-platform setup).
-    entry_id = getattr(entity_entry, "config_entry_id", None)
-    if entry_id:
-        coordinator = domain_data.get(entry_id)
-        if _is_frame_coordinator(coordinator):
-            entry = hass.config_entries.async_get_entry(entry_id)
-            if entry is not None:
-                return coordinator, entry
+        ent_reg = er.async_get(hass)
+        entity_entry = ent_reg.async_get(entity_id)
+        if entity_entry is None:
+            raise ValueError(f"Entity '{entity_id}' not found")
 
-    # 2) Device registry → any domain entry with a frame coordinator
-    if entity_entry.device_id:
-        dev_reg = dr.async_get(hass)
-        device_entry = dev_reg.async_get(entity_entry.device_id)
-        if device_entry is not None:
-            for eid in device_entry.config_entries:
-                coordinator = domain_data.get(eid)
-                if not _is_frame_coordinator(coordinator):
-                    continue
-                entry = hass.config_entries.async_get_entry(eid)
-                if entry is not None:
-                    return coordinator, entry
+        hit = _coordinator_for_entry_id(
+            hass, getattr(entity_entry, "config_entry_id", None)
+        )
+        if hit is not None:
+            return hit
 
+        uid = getattr(entity_entry, "unique_id", None) or ""
+        for suffix in _ENTITY_UNIQUE_SUFFIXES:
+            if uid.endswith(suffix):
+                hit = _coordinator_for_entry_id(hass, uid[: -len(suffix)])
+                if hit is not None:
+                    return hit
+                break
+
+        if entity_entry.device_id:
+            dev_reg = dr.async_get(hass)
+            device_entry = dev_reg.async_get(entity_entry.device_id)
+            if device_entry is not None:
+                for ident in getattr(device_entry, "identifiers", ()) or ():
+                    if (
+                        isinstance(ident, (list, tuple))
+                        and len(ident) >= 2
+                        and ident[0] == DOMAIN
+                    ):
+                        hit = _coordinator_for_entry_id(hass, ident[1])
+                        if hit is not None:
+                            return hit
+                for eid in device_entry.config_entries:
+                    hit = _coordinator_for_entry_id(hass, eid)
+                    if hit is not None:
+                        return hit
+
+    loaded = sorted(
+        k
+        for k, v in (hass.data.get(DOMAIN) or {}).items()
+        if _is_frame_coordinator(v)
+    )
     raise ValueError(
         "No frame coordinator found for this device "
-        "(reload the Fraimic integration if you just added a Meural)"
+        f"(entity={entity_id!r}, entry_id={entry_id!r}; "
+        f"loaded_frames={loaded or 'none'}). "
+        "Reload the Fraimic integration if a frame was just added."
     )
 
 
@@ -196,10 +256,13 @@ class FraimicSendImageView(HomeAssistantView):
             return self.json_message(f"Invalid request body: {err}", status_code=400)
 
         entity_id: str | None = data.get("entity_id")  # type: ignore[assignment]
+        entry_id: str | None = data.get("entry_id")  # type: ignore[assignment]
         image_field = data.get("image")
 
-        if not entity_id:
-            return self.json_message("entity_id is required", status_code=400)
+        if not entity_id and not entry_id:
+            return self.json_message(
+                "entity_id or entry_id is required", status_code=400
+            )
         if image_field is None:
             return self.json_message("image file is required", status_code=400)
 
@@ -217,9 +280,11 @@ class FraimicSendImageView(HomeAssistantView):
         if not raw_bytes:
             return self.json_message("Uploaded file is empty", status_code=400)
 
-        # Resolve entity_id → device → config entry → coordinator.
+        # Resolve entry_id / entity_id → config entry → coordinator.
         try:
-            coordinator, entry = resolve_frame_by_entity(hass, entity_id)
+            coordinator, entry = resolve_frame_by_entity(
+                hass, entity_id, entry_id=entry_id
+            )
         except ValueError as err:
             return self.json_message(str(err), status_code=404)
 

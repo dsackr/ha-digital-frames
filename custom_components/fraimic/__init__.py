@@ -409,11 +409,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     # drops it. (MeuralCoordinator no-ops this.)
     await coordinator.async_load_pending_send()
 
-    # Perform the first data fetch; raises ConfigEntryNotReady on failure so
-    # HA will retry automatically.
-    await coordinator.async_config_entry_first_refresh()
+    # Register the coordinator *before* first_refresh / platforms so send
+    # resolution never races an empty hass.data slot, and so a soft options
+    # update can find it without a full reload.
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[entry.entry_id] = coordinator
+    domain_data[f"_options_snapshot_{entry.entry_id}"] = dict(entry.options)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Perform the first data fetch; raises ConfigEntryNotReady on failure so
+    # HA will retry automatically. Clear the slot if setup aborts.
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        domain_data.pop(entry.entry_id, None)
+        domain_data.pop(f"_options_snapshot_{entry.entry_id}", None)
+        raise
 
     # Every configured frame is guaranteed a spot on the default wall --
     # this hook covers embedded adds, discovery adds, and plain restarts.
@@ -434,7 +444,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     if not hass.services.has_service(DOMAIN, "send_image"):
         _register_services(hass)
 
-    # Re-register listener so option changes (e.g. scan_interval) take effect.
+    # Soft options listener: orientation locks must NOT reload the entry
+    # (that dropped Meural coordinators while entity registry rows remained).
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
@@ -489,9 +500,47 @@ async def async_remove_entry(hass: HomeAssistant, entry: "ConfigEntry") -> None:
         await wall_manager.async_prune_entry(entry.entry_id)
 
 
+# Options that require a full config-entry reload (coordinator interval, etc.).
+_RELOAD_OPTION_KEYS = frozenset({"scan_interval"})
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: "ConfigEntry") -> None:
-    """Handle config entry option updates (e.g. scan_interval changes)."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Handle config entry option updates.
+
+    Only *scan_interval* forces a full reload. Orientation locks are applied
+    at send time from entry.options / live gsensor — rewriting them used to
+    call async_reload, which unloaded the Meural coordinator while entity
+    registry rows stayed, so library send failed with "No frame coordinator".
+    """
+    from .const import (  # noqa: PLC0415
+        CONF_ORIENTATION,
+        CONF_ORIENTATION_FOLLOW_DEVICE,
+    )
+    from .http_api import _is_frame_coordinator  # noqa: PLC0415
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    snap_key = f"_options_snapshot_{entry.entry_id}"
+    prev = domain_data.get(snap_key)
+    curr = dict(entry.options)
+    domain_data[snap_key] = curr
+
+    if prev is None:
+        return
+
+    if any(prev.get(k) != curr.get(k) for k in _RELOAD_OPTION_KEYS):
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    orient_changed = prev.get(CONF_ORIENTATION) != curr.get(
+        CONF_ORIENTATION
+    ) or prev.get(CONF_ORIENTATION_FOLLOW_DEVICE) != curr.get(
+        CONF_ORIENTATION_FOLLOW_DEVICE
+    )
+    coord = domain_data.get(entry.entry_id)
+    if orient_changed and _is_frame_coordinator(coord):
+        redisplay = getattr(coord, "async_redisplay_last", None)
+        if callable(redisplay):
+            await redisplay()
 
 
 # ---------------------------------------------------------------------------

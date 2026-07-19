@@ -3064,9 +3064,15 @@
         const result = await resp.json();
         const byEntry = {};
         for (const f of (result.frames || [])) byEntry[f.entry_id] = f;
+        // Prefer server-side battery_entity_id (Meural → IP) over WS discovery
+        // when present — avoids stale/missing entity links after reloads.
         for (const frame of this._frames) {
           const match = byEntry[frame.entryId];
           if (match) {
+            if (match.battery_entity_id) frame.entityId = match.battery_entity_id;
+            if (match.orientation_entity_id) {
+              frame.orientationEntityId = match.orientation_entity_id;
+            }
             frame.width    = match.width;
             frame.height   = match.height;
             frame.size     = match.size;
@@ -3077,6 +3083,27 @@
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
           }
+        }
+        // Also surface API-only frames WS missed (e.g. device config_entries gap).
+        for (const f of (result.frames || [])) {
+          if (this._frames.some((x) => x.entryId === f.entry_id)) continue;
+          if (!f.battery_entity_id) continue;
+          this._frames.push({
+            title: f.title,
+            entityId: f.battery_entity_id,
+            orientationEntityId: f.orientation_entity_id || null,
+            deviceId: null,
+            entryId: f.entry_id,
+            width: f.width,
+            height: f.height,
+            size: f.size,
+            host: f.host,
+            origin: f.origin,
+            platform: f.platform,
+            orientation: f.orientation,
+            lastImageId: f.last_image_id,
+            hasThumbnail: f.has_thumbnail,
+          });
         }
       } catch (err) {
         console.warn('[fraimic-panel] frame resolution lookup failed:', err);
@@ -5315,7 +5342,9 @@
       btn.textContent = '⏳ Sending…';
 
       const form = new FormData();
-      form.append('entity_id', entityId);
+      const frame = (this._frames || []).find((f) => f.entityId === entityId);
+      if (frame && frame.entryId) form.append('entry_id', frame.entryId);
+      if (entityId) form.append('entity_id', entityId);
       form.append('image_id', imageId);
       if (this._packerOverride) form.append('packer', this._packerOverride);
 
@@ -7198,7 +7227,10 @@
     // Returns { queued } on acceptance; throws on a real failure.
     async _sendLibraryImageToFrame(frame, imageId) {
       const form = new FormData();
-      form.append('entity_id', frame.entityId);
+      // entry_id is the reliable key (survives entity-registry / reload races);
+      // entity_id remains for older backends and status sensors.
+      if (frame.entryId) form.append('entry_id', frame.entryId);
+      if (frame.entityId) form.append('entity_id', frame.entityId);
       form.append('image_id', imageId);
       if (this._packerOverride) form.append('packer', this._packerOverride);
       const resp = await fetch('/api/fraimic/library/send', {
@@ -8156,7 +8188,8 @@
         let queued = false;
         if (file) {
           const form = new FormData();
-          form.append('entity_id', frame.entityId);
+          if (frame.entryId) form.append('entry_id', frame.entryId);
+          if (frame.entityId) form.append('entity_id', frame.entityId);
           form.append('image', file);
           const resp = await fetch('/api/fraimic/send_image', {
             method: 'POST', headers: this._authHeaders(), body: form,
@@ -9771,7 +9804,9 @@
       try {
         await this._editorSaveCrop();
         const form = new FormData();
-        form.append('entity_id', entityId);
+        const edFrame = (this._frames || []).find((f) => f.entityId === entityId);
+        if (edFrame && edFrame.entryId) form.append('entry_id', edFrame.entryId);
+        if (entityId) form.append('entity_id', entityId);
         form.append('image_id', st.image.image_id);
         if (this._packerOverride) form.append('packer', this._packerOverride);
         const resp = await fetch('/api/fraimic/library/send', {
