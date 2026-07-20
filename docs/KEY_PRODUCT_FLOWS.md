@@ -31,18 +31,33 @@ User chooses **Fraimic / e-ink clone** or **Meural Canvas (local)** from the
 add-frame menu. Fraimic path scans the LAN or takes an IP and auto-detects
 size/resolution; Meural path probes the local postcard API and stores a
 `driver=meural` config entry.
+
+**Background auto-discovery** (every ~20 min + on panel open) is **active
+HTTP probing** of the HA host's /24 — not a shared broadcast protocol.
+Each IP is asked `GET /api/info` (Fraimic family) then, if that fails,
+`GET /remote/identify/` (Meural local). Hits feed HA's
+`SOURCE_INTEGRATION_DISCOVERY` pipeline: Fraimic → name-device form;
+Meural → `discovery_confirm_meural` form. Already-configured frames are
+matched (device_key / Meural unique id / host) and IP is updated if the
+frame moved; pending flows dedup via `unique_id`.
 - **Entry points**: `config_flow.py` (`DigitalFramesConfigFlow.async_step_user` /
-  `add_fraimic` / `add_meural` / `pick_device` / `manual` / `name_device` /
-  `dhcp` / `integration_discovery`), `helpers.py` (`probe_frame`,
-  `probe_device_size`, `scan_subnet`, `detect_frame_type_from_info`),
-  `meural.py` (`probe_meural`), `discovery.py`.
+  `add_fraimic` / `add_meural` / `discovery_confirm_meural` / `pick_device` /
+  `manual` / `name_device` / `dhcp` / `integration_discovery`),
+  `helpers.py` (`probe_frame`, `probe_device_size`, `scan_subnet`,
+  `detect_frame_type_from_info`), `meural.py` (`probe_meural`,
+  `meural_unique_id`), `discovery.py` (`_async_scan_once`,
+  `_match_and_update_meural`).
 - **If it silently breaks**: users can't add frames at all, or duplicate
-  entries get created for the same physical frame.
+  entries get created for the same physical frame; Meurals never appear
+  under Settings → Devices & Services → Discovered.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
   `tests/python/config_flow/test_config_flow_user_scan.py` (menu,
-  Fraimic user/manual/pick_device/DHCP steps, Meural local add, size
-  auto-detect, dedup).
+  Fraimic user/manual/pick_device/DHCP steps, Meural local add, Meural
+  integration_discovery + confirm, size auto-detect, dedup);
+  `tests/python/unit/test_meural.py` (`meural_unique_id`, dual-probe
+  `scan_subnet`); `tests/python/unit/test_discovery_meural.py`
+  (background sweep starts Meural discovery flow / skips configured).
 
 ## 2. Options flow (scan interval, size, orientation edge, 180° flip)
 User edits a frame's scan interval, physical size, hanging edge, and
@@ -275,42 +290,47 @@ assigned image at once; exposed as `scene.*` entities for voice control.
   (CRUD, duplicate-name rejection, send_mappings partial-failure fan-out,
   schedule-disarm on delete).
 
-## 17. Scene packs (curated art bundles, install/sync/uninstall)
-One-click install of a public-domain image bundle that auto-builds a
-matching scene, orientation-aware; sync repairs partial installs.
+## 17. Gallery art packs (curated bundles, install/sync/uninstall)
+**(Content platform: Gallery tab — was "Add-ons / scene packs".)** One-click
+install of a public-domain image collection into the library; optionally
+auto-builds an orientation-aware scene (`create_scene=true` default).
+Library-only install is supported (`create_scene=false` / panel
+"Library only"). Sync repairs partial installs.
 - **Entry points**: `scene_packs.py` (`ScenePackManager.async_install_pack` /
-  `async_sync_pack` / `async_uninstall_pack`), `scene_packs_http.py`.
+  `async_sync_pack` / `async_uninstall_pack`), `scene_packs_http.py`
+  (`POST …/install` body `create_scene`), panel Gallery tab
+  (`digital-frames-panel.js` `_installPack`, `_renderScenePacks`).
 - **If it silently breaks**: an interrupted install leaves orphaned images
   untracked, blocking reinstall; uninstall can leave stray images if some
-  deletes fail.
+  deletes fail; library-only installs unexpectedly create scenes (or vice
+  versa).
 - **Test status**: Panel-tested indirectly (`addons-categories.spec.js`;
   `addons-catalog-refresh.spec.js` covers the catalog re-fetching on tab
   activation and panel revive rather than only once at initial load).
   **Backend-tested** — `tests/python/managers/test_scene_packs.py`
-  (install success/partial-failure/all-fail, already-installed guard,
-  uninstall scene+image cleanup and untag-vs-delete, sync recovery by
-  filename, orientation-aware image-to-frame assignment).
+  (install success/partial-failure/all-fail, **library-only create_scene=False**,
+  already-installed guard, uninstall scene+image cleanup and untag-vs-delete,
+  sync recovery by filename, orientation-aware image-to-frame assignment).
 
-## 18. Scene-pack "widgets" (agenda, quotes, scripture add-ons)
+## 18. Scene-pack "widgets" (agenda tool — legacy)
 A pack type that downloads a Python renderer script + JSON config,
 schedules it, and runs it as a subprocess to generate/send a rendered
-image to one target frame. The agenda widget can pull from multiple
-configured `calendar.*` entities at once (renamed from the older
-one-entity-only "Home Assistant Calendar" field), merging events from
-every selected calendar.
+image to one target frame. **Legacy path** — Daily Agenda still uses this
+until Content Platform Phase 4 migrates it to Live generators (see
+`docs/CONTENT_PLATFORM_ROADMAP.md`). Catalog no longer lists xOTD as a
+widget (renderer is pinned for skills only).
 - **Entry points**: `scene_packs.py` (`_async_install_widget`,
   `_schedule_widget`, `async_run_widget`); the panel's generic
   `config_schema` engine (`digital-frames-panel.js`) drives each widget's install
   form, including the `multiple` (checkbox-group, comma-joined entity ids)
-  and `json` field types.
+  and `json` field types. Gallery **Tools** section.
 - **If it silently breaks**: a widget never runs (scheduler not armed), or
   a crashed subprocess silently does nothing forever.
 - **Test status**: Panel-tested for config forms only
   (`addon-config-schema.spec.js`, `addon-schema-gaps.spec.js`,
   `agenda-calendar-source.spec.js`). Backend scheduling/execution: **Gap**
-  — deliberately out of scope for Phase 4 (subprocess execution and the
-  daily/hourly scheduler need heavier mocking than the rest of this phase;
-  tracked as a follow-up in TESTING_STRATEGY.md rather than folded in here).
+  — deliberately out of scope for manager Phase 4; will be closed by Live
+  Agenda migration (Content Platform Phase 4), not expanded widget tests.
 
 ## 19. Walls: virtual multi-frame layout (panel-local state)
 User arranges a subset of frames on a free-form canvas mirroring how
@@ -455,41 +475,50 @@ across every visit to the Frames panel for the life of the browser tab.
   correctly; a same-tick DOM move, as HA sometimes does internally, must
   NOT tear anything down). Backend: not applicable.
 
-## 28. Skills / Daily Content (xOTD): reusable content generators
-User creates named "skills" (word/quote/joke/scripture of the day, image
-feeds like NASA APOD / Wikimedia POTD / Bing wallpaper, or
-random-from-album) and sends one to any frame — ad hoc ("Send Now" in the
-Daily Content tab, the Lovelace card's Daily picker), staged into a scene
-via the wall picker, or on a schedule. Text modes render through the
-pinned remote `xotd_renderer.py` subprocess at the target frame's
-composition size. The script writes Spectra `xotd.bin` **and** full RGB
-`xotd_preview.png` (before pack). `text_skill_payload_for_codec` then
-picks the wire format: Spectra frames get the `.bin`; Meural/`jpeg_q90`
-gets JPEG from the **RGB PNG** (not Spectra-unpack, so anti-aliased text
-is preserved). Image modes resolve to a library image_id (feeds upload
-the fetched photo into the library first) and use the normal library
-codec path. Previews prefer the RGB PNG so last-image thumbnails stay sharp.
+## 28. Live content (skills / xOTD renderer): reusable content generators
+**(Content platform: Live tab — was "Daily Content / skills".)** User creates
+named presets (word/quote/joke/scripture of the day, image feeds like NASA
+APOD / Wikimedia POTD / Bing wallpaper, or random-from-album) and sends one
+to any frame — ad hoc ("Send Now" on the Live tab, the Lovelace card's Daily
+picker), staged into a scene via the wall picker, or on a schedule.
+**Quick setup (Phase 3):** each Live card has frame + time + "Schedule daily"
+which calls `POST /api/digital_frames/live/quick_setup` to create one daily
+recurring schedule per selected frame (does not clone the skill).
+Text modes render through the pinned remote `xotd_renderer.py` subprocess
+at the target frame's composition size. The script writes Spectra
+`xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
+`text_skill_payload_for_codec` then picks the wire format: Spectra frames
+get the `.bin`; Meural/`jpeg_q90` gets JPEG from the **RGB PNG** (not
+Spectra-unpack, so anti-aliased text is preserved). Image modes resolve to
+a library image_id (feeds upload the fetched photo into the library first)
+and use the normal library codec path. Previews prefer the RGB PNG so
+last-image thumbnails stay sharp.
 - **Entry points**: `skills.py` (`SkillManager.async_save_skill` /
   `async_render_for_entry` / `_async_render_text` /
   `_async_fetch_image_feed` / `_async_pick_image_album`),
   `panel_codec.py` (`text_skill_payload_for_codec`),
-  `skills_http.py` (CRUD + `DigitalFramesSkillSendView`), fan-out via
-  `scenes.py` (`async_send_mappings`).
+  `skills_http.py` (CRUD + `DigitalFramesSkillSendView` +
+  `DigitalFramesLiveQuickSetupView`), fan-out via
+  `scenes.py` (`async_send_mappings`), panel Live tab
+  (`_quickScheduleLive`).
 - **If it silently breaks**: daily content stops arriving (schedules
   no-op), a skill renders blank/stale content, fan-out to several frames
   shows different content per frame, Meural receives Spectra `.bin` on
-  postcard (garbled/fail) instead of JPEG, or — the regression fixed in
-  July 2026 — a text-skill send wipes the frame's last-image state so the
-  card/panel thumbnail goes blank while the frame shows content.
+  postcard (garbled/fail) instead of JPEG, quick-setup creates no/wrong
+  schedules, or — the regression fixed in July 2026 — a text-skill send
+  wipes the frame's last-image state so the card/panel thumbnail goes blank
+  while the frame shows content.
 - **Test status**: **Backend-tested** —
   `tests/python/managers/test_skills.py` (CRUD, per-mode render dispatch,
   feed fetch/upload, subprocess lifecycle + cleanup, preview-PNG
   generation with graceful degradation, Meural JPEG re-encode from
-  text-skill bin) and
+  text-skill bin),
+  `tests/python/managers/test_live_quick_setup.py` (daily schedule create,
+  on_demand_only, missing skill),
   `tests/python/managers/test_scenes.py` (bin renders thread their
   preview through to the coordinator as the send thumbnail);
   `tests/python/unit/test_panel_codec.py` (`text_skill_payload_for_codec`).
-  Panel-tested — `skills.spec.js` (Daily Content tab),
+  Panel-tested — `skills.spec.js` (Live tab; internal id still `xotd`),
   `walls-skill-picker.spec.js` (staging into scenes),
   `fraimic-card.spec.js` (card Daily picker send).
 

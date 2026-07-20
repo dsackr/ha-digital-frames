@@ -151,6 +151,30 @@ async def test_install_pack_success(
     assert img_b.get("voice_name") is None
 
 
+async def test_install_pack_library_only_skips_scene(
+    hass, scene_pack_manager, aioclient_mock, sample_image_bytes, make_frame_entry
+):
+    """Content Platform Phase 2: create_scene=False still tracks the pack."""
+    entry = make_frame_entry()
+    entry.add_to_hass(hass)
+
+    images = [
+        {"filename": "a.jpg", "path": "scene_packs/monet/a.jpg", "title": "Sunrise"},
+    ]
+    url, body = _catalog_url_and_body(images)
+    aioclient_mock.get(url, json=body)
+    aioclient_mock.get(_image_url(images[0]), content=sample_image_bytes(800, 600))
+
+    result = await scene_pack_manager.async_install_pack("monet", create_scene=False)
+
+    assert result["success"] is True
+    assert result["images_added"] == 1
+    assert result["scene_created"] is False
+    assert scene_pack_manager._installed["monet"]["scene_id"] is None
+    assert len(await scene_pack_manager._library.async_list_images()) == 1
+    assert len(scene_pack_manager._scenes.scenes) == 0
+
+
 async def test_install_pack_per_image_failure_does_not_strand_others(
     hass, scene_pack_manager, aioclient_mock, sample_image_bytes
 ):

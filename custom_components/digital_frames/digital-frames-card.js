@@ -1061,7 +1061,7 @@
         } catch (_) { /* fall through to empty-state */ }
         if (token !== this._pickerToken) return;
         if (!skills.length) {
-          grid.innerHTML = '<div class="picker-note">No daily content yet — create some in the Fraimic panel\'s Daily Content tab.</div>';
+          grid.innerHTML = '<div class="picker-note">No live content yet — create some in the Digital Frames panel\'s Live tab.</div>';
           return;
         }
         grid.innerHTML = '';

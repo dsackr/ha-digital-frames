@@ -7,7 +7,8 @@
 (function () {
   'use strict';
 
-  const PANEL_VERSION = '0.10.2';
+  // Bump when user-visible panel copy/layout changes (handoff / cache check).
+  const PANEL_VERSION = '0.11.0';
 
   // Mirrors library.py's DEFAULT_ALBUM -- every photo belongs to this album
   // unless/until it's reorganized elsewhere; can't be renamed or deleted.
@@ -18,8 +19,10 @@
   // a Fraimic endpoint.
   const SCENE_PACK_RAW_BASE = 'https://raw.githubusercontent.com/dsackr/frame-addons/main';
 
-  // Labels for known add-on category tags. The Add-ons tab derives which
-  // Art Pack category tiles to show from the tags in the remote pack catalog.
+  // Labels for known Gallery category tags. The Gallery tab derives which
+  // collection tiles to show from the tags in the remote pack catalog.
+  // Content platform Phase 1: user-facing "Gallery" / "Live" (internal tab
+  // ids still 'addons' / 'xotd' until a later rename PR).
   const PACK_CATEGORIES = {
     famous_artists: { label: 'Famous Artists' },
     nature: { label: 'Nature' },
@@ -27,13 +30,11 @@
     seasons: { label: 'Seasons & Holidays' },
     history: { label: 'History' },
     speed: { label: 'Speed' },
-    productivity: { label: 'Productivity' }
+    productivity: { label: 'Tools' }
   };
   const PRODUCTIVITY_CATEGORY = 'productivity';
-  // Packs excluded from every Add-ons catalog listing entirely (see
-  // _renderScenePacks) -- "xotd" is just the script source skills.py
-  // downloads for text-mode rendering, not something a user installs;
-  // skills themselves are managed from the "Daily Content" tab.
+  // Defensive filter if a stale catalog still lists xotd — Live renderers
+  // are managed on the Live tab, not as Gallery installs.
   const MULTI_INSTANCE_PACK_IDS = ['xotd'];
   const PACK_CATEGORY_ORDER = [
     'famous_artists',
@@ -2267,7 +2268,7 @@
     }
 
     // -----------------------------------------------------------------------
-    // Tab bar: Dashboard / Add-ons
+    // Tab bar: Dashboard / Gallery / Live
     // -----------------------------------------------------------------------
 
     // Mirrors HA frontend's own navigate() helper: history.pushState must
@@ -2326,8 +2327,8 @@
 
         <div class="tab-bar" id="tab-bar">
           <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-          <button class="tab-btn" data-tab="addons">Add-ons</button>
-          <button class="tab-btn" data-tab="xotd">Daily Content</button>
+          <button class="tab-btn" data-tab="addons">Gallery</button>
+          <button class="tab-btn" data-tab="xotd">Live</button>
         </div>
 
         <div class="tab-content active" id="tab-dashboard">
@@ -2429,28 +2430,32 @@
         </div><!-- /tab-dashboard -->
 
         <div class="tab-content" id="tab-addons">
+        <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
+          Curated public-domain art and seasonal collections for your frames.
+          Install a collection to add it to your library (and optionally create
+          a scene). Tools such as Daily Agenda still appear here until they
+          move fully under Live.
+        </p>
         <div class="feedback" id="pack-fb"></div>
         <div class="addons-crumb" id="addons-crumb"></div>
         <div class="lib-grid" id="pack-grid">
           <div class="empty">
             <div class="empty-icon">⋯</div>
-            <h2>Loading scene packs…</h2>
+            <h2>Loading gallery…</h2>
           </div>
         </div>
         </div><!-- /tab-addons -->
 
         <div class="tab-content" id="tab-xotd">
         <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-          A skill is a piece of content -- Word/Joke/Quote/Scripture of the
-          Day, or a rotating photo feed/album -- with no frame or schedule
-          of its own. Create one below, then treat it like a photo: drop it
-          on a wall tile, send it to any frame on demand, or schedule it
-          from the Schedules tab.
+          Daily and rotating content — jokes, quotes, scripture, words, or
+          photo feeds. Create a preset below, then send it like a photo: to
+          any frame, onto a wall tile, or on a schedule from the Schedules tab.
         </p>
         <div class="feedback" id="xotd-fb"></div>
-        <h3 style="margin:0 0 10px;font-size:14px">Add a New Skill</h3>
+        <h3 style="margin:0 0 10px;font-size:14px">Add live content</h3>
         <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
-        <h3 style="margin:24px 0 10px;font-size:14px">Your Skills</h3>
+        <h3 style="margin:24px 0 10px;font-size:14px">Your live content</h3>
         <div class="lib-grid" id="xotd-grid">
           <div class="empty">
             <div class="empty-icon">⋯</div>
@@ -2966,7 +2971,7 @@
 
         <div class="modal-overlay" id="widget-config-overlay">
           <div class="modal-box" style="max-width:520px">
-            <h3 id="widget-config-title">Configure Add-on</h3>
+            <h3 id="widget-config-title">Configure tool</h3>
             <div id="widget-config-fields"></div>
             <div class="feedback" id="widget-config-fb"></div>
             <div class="modal-actions">
@@ -2978,7 +2983,7 @@
 
         <div class="modal-overlay" id="xotd-modal-overlay">
           <div class="modal-box" style="max-width:520px">
-            <h3 id="xotd-modal-title">New Instance</h3>
+            <h3 id="xotd-modal-title">New live content</h3>
             <div id="xotd-modal-fields"></div>
             <div class="feedback" id="xotd-modal-fb"></div>
             <div class="modal-actions">
@@ -8042,7 +8047,7 @@
       if (!this._albums || !this._albums.length) await this._loadAlbums();
       if (!this._skills) await this._loadXotdInstances();
       albumSelect.innerHTML = '<option value="">All Photos</option>' +
-        '<option value="__skills__">✨ Skills</option>' +
+        '<option value="__skills__">✨ Live content</option>' +
         this._albums.map(a => `<option value="${this._esc(a.name)}">${this._esc(a.name)}</option>`).join('');
       // An add-on scene's images all ship in one dedicated album -- default
       // straight to it instead of "All Photos" so picking a replacement for
@@ -8200,7 +8205,7 @@
     _renderWallPickerSkillsGrid(entryId, grid) {
       const skills = this._skills || [];
       if (!skills.length) {
-        grid.innerHTML = '<div class="modal-file-summary">No skills yet -- create one from the Daily Content tab.</div>';
+        grid.innerHTML = '<div class="modal-file-summary">No live content yet — create some from the Live tab.</div>';
         return;
       }
 
@@ -8281,7 +8286,7 @@
       }
       if (isSkillMapping) {
         btn.disabled = true;
-        btn.title = 'Save the scene, or use the Daily Content tab\'s "Send Now", to send a skill';
+        btn.title = 'Save the scene, or use the Live tab\'s "Send Now", to send live content';
         btn.textContent = '▶ Send';
         return;
       }
@@ -8595,8 +8600,8 @@
         grid.innerHTML = `
           <div class="empty">
             <div class="empty-icon">◈</div>
-            <h2>No scene packs available</h2>
-            <p>Couldn't reach the scene pack catalog right now -- check your
+            <h2>No gallery collections available</h2>
+            <p>Couldn't reach the art catalog right now — check your
                internet connection and reload the page.</p>
           </div>
         `;
@@ -8608,11 +8613,11 @@
         grid.className = '';
         grid.innerHTML = `
           <div class="addons-section">
-            <h2 class="addons-section-title">Art Packs</h2>
+            <h2 class="addons-section-title">Art collections</h2>
             <div class="category-grid" id="art-categories-grid"></div>
           </div>
           <div class="addons-section" style="margin-top: 40px;">
-            <h2 class="addons-section-title">Productivity Packs</h2>
+            <h2 class="addons-section-title">Tools</h2>
             <div class="lib-grid" id="productivity-grid"></div>
           </div>
         `;
@@ -8731,7 +8736,9 @@
       const count = (pack.images || []).length;
       const coverUrl = `${SCENE_PACK_RAW_BASE}/${pack.cover}`;
       const isWidget = pack.type === 'widget';
-      const summaryText = isWidget ? 'System Add-on Widget' : `${count} image${count === 1 ? '' : 's'} · ${this._esc(pack.license || '')}`;
+      const summaryText = isWidget
+        ? 'Tool (legacy install — moving to Live in a later release)'
+        : `${count} image${count === 1 ? '' : 's'} · ${this._esc(pack.license || '')}`;
 
       let statusHtml;
       let badgeHtml = '';
@@ -8754,16 +8761,22 @@
           `;
           badgeHtml = `
             <div style="margin-top:10px">
-              <span class="badge-installed">✓ ${pack.scene_created ? 'Installed · scene created' : 'Installed'}</span>
+              <span class="badge-installed">✓ ${pack.scene_created ? 'In library · scene created' : 'In library'}</span>
             </div>
           `;
         }
+      } else if (isWidget) {
+        statusHtml = `<button class="btn-primary" id="pack-install-${sid}">⬇ Set up</button>`;
       } else {
-        statusHtml = `<button class="btn-primary" id="pack-install-${sid}">⬇ Install</button>`;
+        // Phase 2: default keeps auto-scene; library-only is explicit.
+        statusHtml = `
+          <button class="btn-primary" id="pack-install-${sid}" title="Add images to the library and create a scene">⬇ Install + scene</button>
+          <button class="btn-ghost" id="pack-install-lib-${sid}" title="Add images to the library only">Library only</button>
+        `;
       }
 
       el.innerHTML = `
-        <img class="pack-cover" src="${this._esc(coverUrl)}" alt="${this._esc(pack.name)}" loading="lazy" title="${isWidget ? 'Configure this add-on' : 'Preview this pack'}">
+        <img class="pack-cover" src="${this._esc(coverUrl)}" alt="${this._esc(pack.name)}" loading="lazy" title="${isWidget ? 'Configure this tool' : 'Preview this collection'}">
         <div class="scene-card-title">${this._esc(pack.name)}</div>
         <div class="pack-desc">${this._esc(pack.description || '')}</div>
         <div class="scene-card-summary">${summaryText}</div>
@@ -8796,9 +8809,15 @@
             if (isWidget) {
               this._openWidgetConfigModal(pack, el, sid);
             } else {
-              this._installPack(pack, el, sid);
+              this._installPack(pack, el, sid, { createScene: true });
             }
           });
+        const libOnly = el.querySelector(`#pack-install-lib-${sid}`);
+        if (libOnly) {
+          libOnly.addEventListener('click', () => {
+            this._installPack(pack, el, sid, { createScene: false });
+          });
+        }
       }
 
       return el;
@@ -8958,7 +8977,7 @@
       fb.style.display = 'none';
       title.textContent = `${pack.installed ? 'Configure' : 'Install'} ${pack.name}`;
       submitBtn.disabled = false;
-      submitBtn.textContent = pack.installed ? 'Save Settings' : 'Install Add-on';
+      submitBtn.textContent = pack.installed ? 'Save settings' : 'Install';
       
       let html = '';
       
@@ -9171,7 +9190,7 @@
           fb.className = 'feedback err';
           fb.style.display = 'block';
           newSubmitBtn.disabled = false;
-          newSubmitBtn.textContent = pack.installed ? 'Save Settings' : 'Install Add-on';
+          newSubmitBtn.textContent = pack.installed ? 'Save settings' : 'Install';
         }
       };
       
@@ -9295,10 +9314,10 @@
         grid.innerHTML = `
           <div class="empty">
             <div class="empty-icon">◈</div>
-            <h2>No skills yet</h2>
-            <p>Pick a content type above to create a Joke, Quote, Scripture,
-               Word, or Image skill you can send to any frame, drop onto a
-               wall tile, or schedule.</p>
+            <h2>No live content yet</h2>
+            <p>Pick a type above to create a joke, quote, scripture, word,
+               or photo feed you can send to any frame, drop onto a wall
+               tile, or schedule.</p>
           </div>
         `;
         return;
@@ -9334,8 +9353,13 @@
             ${this._frames.length ? frameOptions : '<option value="">No frames available</option>'}
           </select>
         </div>
+        <div class="modal-row" style="margin-top:6px;display:flex;gap:8px;align-items:center">
+          <label style="font-size:11px;color:var(--secondary-text-color);white-space:nowrap">Daily at</label>
+          <input type="time" id="xotd-schedule-time-${sid}" value="08:00" style="flex:1;min-width:0">
+        </div>
         <div class="btns" style="margin-top:6px">
           <button class="btn-primary" id="xotd-run-${sid}" ${this._frames.length ? '' : 'disabled'}>▶ Send Now</button>
+          <button class="btn-ghost" id="xotd-schedule-${sid}" ${this._frames.length ? '' : 'disabled'} title="Create a daily schedule for the selected frame">Schedule daily</button>
           <button class="btn-ghost" id="xotd-edit-${sid}">✎ Edit</button>
           <button class="btn-ghost" id="xotd-delete-${sid}">🗑 Delete</button>
         </div>
@@ -9343,10 +9367,58 @@
       `;
 
       el.querySelector(`#xotd-run-${sid}`).addEventListener('click', () => this._runXotdInstanceNow(skill, el, sid));
+      el.querySelector(`#xotd-schedule-${sid}`).addEventListener('click', () => this._quickScheduleLive(skill, el, sid));
       el.querySelector(`#xotd-edit-${sid}`).addEventListener('click', () => this._openXotdModal(skill));
       el.querySelector(`#xotd-delete-${sid}`).addEventListener('click', () => this._deleteXotdInstance(skill, el, sid));
 
       return el;
+    }
+
+    async _quickScheduleLive(skill, el, sid) {
+      const fb = el.querySelector(`#xotd-card-fb-${sid}`);
+      const frameSel = el.querySelector(`#xotd-send-frame-${sid}`);
+      const timeEl = el.querySelector(`#xotd-schedule-time-${sid}`);
+      const entryId = frameSel && frameSel.value;
+      const time = (timeEl && timeEl.value) || '08:00';
+      if (!entryId) {
+        fb.className = 'feedback err';
+        fb.textContent = 'Choose a frame first.';
+        fb.style.display = 'block';
+        return;
+      }
+      const btn = el.querySelector(`#xotd-schedule-${sid}`);
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '⏳ …';
+      try {
+        const resp = await fetch('/api/digital_frames/live/quick_setup', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            skill_id: skill.skill_id,
+            entry_ids: [entryId],
+            time,
+          }),
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+        fb.className = 'feedback ok';
+        fb.textContent = `Scheduled daily at ${time}. Manage under Schedules.`;
+        fb.style.display = 'block';
+        if (typeof this._loadSchedules === 'function') {
+          await this._loadSchedules();
+          if (typeof this._renderSchedules === 'function') this._renderSchedules();
+        }
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Schedule failed: ${err.message}`;
+        fb.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
     }
 
     async _runXotdInstanceNow(skill, el, sid) {
@@ -9708,16 +9780,26 @@
       }
     }
 
-    async _installPack(pack, el, sid) {
-      const btn = el.querySelector(`#pack-install-${sid}`);
+    async _installPack(pack, el, sid, { createScene = true } = {}) {
+      const btn = el.querySelector(
+        createScene ? `#pack-install-${sid}` : `#pack-install-lib-${sid}`
+      ) || el.querySelector(`#pack-install-${sid}`);
+      const otherBtn = el.querySelector(
+        createScene ? `#pack-install-lib-${sid}` : `#pack-install-${sid}`
+      );
       const fb  = el.querySelector(`#pack-card-fb-${sid}`);
-      const prevText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '⏳ Installing…';
+      const prevText = btn ? btn.textContent : 'Install';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Installing…';
+      }
+      if (otherBtn) otherBtn.disabled = true;
 
       try {
         const resp = await fetch(`/api/digital_frames/scene_packs/${pack.id}/install`, {
-          method: 'POST', headers: this._authHeaders(),
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ create_scene: !!createScene }),
         });
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {
@@ -9734,13 +9816,22 @@
         await this._loadScenePacks();
         this._renderScenePacks();
 
+        const pageFb = this.shadowRoot.getElementById('pack-fb');
+        if (pageFb && !(result.errors && result.errors.length)) {
+          pageFb.className = 'feedback ok';
+          pageFb.textContent = result.scene_created
+            ? `"${pack.name}" added to the library and a scene was created.`
+            : `"${pack.name}" added to the library (no scene).`;
+          pageFb.style.display = 'block';
+          setTimeout(() => { pageFb.style.display = 'none'; }, 5000);
+        }
+
         // A partial install still reports success (some images did make
         // it in) -- surface it on the page-level banner rather than the
         // per-card one, since _renderScenePacks() just tore down the card
         // this callback's `fb` reference pointed at.
         if (result.errors && result.errors.length) {
           const total = result.images_added + result.errors.length;
-          const pageFb = this.shadowRoot.getElementById('pack-fb');
           pageFb.className = 'feedback err';
           pageFb.textContent = `"${pack.name}" installed ${result.images_added} of ${total} images -- `
             + `failed: ${result.errors.map(e => e.filename).join(', ')}. Remove and try again, `
@@ -9748,11 +9839,16 @@
           pageFb.style.display = 'block';
         }
       } catch (err) {
-        fb.className = 'feedback err';
-        fb.textContent = `Install failed: ${err.message}`;
-        fb.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = prevText;
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent = `Install failed: ${err.message}`;
+          fb.style.display = 'block';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevText;
+        }
+        if (otherBtn) otherBtn.disabled = false;
       }
     }
 

@@ -222,8 +222,18 @@ class ScenePackManager:
         return record["image_id"], width > height
 
     async def async_install_pack(
-        self, pack_id: str, config_data: dict[str, Any] = None
+        self,
+        pack_id: str,
+        config_data: dict[str, Any] = None,
+        *,
+        create_scene: bool = True,
     ) -> dict[str, Any]:
+        """Install a Gallery art pack (or widget tool).
+
+        *create_scene* (art packs only, default True): also auto-build a
+        scene mapping images to configured frames. Set False for
+        library-only installs (Content Platform Phase 2).
+        """
         pack = await self.async_get_pack(pack_id)
 
         if pack.get("type") == "widget":
@@ -282,29 +292,33 @@ class ScenePackManager:
                 + (errors[0]["message"] if errors else "unknown error")
             )
 
-        frames: list[tuple[str, bool]] = []
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.data.get("kind") == KIND_SCENES_HUB:
-                continue
-            width = entry.data.get(CONF_WIDTH)
-            height = entry.data.get(CONF_HEIGHT)
-            if isinstance(width, int) and isinstance(height, int):
-                # Match pack images against the frame's *effective*
-                # orientation (honours the orientation lock), not the
-                # panel's native buffer orientation.
-                from .helpers import render_spec_for_entry  # noqa: PLC0415
-
-                spec = render_spec_for_entry(entry)
-                frames.append((entry.entry_id, spec.width > spec.height))
-
         scene_id = None
-        if frames:
-            mappings = _assign_images_to_frames(frames, uploaded)
-            if mappings:
-                scene = await self._scenes.async_save_scene(
-                    name=pack["name"], mappings=mappings, album=album, source="addon"
-                )
-                scene_id = scene["scene_id"]
+        if create_scene:
+            frames: list[tuple[str, bool]] = []
+            for entry in self.hass.config_entries.async_entries(DOMAIN):
+                if entry.data.get("kind") == KIND_SCENES_HUB:
+                    continue
+                width = entry.data.get(CONF_WIDTH)
+                height = entry.data.get(CONF_HEIGHT)
+                if isinstance(width, int) and isinstance(height, int):
+                    # Match pack images against the frame's *effective*
+                    # orientation (honours the orientation lock), not the
+                    # panel's native buffer orientation.
+                    from .helpers import render_spec_for_entry  # noqa: PLC0415
+
+                    spec = render_spec_for_entry(entry)
+                    frames.append((entry.entry_id, spec.width > spec.height))
+
+            if frames:
+                mappings = _assign_images_to_frames(frames, uploaded)
+                if mappings:
+                    scene = await self._scenes.async_save_scene(
+                        name=pack["name"],
+                        mappings=mappings,
+                        album=album,
+                        source="addon",
+                    )
+                    scene_id = scene["scene_id"]
 
         self._installed[pack_id] = {
             "album": album,

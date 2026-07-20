@@ -53,7 +53,12 @@ class DigitalFramesScenePacksView(HomeAssistantView):
 
 
 class DigitalFramesScenePackInstallView(HomeAssistantView):
-    """Install a scene pack: import its images and build a scene."""
+    """Install a Gallery pack: import images; optionally build a scene.
+
+    JSON body (all optional):
+      config: widget config (tools only)
+      create_scene: bool (art packs; default true) — library-only when false
+    """
 
     url = "/api/digital_frames/scene_packs/{pack_id}/install"
     name = "api:digital_frames:scene_packs:install"
@@ -71,8 +76,17 @@ class DigitalFramesScenePackInstallView(HomeAssistantView):
             except Exception:
                 body = {}
             config_data = body.get("config")
-            
-            result = await manager.async_install_pack(pack_id, config_data)
+            create_scene = body.get("create_scene", True)
+            if not isinstance(create_scene, bool):
+                create_scene = str(create_scene).strip().lower() not in (
+                    "0",
+                    "false",
+                    "no",
+                )
+
+            result = await manager.async_install_pack(
+                pack_id, config_data, create_scene=create_scene
+            )
         except ScenePackError as err:
             return self.json_message(str(err), status_code=400)
         except Exception as err:  # noqa: BLE001

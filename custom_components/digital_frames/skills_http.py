@@ -1,4 +1,4 @@
-"""HTTP API views for Fraimic skills.
+"""HTTP API views for Digital Frames skills / Live content.
 
 Endpoints:
     GET    /api/digital_frames/skills                 list skills
@@ -6,6 +6,7 @@ Endpoints:
     POST   /api/digital_frames/skills/{skill_id}      update a skill ({name, content_mode, config})
     DELETE /api/digital_frames/skills/{skill_id}      delete a skill
     POST   /api/digital_frames/skills/{skill_id}/send send a skill to one frame now ({entry_id})
+    POST   /api/digital_frames/live/quick_setup       skill + frame(s) + daily time → schedule(s)
 """
 
 from __future__ import annotations
@@ -159,3 +160,116 @@ class DigitalFramesSkillSendView(HomeAssistantView):
         results = result.get("results", [])
         success = bool(results) and all(r.get("success") for r in results)
         return self.json({"success": success, "results": results})
+
+
+class DigitalFramesLiveQuickSetupView(HomeAssistantView):
+    """Content Platform Phase 3: one-shot Live routine setup.
+
+    Body:
+      skill_id: str (required) — existing Live content preset
+      entry_ids: list[str] (required unless on_demand_only)
+      time: "HH:MM" daily fire (default "08:00")
+      on_demand_only: bool — if true, create no schedules (skill must already exist)
+
+    Creates one daily recurring schedule per frame. Does not clone skills.
+    """
+
+    url = "/api/digital_frames/live/quick_setup"
+    name = "api:digital_frames:live:quick_setup"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        skill_manager = _get_skill_manager(hass)
+        schedule_manager = hass.data.get(DOMAIN, {}).get("_schedules")
+        if schedule_manager is None:
+            return self.json_message(
+                "Schedule manager not initialised", status_code=500
+            )
+
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON body: {err}", status_code=400)
+        if not isinstance(body, dict):
+            return self.json_message("Request body must be an object", status_code=400)
+
+        skill_id = (body.get("skill_id") or "").strip()
+        if not skill_id:
+            return self.json_message("skill_id is required", status_code=400)
+
+        skill = await skill_manager.async_get_skill(skill_id)
+        if skill is None:
+            return self.json_message(f"Skill '{skill_id}' not found", status_code=404)
+
+        if body.get("on_demand_only"):
+            return self.json(
+                {
+                    "success": True,
+                    "skill_id": skill_id,
+                    "schedules": [],
+                    "on_demand_only": True,
+                }
+            )
+
+        entry_ids = body.get("entry_ids") or body.get("entry_id")
+        if isinstance(entry_ids, str):
+            entry_ids = [entry_ids]
+        if not isinstance(entry_ids, list) or not entry_ids:
+            return self.json_message(
+                "entry_ids must be a non-empty list of frame entry ids",
+                status_code=400,
+            )
+        entry_ids = [str(e).strip() for e in entry_ids if str(e).strip()]
+        if not entry_ids:
+            return self.json_message("entry_ids must be non-empty", status_code=400)
+
+        time_str = (body.get("time") or "08:00").strip()
+        # Accept HH:MM or HH:MM:SS — schedules validate HH:MM.
+        parts = time_str.split(":")
+        if len(parts) >= 2:
+            time_str = f"{parts[0].zfill(2)}:{parts[1].zfill(2)}"
+
+        skill_name = getattr(skill, "name", None) or skill_id
+
+        from .schedules import ScheduleError  # noqa: PLC0415
+
+        created: list[dict] = []
+        try:
+            for entry_id in entry_ids:
+                entry = hass.config_entries.async_get_entry(entry_id)
+                frame_label = (
+                    entry.title if entry is not None else entry_id
+                )
+                name = f"{skill_name} → {frame_label}"
+                schedule = await schedule_manager.async_create_schedule(
+                    name,
+                    {
+                        "type": "skill",
+                        "entry_id": entry_id,
+                        "skill_id": skill_id,
+                    },
+                    {
+                        "type": "recurring",
+                        "freq": "daily",
+                        "time": time_str,
+                    },
+                    enabled=True,
+                )
+                created.append(schedule)
+        except ScheduleError as err:
+            return self.json_message(str(err), status_code=400)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Live quick_setup failed: %s", err)
+            return self.json_message(
+                f"Failed to create schedule(s): {err}", status_code=500
+            )
+
+        return self.json(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "schedules": created,
+                "on_demand_only": False,
+            }
+        )

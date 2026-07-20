@@ -310,6 +310,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})["_skills"] = skill_manager
 
     from .skills_http import (  # noqa: PLC0415
+        DigitalFramesLiveQuickSetupView,
         DigitalFramesSkillSendView,
         DigitalFramesSkillsView,
         DigitalFramesSkillView,
@@ -318,6 +319,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesSkillsView())
     hass.http.register_view(DigitalFramesSkillView())
     hass.http.register_view(DigitalFramesSkillSendView())
+    hass.http.register_view(DigitalFramesLiveQuickSetupView())
 
     # One-time migration: xOTD's old per-instance (content_mode, frame,
     # schedule) model is retired in favour of frame-agnostic skills
