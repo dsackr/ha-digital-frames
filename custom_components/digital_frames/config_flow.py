@@ -24,6 +24,7 @@ from .const import (
     CONF_WIDTH,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    DRIVER_FRAIMIC,
     DRIVER_MEURAL,
     DRIVER_SAMSUNG,
     KIND_SCENES_HUB,
@@ -56,7 +57,7 @@ from .helpers import (
     probe_frame,
     scan_subnet,
 )
-from .meural import probe_meural
+from .meural import meural_orientation_from_payload, meural_unique_id, probe_meural
 
 if TYPE_CHECKING:
     pass
@@ -156,9 +157,32 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_integration_discovery(
         self, discovery_info: dict[str, Any]
     ) -> FlowResult:
-        """Handle a frame found by the periodic background subnet scan."""
+        """Handle a frame found by the periodic background subnet scan.
+
+        Fraimic and Meural share the scan *pipeline* (SOURCE_INTEGRATION_DISCOVERY
+        + unique_id dedup), not a broadcast protocol — each was found by a
+        different HTTP probe (see helpers.scan_subnet).
+        """
         ip: str = discovery_info["ip"]
         info: dict[str, Any] = discovery_info["info"]
+        driver = discovery_info.get("driver") or DRIVER_FRAIMIC
+
+        if driver == DRIVER_MEURAL:
+            unique = meural_unique_id(info, ip)
+            # raise_on_progress aborts if a discovery flow for this Meural
+            # is already pending — rescans must not stack duplicates.
+            await self.async_set_unique_id(unique)
+            self._abort_if_unique_id_configured(updates={CONF_HOST: ip})
+
+            self._selected_host = ip
+            self._selected_info = info
+            alias = ""
+            if isinstance(info, dict):
+                alias = str(info.get("alias") or info.get("name") or "").strip()
+            self.context["title_placeholders"] = {
+                "name": alias or f"Meural ({ip})"
+            }
+            return await self.async_step_discovery_confirm_meural()
 
         key = device_key_from_info(info)
         if not key:
@@ -174,6 +198,67 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
 
         self.context["title_placeholders"] = {"name": ip}
         return await self._async_use_device(ip, info)
+
+    async def async_step_discovery_confirm_meural(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm a Meural found by background discovery and create the entry."""
+        errors: dict[str, str] = {}
+        host = self._selected_host
+        info = self._selected_info
+        default_name = ""
+        if isinstance(info, dict):
+            default_name = str(
+                info.get("alias") or info.get("name") or ""
+            ).strip()
+        if not default_name:
+            default_name = f"Meural {host}"
+
+        if user_input is not None:
+            name = (user_input.get(CONF_NAME) or "").strip() or default_name
+            width = int(user_input.get(CONF_WIDTH) or MEURAL_DEFAULT_WIDTH)
+            height = int(user_input.get(CONF_HEIGHT) or MEURAL_DEFAULT_HEIGHT)
+            unique = meural_unique_id(info, host)
+            await self.async_set_unique_id(str(unique))
+            self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+            options: dict[str, Any] = {CONF_ORIENTATION_FOLLOW_DEVICE: True}
+            device_orient = meural_orientation_from_payload(info)
+            if device_orient:
+                options[CONF_ORIENTATION] = device_orient
+
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_DRIVER: DRIVER_MEURAL,
+                    CONF_HOST: host,
+                    CONF_NAME: name,
+                    CONF_WIDTH: width,
+                    CONF_HEIGHT: height,
+                    CONF_SIZE: MEURAL_SIZE_LABEL,
+                    CONF_DEVICE_KEY: str(unique),
+                    CONF_MAC: "",
+                },
+                options=options,
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_NAME, default=default_name): str,
+                vol.Optional(CONF_WIDTH, default=MEURAL_DEFAULT_WIDTH): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+                vol.Optional(CONF_HEIGHT, default=MEURAL_DEFAULT_HEIGHT): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="discovery_confirm_meural",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"host": host},
+        )
 
     # ------------------------------------------------------------------
     # Step 1 — choose driver (Fraimic Spectra family vs Meural local)
@@ -271,19 +356,12 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
             if info is None:
                 errors[CONF_HOST] = "cannot_connect"
             else:
-                unique = f"meural:{host}"
-                # Prefer a stable serial from identify payload when present.
-                for key in ("serial", "serialNumber", "deviceId", "id", "mac"):
-                    if info.get(key):
-                        unique = f"meural:{info[key]}"
-                        break
+                unique = meural_unique_id(info, host)
                 await self.async_set_unique_id(str(unique))
                 self._abort_if_unique_id_configured(updates={CONF_HOST: host})
 
                 # Seed follow-device orientation from gsensor so crop/send
                 # match hang immediately (see MeuralCoordinator follow).
-                from .meural import meural_orientation_from_payload  # noqa: PLC0415
-
                 options: dict[str, Any] = {CONF_ORIENTATION_FOLLOW_DEVICE: True}
                 device_orient = meural_orientation_from_payload(info)
                 if device_orient:

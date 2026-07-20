@@ -149,14 +149,34 @@ def _status_ok(payload: Any) -> bool:
     return status is None or status == "pass"
 
 
+def meural_unique_id(info: dict[str, Any] | None, host: str) -> str:
+    """Stable unique_id for a local Meural (prefer serial/mac from identify)."""
+    host = (host or "").strip()
+    if isinstance(info, dict):
+        for key in ("serial", "serialNumber", "deviceId", "id", "mac"):
+            raw = info.get(key)
+            if raw is not None and str(raw).strip():
+                return f"meural:{str(raw).strip()}"
+    return f"meural:{host}"
+
+
 async def probe_meural(
-    session: aiohttp.ClientSession, host: str
+    session: aiohttp.ClientSession,
+    host: str,
+    *,
+    timeout: aiohttp.ClientTimeout | None = None,
 ) -> dict[str, Any] | None:
-    """Return identify payload if *host* looks like a local Meural, else None."""
+    """Return identify payload if *host* looks like a local Meural, else None.
+
+    *timeout* defaults to the normal probe timeout; subnet scans pass a
+    short timeout so a full /24 sweep stays bounded.
+    """
     host = host.strip()
     if not host:
         return None
-    payload = await _get_json(session, host, "identify/")
+    payload = await _get_json(
+        session, host, "identify/", timeout=timeout or _PROBE_TIMEOUT
+    )
     if not isinstance(payload, dict):
         return None
     if payload.get("status") == "fail":

@@ -27,6 +27,7 @@ from custom_components.digital_frames.panel_codec import (
 )
 from custom_components.digital_frames.meural import (
     meural_orientation_from_payload,
+    meural_unique_id,
     parse_meural_system_stats,
     probe_meural,
     send_meural_postcard,
@@ -81,6 +82,16 @@ def _mock_session(status: int, text: str):
     return session
 
 
+def test_meural_unique_id_prefers_serial():
+    assert meural_unique_id({"serial": "ABC123"}, "192.168.1.80") == "meural:ABC123"
+    assert (
+        meural_unique_id({"serialNumber": "SN9"}, "192.168.1.80") == "meural:SN9"
+    )
+    assert meural_unique_id({"mac": "aa:bb"}, "192.168.1.80") == "meural:aa:bb"
+    assert meural_unique_id({}, "192.168.1.80") == "meural:192.168.1.80"
+    assert meural_unique_id(None, "10.0.0.5") == "meural:10.0.0.5"
+
+
 @pytest.mark.asyncio
 async def test_probe_meural_pass():
     session = _mock_session(
@@ -96,6 +107,64 @@ async def test_probe_meural_fail():
     session = _mock_session(200, '{"status":"fail","response":"nope"}')
     info = await probe_meural(session, "192.168.1.80")
     assert info is None
+
+
+@pytest.mark.asyncio
+async def test_scan_subnet_dual_probe_meural(monkeypatch):
+    """include_meural falls through to Meural probe when Fraimic misses."""
+    from custom_components.digital_frames.const import DRIVER_MEURAL
+    from custom_components.digital_frames import helpers as helpers_mod
+
+    async def _probe_frame(session, host, timeout=None):
+        return None
+
+    async def _probe_meural(session, host, *, timeout=None):
+        if host == "192.168.1.80":
+            return {"serial": "MEU1", "host": host}
+        return None
+
+    monkeypatch.setattr(helpers_mod, "probe_frame", _probe_frame)
+    monkeypatch.setattr(
+        "custom_components.digital_frames.meural.probe_meural", _probe_meural
+    )
+
+    # Only probe a single host by shrinking the "subnet" via a fake host list.
+    # scan_subnet builds /24 from host_ip — monkeypatch gather path by
+    # overriding IPv4Network hosts via a narrow local range is hard; instead
+    # call the bounded probe logic through scan_subnet with concurrency and
+    # accept full /24 (254 probes) with instant mocks.
+    found = await helpers_mod.scan_subnet(
+        "192.168.1.2", object(), concurrency=254, include_meural=True
+    )
+    meurals = [f for f in found if f.get("driver") == DRIVER_MEURAL]
+    assert len(meurals) == 1
+    assert meurals[0]["ip"] == "192.168.1.80"
+    assert meurals[0]["info"]["serial"] == "MEU1"
+
+
+@pytest.mark.asyncio
+async def test_scan_subnet_meural_off_by_default(monkeypatch):
+    from custom_components.digital_frames import helpers as helpers_mod
+
+    async def _probe_frame(session, host, timeout=None):
+        return None
+
+    called = {"n": 0}
+
+    async def _probe_meural(session, host, *, timeout=None):
+        called["n"] += 1
+        return {"serial": "X"}
+
+    monkeypatch.setattr(helpers_mod, "probe_frame", _probe_frame)
+    monkeypatch.setattr(
+        "custom_components.digital_frames.meural.probe_meural", _probe_meural
+    )
+
+    found = await helpers_mod.scan_subnet(
+        "192.168.1.2", object(), concurrency=254, include_meural=False
+    )
+    assert found == []
+    assert called["n"] == 0
 
 
 @pytest.mark.asyncio

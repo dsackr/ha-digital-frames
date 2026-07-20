@@ -26,6 +26,7 @@ from .const import (
     CONF_ROTATION_EDGE,
     CONF_WIDTH,
     DOMAIN,
+    DRIVER_FRAIMIC,
     DRIVER_MEURAL,
     DRIVER_SAMSUNG,
     EDGE_LEFT,
@@ -378,21 +379,22 @@ async def scan_subnet(
     session: aiohttp.ClientSession,
     *,
     concurrency: int = 64,
+    include_meural: bool = False,
 ) -> list[dict[str, Any]]:
     """Probe all 254 host addresses in the /24 subnet of *host_ip*.
 
-    Uses the caller's *session* (pass HA's managed session via
-    async_get_clientsession). Probes are bounded by *concurrency*: firing all
-    254 at once through a shared connector can exceed its connection limit,
-    and a probe stuck waiting in the connector queue burns its 0.5 s total
-    timeout before a single packet is sent -- silently missing live frames.
-    The semaphore is acquired *before* the request starts, so the timeout
-    only ever covers actual network time. Worst case a full sweep takes
-    ~254/concurrency * 0.5 s (~2 s at the default).
+    This is **active HTTP probing**, not a shared broadcast protocol with
+    Meural. Each IP is asked:
 
-    Returns a list of ``{"ip": str, "info": dict}`` for every address that
-    responded as a Fraimic frame (i.e. returned a valid /api/info payload with
-    a device_key).
+    1. Fraimic family: ``GET /api/info`` (device_key present → hit)
+    2. If *include_meural* and that failed: Meural local
+       ``GET /remote/identify/`` (valid identify payload → hit)
+
+    Same LAN sweep machinery; different per-host probes. Bounded by
+    *concurrency* so connector queues don't burn the short scan timeout.
+
+    Returns ``{"ip", "info", "driver"}`` where *driver* is
+    ``DRIVER_FRAIMIC`` or ``DRIVER_MEURAL``.
     """
     try:
         network = ipaddress.IPv4Network(f"{host_ip}/24", strict=False)
@@ -404,16 +406,37 @@ async def scan_subnet(
 
     async def _probe_bounded(host: str) -> dict[str, Any] | None:
         async with semaphore:
-            return await probe_frame(session, host, _SCAN_TIMEOUT)
+            info = await probe_frame(session, host, _SCAN_TIMEOUT)
+            if isinstance(info, dict) and device_key_from_info(info):
+                return {
+                    "ip": host,
+                    "info": info,
+                    "driver": DRIVER_FRAIMIC,
+                }
+            if include_meural:
+                # Late import: helpers must not hard-require meural at module load
+                # for tests that only mock probe_frame.
+                from .meural import probe_meural  # noqa: PLC0415
+
+                minfo = await probe_meural(
+                    session, host, timeout=_SCAN_TIMEOUT
+                )
+                if isinstance(minfo, dict):
+                    return {
+                        "ip": host,
+                        "info": minfo,
+                        "driver": DRIVER_MEURAL,
+                    }
+            return None
 
     results = await asyncio.gather(
         *(_probe_bounded(h) for h in hosts), return_exceptions=True
     )
 
     found: list[dict[str, Any]] = []
-    for addr, result in zip(hosts, results):
-        if isinstance(result, dict) and device_key_from_info(result):
-            found.append({"ip": addr, "info": result})
+    for result in results:
+        if isinstance(result, dict) and result.get("ip") and result.get("info"):
+            found.append(result)
     return found
 
 

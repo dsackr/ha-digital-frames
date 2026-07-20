@@ -1,6 +1,6 @@
 {
   "config": {
-    "flow_title": "Fraimic Frame ({name})",
+    "flow_title": "Digital Frames — {name}",
     "step": {
       "user": {
         "title": "Add a frame",
@@ -23,7 +23,7 @@
       },
       "add_meural": {
         "title": "Add Meural Canvas (local)",
-        "description": "Point at your Meural's local IP. Images are sent as JPEG postcards over your LAN — no Meural account required.",
+        "description": "Point at your Meural's local IP. Images are sent as JPEG postcards over your LAN — no Meural account required. Meurals are also auto-discovered on the LAN every ~20 minutes when awake.",
         "data": {
           "host": "IP Address",
           "name": "Frame Name",
@@ -32,6 +32,20 @@
         },
         "data_description": {
           "host": "Meural local IP on your network",
+          "name": "Friendly name for walls and scenes",
+          "width": "Panel width in pixels (default 1920)",
+          "height": "Panel height in pixels (default 1080)"
+        }
+      },
+      "discovery_confirm_meural": {
+        "title": "Meural Canvas discovered",
+        "description": "A Meural was found at {host} via the local identify API (no cloud). Confirm the name and panel size to add it.",
+        "data": {
+          "name": "Frame Name",
+          "width": "Width (pixels)",
+          "height": "Height (pixels)"
+        },
+        "data_description": {
           "name": "Friendly name for walls and scenes",
           "width": "Panel width in pixels (default 1920)",
           "height": "Panel height in pixels (default 1080)"

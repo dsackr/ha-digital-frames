@@ -270,6 +270,82 @@ async def test_meural_cannot_connect(hass, monkeypatch):
     assert result["errors"] == {CONF_HOST: "cannot_connect"}
 
 
+async def test_meural_integration_discovery_confirm_creates_entry(hass):
+    """Background scan hit → integration_discovery → confirm form → entry."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data={
+            "ip": "192.168.1.80",
+            "info": {
+                "serial": "MEURAL-DISC-1",
+                "alias": "Hallway",
+                "gsensor": "portrait",
+            },
+            "driver": DRIVER_MEURAL,
+        },
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "discovery_confirm_meural"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Hallway Meural",
+            CONF_WIDTH: 1920,
+            CONF_HEIGHT: 1080,
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Hallway Meural"
+    assert result["data"][CONF_DRIVER] == DRIVER_MEURAL
+    assert result["data"][CONF_HOST] == "192.168.1.80"
+    assert result["data"][CONF_DEVICE_KEY] == "meural:MEURAL-DISC-1"
+    assert result["data"][CONF_SIZE] == MEURAL_SIZE_LABEL
+    from custom_components.digital_frames.const import (  # noqa: PLC0415
+        CONF_ORIENTATION,
+        CONF_ORIENTATION_FOLLOW_DEVICE,
+        ORIENTATION_PORTRAIT,
+    )
+
+    assert result["options"][CONF_ORIENTATION_FOLLOW_DEVICE] is True
+    assert result["options"][CONF_ORIENTATION] == ORIENTATION_PORTRAIT
+
+
+async def test_meural_integration_discovery_already_configured_aborts(hass):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="meural:MEURAL-DISC-1",
+        data={
+            CONF_HOST: "192.168.1.80",
+            CONF_NAME: "Existing Meural",
+            CONF_WIDTH: 1920,
+            CONF_HEIGHT: 1080,
+            CONF_SIZE: MEURAL_SIZE_LABEL,
+            CONF_DEVICE_KEY: "meural:MEURAL-DISC-1",
+            CONF_DRIVER: DRIVER_MEURAL,
+            CONF_MAC: "",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data={
+            "ip": "192.168.1.99",
+            "info": {"serial": "MEURAL-DISC-1", "alias": "Hallway"},
+            "driver": DRIVER_MEURAL,
+        },
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    # Host should have been updated to the newly discovered IP.
+    assert entry.data[CONF_HOST] == "192.168.1.99"
+
+
 async def test_dhcp_discovery_matches_existing_entry_aborts(
     hass, make_frame_entry, monkeypatch
 ):

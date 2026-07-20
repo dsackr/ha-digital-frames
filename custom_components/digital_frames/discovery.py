@@ -1,4 +1,4 @@
-"""Periodic background discovery of Fraimic frames on the local network.
+"""Periodic background discovery of frames on the local network.
 
 DHCP discovery (config_flow.async_step_dhcp) only fires when HA happens to
 observe a live DHCP handshake from a matching MAC OUI — a frame with an
@@ -8,6 +8,11 @@ genuinely new frame into HA's standard discovery pipeline
 (SOURCE_INTEGRATION_DISCOVERY), so it surfaces on the Settings → Devices &
 Services "Discovered" card and the "new devices discovered" notification
 exactly like any other discoverable integration.
+
+There is **no shared broadcast protocol** between Fraimic and Meural.
+Discovery is active HTTP probing of the HA host's /24: ``GET /api/info``
+for Fraimic-family frames and ``GET /remote/identify/`` for Meural Canvas
+(local). Same sweep machinery; different per-host probes.
 
 Registered from async_setup (domain-level, alongside the scenes-hub entry),
 so discovery works from the very first restart after install — before any
@@ -19,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
@@ -28,15 +33,25 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN, KIND_SCENES_HUB
+from .const import (
+    CONF_DEVICE_KEY,
+    CONF_DRIVER,
+    CONF_HOST,
+    DOMAIN,
+    DRIVER_FRAIMIC,
+    DRIVER_MEURAL,
+    KIND_SCENES_HUB,
+)
 from .helpers import (
     device_key_from_info,
     get_local_ip,
     match_and_update_entry,
     scan_subnet,
 )
+from .meural import meural_unique_id
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,7 +79,7 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
             except Exception:  # noqa: BLE001
                 # A failed sweep must never kill the timer — the next
                 # interval retries from scratch.
-                _LOGGER.exception("Fraimic background discovery scan failed")
+                _LOGGER.exception("Digital Frames background discovery scan failed")
 
     unsubs: list = []
 
@@ -120,10 +135,47 @@ class DigitalFramesDiscoveryScanView(HomeAssistantView):
         return self.json({"success": True})
 
 
+def _match_and_update_meural(
+    hass: "HomeAssistant",
+    entries: list["ConfigEntry"],
+    ip: str,
+    unique: str,
+) -> "ConfigEntry | None":
+    """Return the configured Meural entry for *unique*/*ip*, updating host if moved."""
+    for entry in entries:
+        if entry.data.get(CONF_DRIVER) != DRIVER_MEURAL:
+            continue
+        entry_key = entry.data.get(CONF_DEVICE_KEY) or ""
+        entry_host = entry.data.get(CONF_HOST)
+        is_same = (entry_key and entry_key == unique) or (entry_host == ip)
+        if not is_same:
+            continue
+        if entry_host != ip or entry_key != unique:
+            _LOGGER.info(
+                "Meural %s moved: %s → %s", unique, entry_host, ip
+            )
+            hass.config_entries.async_update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    CONF_HOST: ip,
+                    CONF_DEVICE_KEY: unique,
+                },
+            )
+        return entry
+    return None
+
+
 async def _async_scan_once(hass: "HomeAssistant") -> None:
-    """One subnet sweep: update moved frames, start flows for new ones."""
+    """One subnet sweep: update moved frames, start flows for new ones.
+
+    Dual-probes Fraimic + Meural (``include_meural=True``). Not a shared
+    broadcast — sequential per-IP HTTP probes on the HA host's /24.
+    """
     local_ip = await hass.async_add_executor_job(get_local_ip)
-    found = await scan_subnet(local_ip, async_get_clientsession(hass))
+    found = await scan_subnet(
+        local_ip, async_get_clientsession(hass), include_meural=True
+    )
     if not found:
         return
 
@@ -134,11 +186,34 @@ async def _async_scan_once(hass: "HomeAssistant") -> None:
     ]
 
     for item in found:
-        ip, info = item["ip"], item["info"]
-        key = device_key_from_info(info)
-        if not key:
-            continue
+        ip: str = item["ip"]
+        info: dict[str, Any] = item["info"]
+        driver = item.get("driver") or DRIVER_FRAIMIC
         try:
+            if driver == DRIVER_MEURAL:
+                unique = meural_unique_id(info, ip)
+                if _match_and_update_meural(
+                    hass, frame_entries, ip, unique
+                ) is not None:
+                    continue
+
+                _LOGGER.info(
+                    "Discovered new Meural at %s (unique_id=%s)", ip, unique
+                )
+                await hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                    data={
+                        "ip": ip,
+                        "info": info,
+                        "driver": DRIVER_MEURAL,
+                    },
+                )
+                continue
+
+            key = device_key_from_info(info)
+            if not key:
+                continue
             # Configured frame (host refreshed in place if it moved)?
             if match_and_update_entry(hass, frame_entries, ip, info) is not None:
                 continue
@@ -152,7 +227,11 @@ async def _async_scan_once(hass: "HomeAssistant") -> None:
             await hass.config_entries.flow.async_init(
                 DOMAIN,
                 context={"source": SOURCE_INTEGRATION_DISCOVERY},
-                data={"ip": ip, "info": info},
+                data={
+                    "ip": ip,
+                    "info": info,
+                    "driver": DRIVER_FRAIMIC,
+                },
             )
         except Exception:  # noqa: BLE001
             # One bad frame (e.g. it went to sleep mid-probe) must not
