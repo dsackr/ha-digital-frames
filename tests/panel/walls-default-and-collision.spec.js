@@ -159,7 +159,7 @@ test.describe('Default wall collision and keyboard nudge', () => {
       const root = document.getElementById('panel').shadowRoot;
       [...root.querySelectorAll('.wall-tile')]
         .find((t) => t.dataset.entryId === 'entry_1')
-        .querySelector('.tile-remove-btn').click();
+        .querySelector('.wall-tile-quadrant[data-action="remove-tile"]').click();
     });
 
     // Gone from the canvas, back in the palette.

@@ -116,6 +116,7 @@ function createMockServer({
   const installCalls = []; // { pack_id, config } per /scene_packs/:id/install POST
   const cropSaves = []; // { image_id, width, height, crop_box } per /library/crop POST
   const cropDeletes = []; // { image_id, width, height } per /library/crop DELETE
+  const reloadCalls = []; // { entry_id } per /frame/reload POST
   let updateState = {
     installed: '0.12.100',
     running: '0.12.100',
@@ -195,6 +196,7 @@ function createMockServer({
     optionsInit: (flowId) => ({
       type: 'form', flow_id: flowId, handler: 'entry_1', step_id: 'init',
       data_schema: [
+        { name: 'resolution', type: 'select', optional: true, default: '13.3', options: [['13.3', '13.3 inch e-ink'], ['7.3', '7.3 inch e-ink']] },
         { name: 'scan_interval', type: 'integer', valueMin: 30, optional: true, default: 300 },
         { name: 'rotation_edge', type: 'select', optional: true, default: 'left', options: [['left', 'Left edge up (Fraimic default)'], ['right', 'Right edge up']] },
         { name: 'rotate_portrait_180', type: 'boolean', optional: true, default: false },
@@ -281,6 +283,11 @@ function createMockServer({
       return json(res, 200, { frames });
     }
     if (p === '/api/digital_frames/discovery/scan' && req.method === 'POST') {
+      return json(res, 200, { success: true });
+    }
+    if (p === '/api/digital_frames/frame/reload' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      reloadCalls.push(body || {});
       return json(res, 200, { success: true });
     }
     if (p === '/api/digital_frames/onboarding') {
@@ -705,6 +712,7 @@ function createMockServer({
     flowSubmissions,
     flowDeletes,
     entryDeletes,
+    reloadCalls,
     get scenes() { return sceneList; },
     get schedules() { return scheduleList; },
     get skills() { return skillList; },

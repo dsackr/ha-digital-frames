@@ -106,7 +106,7 @@ test('clicking the remove button on a placed tile removes it from the canvas', a
   // Click the remove button
   await page.evaluate(() => {
     const root = document.getElementById('panel').shadowRoot;
-    const btn = root.querySelector('.tile-remove-btn');
+    const btn = root.querySelector('.wall-tile-quadrant[data-action="remove-tile"]');
     btn.click();
   });
   await page.waitForTimeout(200);

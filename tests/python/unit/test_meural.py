@@ -511,3 +511,41 @@ async def test_redisplay_prefers_library_image_id():
     library.async_get_bin_for_send.assert_awaited_once()
     send.assert_awaited_once_with(b"\xff\xd8\xfffromlib")
     set_last.assert_awaited_once()
+
+
+def test_encode_jpeg_preserves_exif_metadata():
+    """Verify that JPEG encoding preserves original EXIF metadata but resets Orientation to 1."""
+    from PIL import Image as PILImage
+    import io
+
+    # Create a source JPEG with EXIF metadata (Artist="Test Artist", Orientation=6)
+    src_img = PILImage.new("RGB", (400, 300), (200, 50, 50))
+    src_exif = src_img.getexif()
+    src_exif[315] = "Antigravity Test Artist"  # Artist tag
+    src_exif[274] = 6  # Orientation tag: 6 means rotate 90 CW
+
+    src_buf = io.BytesIO()
+    src_img.save(src_buf, format="JPEG", exif=src_exif)
+    src_bytes = src_buf.getvalue()
+
+    # Encode for Meural panel (jpeg_q90 codec)
+    out_bytes = encode_for_panel(
+        src_bytes,
+        400,
+        300,
+        0,
+        False,
+        "fast",
+        None,
+        CODEC_JPEG_Q90,
+    )
+
+    # Decode encoded bytes and verify EXIF properties
+    with PILImage.open(io.BytesIO(out_bytes)) as out_img:
+        out_exif = out_img.getexif()
+        assert out_exif is not None
+        # Verify Artist is preserved
+        assert out_exif.get(315) == "Antigravity Test Artist"
+        # Verify Orientation tag was reset to 1 (normal)
+        assert out_exif.get(274) == 1
+

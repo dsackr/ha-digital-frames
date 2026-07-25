@@ -192,10 +192,11 @@ test.describe('Embedded flow renderer', () => {
 
     const state = await flowModalState(page);
     expect(state.fields).toEqual([
-      expect.objectContaining({ name: 'scan_interval', type: 'integer', inputType: 'number', value: '300', min: '30' }),
-      expect.objectContaining({ name: 'rotation_edge', type: 'select', value: 'left' }),
+      expect.objectContaining({ name: 'resolution', type: 'select', value: '13.3' }),
       expect.objectContaining({ name: 'rotate_portrait_180', type: 'boolean', inputType: 'checkbox', value: false }),
       expect.objectContaining({ name: 'rotate_landscape_180', type: 'boolean', value: false }),
+      expect.objectContaining({ name: 'scan_interval', type: 'integer', inputType: 'number', value: '300', min: '30' }),
+      expect.objectContaining({ name: 'rotation_edge', type: 'select', value: 'left' }),
     ]);
 
     await setFlowField(page, 'scan_interval', '120');
@@ -206,6 +207,7 @@ test.describe('Embedded flow renderer', () => {
 
     // Types must survive collection: integer as number, booleans as booleans.
     expect(mockServer.flowSubmissions[0].body).toEqual({
+      resolution: '13.3',
       scan_interval: 120,
       rotation_edge: 'right',
       rotate_portrait_180: true,

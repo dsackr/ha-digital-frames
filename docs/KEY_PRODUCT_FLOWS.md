@@ -60,9 +60,11 @@ frame moved; pending flows dedup via `unique_id`.
   (background sweep starts Meural discovery flow / skips configured).
 
 ## 2. Options flow (scan interval, size, orientation edge, 180° flip)
-User edits a frame's scan interval, physical size, hanging edge, and
-180°-rotation flags via HA's Configure dialog.
-- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`).
+User edits a frame's scan interval, physical size (renamed to Frame Type), hanging edge, and
+180°-rotation flags (renamed to Flip Portrait/Landscape Image) via HA's Configure dialog.
+Advanced settings (scan interval, hanging edge) and actions (Reconnect Frame, Remove from HA)
+are collapsed under an expandable Advanced Settings section in the Configure modal.
+- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`).
 - **If it silently breaks**: settings don't stick, or the orientation lock
   resets when saving an unrelated field.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`). **Backend-tested** —
@@ -442,13 +444,16 @@ still rmtree's leftover addon dirs.
 User arranges a subset of frames on a free-form canvas mirroring how
 they're physically hung; custom walls and a default "All Frames" wall are
 selected via visual picker tiles, and the default wall self-syncs with
-configured frames. An "Align Wall to Grid" option allows users to snap all
+configured frames. Hovering over a frame tile displays a translucent overlay
+with four corner quadrants for quick actions: selecting an image, removing the tile
+from the wall, viewing frame info (name, IP, orientation, battery percentage), or configuring the
+frame. An "Align Wall to Grid" option allows users to snap all
 placed frames on a wall to a clean structured layout. When aligning selected
 frames, if they would overlap each other, they are automatically spaced out
 along the other axis rather than producing a collision error.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
   `async_ensure_default_wall`, `async_prune_entry`), `walls_http.py`,
-  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`).
+  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`).
 - **If it silently breaks**: removed/re-added frames haunt old layouts,
   the default wall stops tracking newly-added frames, or alignment features
   produce layout overlaps or throw unexpected error banners. A real bug
@@ -786,7 +791,10 @@ User adds a NETGEAR Meural by LAN IP (no Meural cloud account). The frame
 gets a `driver=meural` config entry, JPEG codec (`jpeg_q90`), and
 participates in walls, scenes, library send, and raw upload like Fraimic
 frames. Images are delivered via the local `/remote/postcard` multipart
-API. Sleep-queue does not apply (send resumes the display if suspended).
+API (preserving original EXIF metadata like Artist/Title, with the EXIF Orientation
+tag reset to 1 to prevent double-rotation, allowing the on-screen photo info card
+to display details correctly when waving up). Sleep-queue does not apply
+(send resumes the display if suspended).
 Meural has no battery sensor — the dashboard and send APIs identify the
 frame by its `_ip` sensor (same fallback as `battery_entity_id` on
 `GET /api/digital_frames/frames`).
@@ -850,7 +858,8 @@ artwork, shuffle, media browser, membership gallery sync.
   `async_redisplay_last()` itself only when they're identical, leaving the
   listener as the sole trigger for every actual change.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_meural.py` (JPEG, orientation, follow-device,
+  `tests/python/unit/test_meural.py` (JPEG codec preserving EXIF metadata with
+  Orientation reset to 1, orientation, follow-device,
   system stats parse, suspend/backlight command mapping, orientation
   change persists options without redisplaying directly,
   `_async_update_listener` redisplays exactly once per real orientation

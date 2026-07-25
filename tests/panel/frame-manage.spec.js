@@ -9,8 +9,8 @@ const { createMockServer } = require('./fixtures/mock-server');
 const { gotoPanel, clickPanelButton } = require('./fixtures/panel-page');
 
 const FRAMES = [
-  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'auto' },
-  { entry_id: 'entry_2', title: 'Office Frame', width: 800, height: 480, orientation: 'auto' },
+  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10' },
+  { entry_id: 'entry_2', title: 'Office Frame', width: 800, height: 480, orientation: 'landscape', host: '192.168.1.20' },
 ];
 
 const DISCOVERED_FLOW = {
@@ -20,18 +20,29 @@ const DISCOVERED_FLOW = {
   step_id: 'name_device',
 };
 
-async function openGearFor(page, entryId) {
-  // The manage gear lives on the frame's wall-tile footer (every frame is
-  // placed on the default wall).
+async function openInfoFor(page, entryId) {
   await page.waitForFunction((id) => {
     const root = document.getElementById('panel').shadowRoot;
     const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
-    return tile && tile.querySelector('.wall-tile-gear');
+    return tile && tile.querySelector('.wall-tile-quadrant[data-action="info"]');
   }, entryId, { timeout: 5000 });
   await page.evaluate((id) => {
     const root = document.getElementById('panel').shadowRoot;
     const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
-    tile.querySelector('.wall-tile-gear').click();
+    tile.querySelector('.wall-tile-quadrant[data-action="info"]').click();
+  }, entryId);
+}
+
+async function openConfigureFor(page, entryId) {
+  await page.waitForFunction((id) => {
+    const root = document.getElementById('panel').shadowRoot;
+    const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
+    return tile && tile.querySelector('.wall-tile-quadrant[data-action="configure"]');
+  }, entryId, { timeout: 5000 });
+  await page.evaluate((id) => {
+    const root = document.getElementById('panel').shadowRoot;
+    const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
+    tile.querySelector('.wall-tile-quadrant[data-action="configure"]').click();
   }, entryId);
 }
 
@@ -51,10 +62,24 @@ test.describe('Frame management and discovery banner', () => {
     await mockServer.stop();
   });
 
-  test('gear → rename issues config_entries/update with the new title', async ({ page }) => {
+  test('info overlay → rename issues config_entries/update with the new title', async ({ page }) => {
     await gotoPanel(page, baseUrl, { frames: FRAMES });
 
-    await openGearFor(page, 'entry_1');
+    await openInfoFor(page, 'entry_1');
+
+    // Assert details are displayed correctly
+    const details = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        ip: root.getElementById('frame-info-ip').textContent,
+        orientation: root.getElementById('frame-info-orientation').textContent,
+        battery: root.getElementById('frame-info-battery').textContent,
+      };
+    });
+    expect(details.ip).toBe('192.168.1.10');
+    expect(details.orientation).toBe('Portrait');
+    expect(details.battery).toBe('90%');
+
     await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       root.getElementById('frame-settings-name').value = 'Kitchen Frame';
@@ -71,28 +96,99 @@ test.describe('Frame management and discovery banner', () => {
     ]);
   });
 
-  test('gear → remove confirms then DELETEs the config entry', async ({ page }) => {
+  test('configure options flow modal → advanced settings collapsible toggle works', async ({ page }) => {
     await gotoPanel(page, baseUrl, { frames: FRAMES });
 
-    await openGearFor(page, 'entry_2');
-    page.once('dialog', (dialog) => dialog.accept());
-    await clickPanelButton(page, 'frame-settings-remove');
-
-    await expect.poll(() => mockServer.entryDeletes).toEqual(['entry_2']);
-  });
-
-  test('gear → configure opens the options flow for that entry', async ({ page }) => {
-    await gotoPanel(page, baseUrl, { frames: FRAMES });
-
-    await openGearFor(page, 'entry_1');
-    await clickPanelButton(page, 'frame-settings-configure');
+    await openConfigureFor(page, 'entry_1');
 
     await page.waitForFunction(() => {
       const panel = document.getElementById('panel');
       return panel._flowModal && panel._flowModal.step && panel._flowModal.step.step_id === 'init';
     }, { timeout: 5000 });
-    // The options flow was started against the right entry.
-    expect(mockServer.requestLog).toContain('POST /api/config/config_entries/options/flow');
+
+    // Assert resolution / Frame Type is standard (not hidden)
+    const isResolutionVisible = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const el = root.getElementById('flow-field-resolution');
+      return el && el.offsetParent !== null;
+    });
+    expect(isResolutionVisible).toBe(true);
+
+    // Assert scan_interval and rotation_edge are hidden initially
+    const isScanIntervalVisibleBefore = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const el = root.getElementById('flow-field-scan_interval');
+      return el && el.offsetParent !== null;
+    });
+    expect(isScanIntervalVisibleBefore).toBe(false);
+
+    // Click the Advanced Settings link to expand it
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const toggle = root.querySelector('.options-advanced-toggle');
+      toggle.click();
+    });
+
+    // Assert scan_interval and rotation_edge are visible after clicking toggle
+    const isScanIntervalVisibleAfter = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const el = root.getElementById('flow-field-scan_interval');
+      return el && el.offsetParent !== null;
+    });
+    expect(isScanIntervalVisibleAfter).toBe(true);
+  });
+
+  test('configure options flow modal → reconnect and remove actions inside advanced options work', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+
+    // 1. Reconnect action
+    await openConfigureFor(page, 'entry_1');
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('panel');
+      return panel._flowModal && panel._flowModal.step && panel._flowModal.step.step_id === 'init';
+    }, { timeout: 5000 });
+
+    // Click advanced toggle to make reconnect button clickable
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.querySelector('.options-advanced-toggle').click();
+    });
+
+    // Click reconnect
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const btns = [...root.querySelectorAll('.options-advanced-actions button')];
+      const reconnectBtn = btns.find(b => b.textContent === 'Reconnect Frame');
+      reconnectBtn.click();
+    });
+
+    // Expect the mock reload endpoint to have been called
+    await expect.poll(() => mockServer.reloadCalls).toEqual([{ entry_id: 'entry_1' }]);
+
+    // 2. Remove action
+    await openConfigureFor(page, 'entry_2');
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('panel');
+      return panel._flowModal && panel._flowModal.step && panel._flowModal.step.step_id === 'init';
+    }, { timeout: 5000 });
+
+    // Click advanced toggle
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.querySelector('.options-advanced-toggle').click();
+    });
+
+    // Accept confirmation and click remove
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const btns = [...root.querySelectorAll('.options-advanced-actions button')];
+      const removeBtn = btns.find(b => b.textContent === 'Remove from HA');
+      removeBtn.click();
+    });
+
+    // Expect the mock entry delete endpoint to have been called
+    await expect.poll(() => mockServer.entryDeletes).toEqual(['entry_2']);
   });
 
   test('the banner renders discovered flows and its Add resumes that flow_id', async ({ page }) => {
@@ -170,15 +266,15 @@ test.describe('Frame management and discovery banner', () => {
       const root = document.getElementById('panel').shadowRoot;
       return {
         addBtn: root.getElementById('frame-add-btn').style.display,
-        // Non-admin tiles are rendered without a gear at all.
-        gearCount: root.querySelectorAll('.wall-tile-gear').length,
+        // Non-admin tiles are rendered without a hover overlay.
+        overlayCount: root.querySelectorAll('.wall-tile-hover-overlay').length,
         tileCount: root.querySelectorAll('.wall-tile').length,
         banner: root.getElementById('discovery-banner').style.display,
       };
     });
     expect(visibility.addBtn).toBe('none');
     expect(visibility.tileCount).toBe(2);
-    expect(visibility.gearCount).toBe(0);
+    expect(visibility.overlayCount).toBe(0);
     expect(visibility.banner).toBe('none');
     expect(pageErrors).toEqual([]);
   });

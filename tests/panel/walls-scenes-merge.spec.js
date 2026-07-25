@@ -75,7 +75,7 @@ test.describe('Scenes tab is the wall canvas', () => {
       return {
         tiles: [...root.querySelectorAll('.wall-tile')].map((t) => t.dataset.entryId),
         paletteItems: root.querySelectorAll('.wall-palette-item').length,
-        removeBtns: root.querySelectorAll('.tile-remove-btn').length,
+        removeBtns: root.querySelectorAll('.wall-tile-quadrant[data-action="remove-tile"]').length,
         deleteBtnHidden: root.getElementById('wall-delete-btn').style.display === 'none',
         saveLayoutBtn: root.getElementById('wall-save-layout-btn'),
       };

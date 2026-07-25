@@ -16,8 +16,11 @@ so there is one named place where codec selection is owned.
 from __future__ import annotations
 
 import io
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+_LOGGER = logging.getLogger(__name__)
 
 from .const import (
     CONF_DRIVER,
@@ -182,10 +185,33 @@ def _encode_jpeg_bytes(
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     quality: int = 90,
 ) -> bytes:
-    """Compose *source_bytes* to *width*×*height* and encode JPEG."""
+    """Compose *source_bytes* to *width*×*height* and encode JPEG, preserving EXIF metadata."""
+    from PIL import Image as PILImage, ExifTags  # noqa: PLC0415
+
     image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box)
     buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=quality, optimize=True)
+
+    # Extract EXIF from original source_bytes if present to display info card on Meural
+    exif = None
+    try:
+        with PILImage.open(io.BytesIO(source_bytes)) as original:
+            exif = original.getexif()
+            if exif:
+                # Find the Orientation tag key and reset it to 1 (normal)
+                # to prevent double-rotation since we physically rotate the pixel canvas.
+                orientation_key = next(
+                    (k for k, v in ExifTags.TAGS.items() if v == "Orientation"), None
+                )
+                if orientation_key and orientation_key in exif:
+                    exif[orientation_key] = 1
+    except Exception as err:
+        _LOGGER.warning("Could not read EXIF metadata from source image: %s", err)
+
+    if exif:
+        image.save(buf, format="JPEG", quality=quality, optimize=True, exif=exif)
+    else:
+        image.save(buf, format="JPEG", quality=quality, optimize=True)
+
     return buf.getvalue()
 
 

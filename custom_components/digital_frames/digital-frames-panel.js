@@ -1952,6 +1952,89 @@
       transform: scale(1.2);
       margin-right: auto;
     }
+
+    /* ---- Virtual Wall Hover Overlay ---- */
+    .wall-tile-hover-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.75);
+      display: grid;
+      grid-template: 1fr 1fr / 1fr 1fr;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      z-index: 5;
+      pointer-events: none;
+    }
+    .wall-tile:hover .wall-tile-hover-overlay {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .wall-tile.dragging .wall-tile-hover-overlay {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+    .wall-tile-quadrant {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: rgba(255, 255, 255, 0.7);
+      transition: color 0.15s ease, background-color 0.15s ease;
+      box-sizing: border-box;
+    }
+    .wall-tile-quadrant:hover {
+      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+    .wall-tile-quadrant svg {
+      width: 20px;
+      height: 20px;
+      transition: transform 0.15s ease;
+    }
+    .wall-tile-quadrant:hover svg {
+      transform: scale(1.15);
+    }
+    .wall-tile-quadrant[data-action="select-image"] {
+      border-right: 1px solid rgba(255, 255, 255, 0.15);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .wall-tile-quadrant[data-action="remove-tile"] {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .wall-tile-quadrant[data-action="info"] {
+      border-right: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    /* ---- Advanced Options in Options Flow ---- */
+    .options-advanced-toggle {
+      color: var(--primary-color, #3b82f6);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      margin: 12px 0 8px 0;
+      user-select: none;
+      display: inline-block;
+    }
+    .options-advanced-toggle:hover {
+      text-decoration: underline;
+    }
+    .options-advanced-fields {
+      border-top: 1px dashed var(--divider-color, rgba(0,0,0,.15));
+      padding-top: 12px;
+      margin-top: 8px;
+    }
+    .options-advanced-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .btn-danger {
+      background: #ef4444 !important;
+      color: #ffffff !important;
+    }
+    .btn-danger:hover {
+      background: #dc2626 !important;
+    }
   `;
 
   // -------------------------------------------------------------------------
@@ -2884,17 +2967,26 @@
              the flow modal above. -->
         <div class="modal-overlay" id="frame-settings-overlay">
           <div class="modal-box" style="max-width:440px">
-            <h3 id="frame-settings-title">Frame Settings</h3>
+            <h3 id="frame-settings-title">Frame Information</h3>
             <div class="modal-row">
               <label>Name</label>
               <input type="text" id="frame-settings-name">
             </div>
+            <div class="modal-row">
+              <label>IP Address</label>
+              <span id="frame-info-ip" style="color:var(--secondary-text-color)"></span>
+            </div>
+            <div class="modal-row">
+              <label>Orientation</label>
+              <span id="frame-info-orientation" style="color:var(--secondary-text-color)"></span>
+            </div>
+            <div class="modal-row">
+              <label>Battery</label>
+              <span id="frame-info-battery" style="color:var(--secondary-text-color)"></span>
+            </div>
             <div class="feedback" id="frame-settings-fb"></div>
             <div class="modal-actions" style="flex-wrap:wrap">
               <button class="btn-primary" id="frame-settings-rename">Save Name</button>
-              <button class="btn-ghost" id="frame-settings-configure">⚙ Configure…</button>
-              <button class="btn-ghost" id="frame-settings-reload" title="Reload this frame's integration">🔄 Reload</button>
-              <button class="btn-ghost" id="frame-settings-remove">🗑 Remove</button>
               <button class="btn-ghost" id="frame-settings-close">Close</button>
             </div>
           </div>
@@ -3552,8 +3644,103 @@
       }
 
       const errors = result.errors || {};
-      for (const field of (result.data_schema || [])) {
-        body.appendChild(this._buildFlowField(field, stepKey, errors[field.name]));
+      if (category === 'options' && result.step_id === 'init') {
+        const standardContainer = document.createElement('div');
+        standardContainer.className = 'options-standard-fields';
+
+        const advancedToggle = document.createElement('div');
+        advancedToggle.className = 'options-advanced-toggle';
+        advancedToggle.textContent = '▸ Advanced Settings';
+
+        const advancedContainer = document.createElement('div');
+        advancedContainer.className = 'options-advanced-fields';
+        advancedContainer.style.display = 'none';
+
+        advancedToggle.addEventListener('click', () => {
+          if (advancedContainer.style.display === 'none') {
+            advancedContainer.style.display = 'block';
+            advancedToggle.textContent = '▾ Advanced Settings';
+          } else {
+            advancedContainer.style.display = 'none';
+            advancedToggle.textContent = '▸ Advanced Settings';
+          }
+        });
+
+        for (const field of (result.data_schema || [])) {
+          const fieldEl = this._buildFlowField(field, stepKey, errors[field.name]);
+          if (field.name === 'scan_interval' || field.name === 'rotation_edge') {
+            advancedContainer.appendChild(fieldEl);
+          } else {
+            standardContainer.appendChild(fieldEl);
+          }
+        }
+
+        body.appendChild(standardContainer);
+        body.appendChild(advancedToggle);
+
+        // Add Reconnect and Remove buttons inside advanced container
+        const actionRow = document.createElement('div');
+        actionRow.className = 'options-advanced-actions';
+
+        const reconnectBtn = document.createElement('button');
+        reconnectBtn.type = 'button';
+        reconnectBtn.className = 'btn-ghost';
+        reconnectBtn.textContent = 'Reconnect Frame';
+        reconnectBtn.addEventListener('click', async (e) => {
+          const frame = this._frameSettingsTarget;
+          if (!frame) return;
+          e.target.disabled = true;
+          const oldText = e.target.textContent;
+          e.target.textContent = 'Reconnecting…';
+          try {
+            const resp = await fetch('/api/digital_frames/frame/reload', {
+              method: 'POST',
+              headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ entry_id: frame.entryId }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            this._closeFlowModal();
+            await this._refreshAfterEntryChange();
+          } catch (err) {
+            this._showFlowError(`Reconnect failed: ${err.message}`);
+          } finally {
+            e.target.disabled = false;
+            e.target.textContent = oldText;
+          }
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-ghost btn-danger';
+        removeBtn.textContent = 'Remove from HA';
+        removeBtn.style.marginLeft = '8px';
+        removeBtn.addEventListener('click', async (e) => {
+          const frame = this._frameSettingsTarget;
+          if (!frame) return;
+          if (!window.confirm(`Remove "${frame.title}" from Home Assistant? Its images and scenes stay in the library.`)) return;
+          e.target.disabled = true;
+          try {
+            await this._flowRequest(
+              'DELETE', `/api/config/config_entries/entry/${frame.entryId}`
+            );
+            this._closeFlowModal();
+            await this._refreshAfterEntryChange();
+          } catch (err) {
+            this._showFlowError(`Remove failed: ${err.message}`);
+          } finally {
+            e.target.disabled = false;
+          }
+        });
+
+        actionRow.appendChild(reconnectBtn);
+        actionRow.appendChild(removeBtn);
+        advancedContainer.appendChild(actionRow);
+
+        body.appendChild(advancedContainer);
+      } else {
+        for (const field of (result.data_schema || [])) {
+          body.appendChild(this._buildFlowField(field, stepKey, errors[field.name]));
+        }
       }
       if (errors.base) {
         this._showFlowError(this._flowText(`${keyBase}.error.${errors.base}`, errors.base));
@@ -3748,64 +3935,6 @@
           } catch (err) {
             fb.className = 'feedback err';
             fb.textContent = `Rename failed: ${err.message || err.code || err}`;
-            fb.style.display = 'block';
-          } finally {
-            e.target.disabled = false;
-          }
-        });
-
-      this.shadowRoot.getElementById('frame-settings-configure')
-        .addEventListener('click', () => {
-          const frame = this._frameSettingsTarget;
-          if (!frame) return;
-          close();
-          this._openFlowModal({
-            title: `Configure ${frame.title}`,
-            base: '/api/config/config_entries/options/flow',
-            start: () => this._startOptionsFlow(frame.entryId),
-            userInitiated: true,
-            onDone: () => this._refreshAfterEntryChange(),
-          });
-        });
-
-      this.shadowRoot.getElementById('frame-settings-reload')
-        .addEventListener('click', async (e) => {
-          const frame = this._frameSettingsTarget;
-          if (!frame) return;
-          e.target.disabled = true;
-          try {
-            const resp = await fetch('/api/digital_frames/frame/reload', {
-              method: 'POST',
-              headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ entry_id: frame.entryId }),
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            close();
-            await this._refreshAfterEntryChange();
-          } catch (err) {
-            fb.className = 'feedback err';
-            fb.textContent = `Reload failed: ${err.message}`;
-            fb.style.display = 'block';
-          } finally {
-            e.target.disabled = false;
-          }
-        });
-
-      this.shadowRoot.getElementById('frame-settings-remove')
-        .addEventListener('click', async (e) => {
-          const frame = this._frameSettingsTarget;
-          if (!frame) return;
-          if (!window.confirm(`Remove "${frame.title}" from Home Assistant? Its images and scenes stay in the library.`)) return;
-          e.target.disabled = true;
-          try {
-            await this._flowRequest(
-              'DELETE', `/api/config/config_entries/entry/${frame.entryId}`
-            );
-            close();
-            await this._refreshAfterEntryChange();
-          } catch (err) {
-            fb.className = 'feedback err';
-            fb.textContent = `Remove failed: ${err.message}`;
             fb.style.display = 'block';
           } finally {
             e.target.disabled = false;
@@ -4082,11 +4211,38 @@
 
     _openFrameSettingsMenu(frame) {
       this._frameSettingsTarget = frame;
-      this.shadowRoot.getElementById('frame-settings-title').textContent = frame.title;
+      this.shadowRoot.getElementById('frame-settings-title').textContent = 'Frame Information';
       this.shadowRoot.getElementById('frame-settings-name').value = frame.title;
+
+      this.shadowRoot.getElementById('frame-info-ip').textContent = frame.host || 'Unknown';
+
+      const orient = frame.orientation ? (frame.orientation.charAt(0).toUpperCase() + frame.orientation.slice(1)) : 'Auto';
+      this.shadowRoot.getElementById('frame-info-orientation').textContent = orient;
+
+      const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
+      let batteryText = 'N/A';
+      if (state && state.state !== 'unavailable' && state.state !== 'unknown') {
+        const pct = parseFloat(state.state);
+        if (!isNaN(pct)) {
+          batteryText = `${pct}%`;
+        }
+      }
+      this.shadowRoot.getElementById('frame-info-battery').textContent = batteryText;
+
       const fb = this.shadowRoot.getElementById('frame-settings-fb');
       fb.style.display = 'none';
       this.shadowRoot.getElementById('frame-settings-overlay').style.display = 'flex';
+    }
+
+    _openFrameConfigureFlow(frame) {
+      this._frameSettingsTarget = frame;
+      this._openFlowModal({
+        title: `Configure ${frame.title}`,
+        base: '/api/config/config_entries/options/flow',
+        start: () => this._startOptionsFlow(frame.entryId),
+        userInitiated: true,
+        onDone: () => this._refreshAfterEntryChange(),
+      });
     }
 
     // -----------------------------------------------------------------------
@@ -7457,8 +7613,7 @@
 
         this._renderWallTileContent(tile, entryId, frame);
 
-        // Footer: the frame's name, live status, and (for admins) the
-        // manage gear -- the consolidated dashboard's per-frame surface.
+        // Footer: the frame's name and live status.
         const footer = document.createElement('div');
         footer.className = 'wall-tile-footer';
         const nameEl = document.createElement('span');
@@ -7469,34 +7624,82 @@
         statusEl.className = 'wall-tile-status';
         statusEl.dataset.statusEntity = frame.entityId;
         footer.appendChild(statusEl);
+        tile.appendChild(footer);
+
+        // Hover overlay with 4 corner quadrants (Admin only)
         if (this._isAdmin()) {
-          const gear = document.createElement('button');
-          gear.className = 'wall-tile-gear';
-          gear.textContent = '⚙';
-          gear.title = 'Frame settings';
-          gear.addEventListener('pointerdown', (e) => e.stopPropagation());
-          gear.addEventListener('click', (e) => {
+          const overlay = document.createElement('div');
+          overlay.className = 'wall-tile-hover-overlay';
+
+          const qSelect = document.createElement('div');
+          qSelect.className = 'wall-tile-quadrant';
+          qSelect.dataset.action = 'select-image';
+          qSelect.title = 'Select image';
+          qSelect.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          `;
+          qSelect.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._wallSelectTile(entryId);
+            this._openWallImagePicker(entryId);
+          });
+
+          const qRemove = document.createElement('div');
+          qRemove.className = 'wall-tile-quadrant';
+          qRemove.dataset.action = 'remove-tile';
+          qRemove.title = 'Remove frame from wall';
+          qRemove.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          `;
+          qRemove.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._removeTileFromWall(entryId);
+          });
+
+          const qInfo = document.createElement('div');
+          qInfo.className = 'wall-tile-quadrant';
+          qInfo.dataset.action = 'info';
+          qInfo.title = 'Frame information';
+          qInfo.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+          `;
+          qInfo.addEventListener('click', (e) => {
             e.stopPropagation();
             this._openFrameSettingsMenu(frame);
           });
-          footer.appendChild(gear);
-        }
-        tile.appendChild(footer);
 
-        // Removable from every wall -- default included, where the removal
-        // is tombstoned so the auto-sync doesn't re-add it (the frame goes
-        // back to the palette instead). Dragging the tile off the canvas
-        // does the same thing.
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'tile-remove-btn';
-        removeBtn.innerHTML = '✕';
-        removeBtn.title = 'Remove frame from wall';
-        removeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-        removeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._removeTileFromWall(entryId);
-        });
-        tile.appendChild(removeBtn);
+          const qConfig = document.createElement('div');
+          qConfig.className = 'wall-tile-quadrant';
+          qConfig.dataset.action = 'configure';
+          qConfig.title = 'Configure frame';
+          qConfig.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          `;
+          qConfig.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._openFrameConfigureFlow(frame);
+          });
+
+          overlay.appendChild(qSelect);
+          overlay.appendChild(qRemove);
+          overlay.appendChild(qInfo);
+          overlay.appendChild(qConfig);
+          tile.appendChild(overlay);
+        }
 
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
       }
@@ -7939,8 +8142,31 @@
         // the same as a placed tile: a frame works the same on or off the
         // wall, so clicking either one always means "choose its image,"
         // never "place it here."
-        if (drag.kind === 'tile') this._wallSelectTile(drag.entryId);
-        this._openWallImagePicker(drag.entryId);
+        if (drag.kind === 'tile') {
+          if (!this._isAdmin()) return;
+          const target = e.composedPath()[0];
+          const quadrant = target.closest && target.closest('.wall-tile-quadrant');
+          if (quadrant) {
+            const action = quadrant.dataset.action;
+            const frame = this._frames.find(f => f.entryId === drag.entryId);
+            if (action === 'select-image') {
+              this._wallSelectTile(drag.entryId);
+              this._openWallImagePicker(drag.entryId);
+            } else if (action === 'remove-tile') {
+              this._removeTileFromWall(drag.entryId);
+            } else if (action === 'info') {
+              this._openFrameSettingsMenu(frame);
+            } else if (action === 'configure') {
+              this._openFrameConfigureFlow(frame);
+            }
+            return;
+          }
+          // Default fallback
+          this._wallSelectTile(drag.entryId);
+          this._openWallImagePicker(drag.entryId);
+        } else {
+          this._openWallImagePicker(drag.entryId);
+        }
         return;
       }
 

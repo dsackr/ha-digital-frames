@@ -68,12 +68,12 @@ test.describe('Consolidated dashboard', () => {
       return {
         name: tile.querySelector('.wall-tile-name').textContent,
         status: tile.querySelector('.wall-tile-status').textContent,
-        hasGear: !!tile.querySelector('.wall-tile-gear'),
+        hasHoverOverlay: !!tile.querySelector('.wall-tile-hover-overlay'),
       };
     });
     expect(footer.name).toBe('Living Room Frame');
     expect(footer.status).toContain('🔋90%');   // battery from the mock hass state
-    expect(footer.hasGear).toBe(true);
+    expect(footer.hasHoverOverlay).toBe(true);
   });
 
   test('Manage Library opens as a modal and the upload sub-modal stacks above it', async ({ page }) => {
