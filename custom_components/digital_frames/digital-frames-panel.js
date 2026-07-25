@@ -7728,6 +7728,7 @@
             </svg>
           `;
           qSelect.addEventListener('click', (e) => {
+            if (e.shiftKey || e.ctrlKey || e.metaKey) return;
             e.stopPropagation();
             this._wallSelectTile(entryId);
             this._openWallImagePicker(entryId);
@@ -7744,6 +7745,7 @@
             </svg>
           `;
           qRemove.addEventListener('click', (e) => {
+            if (e.shiftKey || e.ctrlKey || e.metaKey) return;
             e.stopPropagation();
             this._removeTileFromWall(entryId);
           });
@@ -7760,6 +7762,7 @@
             </svg>
           `;
           qInfo.addEventListener('click', (e) => {
+            if (e.shiftKey || e.ctrlKey || e.metaKey) return;
             e.stopPropagation();
             this._openFrameSettingsMenu(frame);
           });
@@ -7775,6 +7778,7 @@
             </svg>
           `;
           qConfig.addEventListener('click', (e) => {
+            if (e.shiftKey || e.ctrlKey || e.metaKey) return;
             e.stopPropagation();
             this._openFrameConfigureFlow(frame);
           });

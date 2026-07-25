@@ -103,6 +103,7 @@ test.describe('Wall multi-select, group move, and align', () => {
     await shiftClickTile(page, 'entry_2');
     await clickTile(page, 'entry_3');
     expect(await getSelection(page)).toEqual(['entry_3']);
+    await page.waitForFunction(() => document.getElementById('panel').shadowRoot.getElementById('wall-image-picker-overlay').style.display === 'block', { timeout: 3000 });
     expect(await pickerDisplay(page)).toBe('block');
   });
 
