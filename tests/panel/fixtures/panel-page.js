@@ -85,8 +85,29 @@ async function clickTile(page, entryId) {
     const root = document.getElementById('panel').shadowRoot;
     const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
     const r = tile.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    return { x: r.x + r.width / 4, y: r.y + r.height / 4 };
   }, entryId);
+  await page.mouse.move(box.x, box.y);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
+// Clicks one of the 4 hover-overlay quadrants on a placed tile using real
+// mouse events (move/down/up), the same way the panel's pointerdown/
+// _onWallPointerUp handlers actually see a user's click -- NOT
+// element.click(), which synthesizes a bare 'click' event without ever
+// routing through those handlers and so cannot catch bugs that only
+// manifest via real pointerdown/pointerup (e.g. the `dragging` class --
+// and its `pointer-events: none` on the overlay -- being applied on
+// pointerdown before the click/drag distinction is known).
+async function clickWallTileQuadrant(page, entryId, action) {
+  const box = await page.evaluate(({ id, act }) => {
+    const root = document.getElementById('panel').shadowRoot;
+    const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
+    const q = tile.querySelector(`.wall-tile-quadrant[data-action="${act}"]`);
+    const r = q.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, { id: entryId, act: action });
   await page.mouse.move(box.x, box.y);
   await page.mouse.down();
   await page.mouse.up();
@@ -216,6 +237,7 @@ module.exports = {
   dragFirstPaletteItemTo,
   dragTileBy,
   clickTile,
+  clickWallTileQuadrant,
   clickPaletteItem,
   pickImageInWallPicker,
   getPickerGridImageIds,

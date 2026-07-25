@@ -462,6 +462,17 @@ function createMockServer({
       return json(res, 200, { success: true, image });
     }
 
+    if (p.startsWith('/api/digital_frames/library/image/') && p.endsWith('/orientation_lock')) {
+      const parts = p.split('/');
+      const imageId = parts[parts.length - 2];
+      const parsed = await readJsonBody(req);
+      const image = images.find(img => img.image_id === imageId);
+      if (image) {
+        image.orientation_lock = parsed.orientation_lock;
+      }
+      return json(res, 200, { success: true, image });
+    }
+
     if (p.startsWith('/api/digital_frames/library/image/')) {
       res.writeHead(200, { 'Content-Type': 'image/png' });
       res.end(TINY_PNG);

@@ -173,6 +173,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesLibraryImageAlbumsView,
         DigitalFramesLibraryImageVoiceNameView,
         DigitalFramesLibraryImageTagsView,
+        DigitalFramesLibraryImageOrientationLockView,
         DigitalFramesLibraryImageView,
         DigitalFramesLibraryListView,
         DigitalFramesLibrarySendView,
@@ -187,6 +188,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesLibraryImageAlbumsView())
     hass.http.register_view(DigitalFramesLibraryImageVoiceNameView())
     hass.http.register_view(DigitalFramesLibraryImageTagsView())
+    hass.http.register_view(DigitalFramesLibraryImageOrientationLockView())
     hass.http.register_view(DigitalFramesLibrarySendView())
     hass.http.register_view(DigitalFramesLibraryCropView())
     hass.http.register_view(DigitalFramesLibraryAlbumsView())

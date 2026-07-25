@@ -266,6 +266,8 @@ class LibraryImage:
     voice_name: str | None = None
     # User-defined tags for categorizing/matching.
     tags: list[str] = field(default_factory=list)
+    # Orientation lock compatibility restriction.
+    orientation_lock: str = "unlocked"
 
     def has_resolution(self, width: int, height: int) -> bool:
         return [width, height] in self.resolutions
@@ -281,20 +283,36 @@ class LibraryImage:
             "albums": self.albums,
             "voice_name": self.voice_name,
             "tags": self.tags,
+            "orientation_lock": self.orientation_lock,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LibraryImage":
+        raw_crops = data.get("crops", {})
+        crops = dict(raw_crops)
+        for key, crop_box in list(raw_crops.items()):
+            if "x" in key:
+                try:
+                    w_str, h_str = key.split("x")
+                    w, h = int(w_str), int(h_str)
+                    ratio_val = round(w / h, 4)
+                    ratio_key = f"ratio:{ratio_val:.4f}"
+                    if ratio_key not in crops:
+                        crops[ratio_key] = crop_box
+                except (ValueError, IndexError):
+                    pass
+
         return cls(
             image_id=data["image_id"],
             filename=data["filename"],
             uploaded_at=data["uploaded_at"],
             content_type=data.get("content_type", "application/octet-stream"),
             resolutions=data.get("resolutions", []),
-            crops=data.get("crops", {}),
+            crops=crops,
             albums=_normalize_albums(data.get("albums")),
             voice_name=data.get("voice_name"),
             tags=data.get("tags", []),
+            orientation_lock=data.get("orientation_lock", "unlocked"),
         )
 
 
@@ -2056,6 +2074,19 @@ class LibraryManager:
         mapping type {"type": "image_crop", ...} (see scenes.py); never set
         by the ordinary manual-crop editor path."""
         width, height = spec.width, spec.height
+        record = await self._find_image(image_id)
+        if record is None:
+            raise LibraryBackendError(f"Image '{image_id}' not found")
+
+        # Compatibility Check (Goal 2)
+        if spec.locked:
+            lock = record.orientation_lock
+            is_landscape_frame = width >= height
+            if lock == "portrait" and is_landscape_frame:
+                raise LibraryBackendError("Image is locked to portrait screens")
+            if lock == "landscape" and not is_landscape_frame:
+                raise LibraryBackendError("Image is locked to landscape screens")
+
         if not codec_id:
             from .frame_types import codec_id_for_resolution  # noqa: PLC0415
 
@@ -2078,11 +2109,27 @@ class LibraryManager:
         if crop_box_override is not None:
             crop_box = tuple(crop_box_override)
         else:
-            record = await self._find_image(image_id)
-            crop_box = (record.crops if record else {}).get(f"{width}x{height}")
-            if not crop_box and record and record.crops:
-                fallback_key = "portrait" if width < height else "landscape"
-                crop_box = record.crops.get(fallback_key)
+            crop_box = None
+            if record and record.crops:
+                crop_box = record.crops.get(f"{width}x{height}")
+                if not crop_box:
+                    ratio_val = round(width / height, 4)
+                    ratio_key = f"ratio:{ratio_val:.4f}"
+                    crop_box = record.crops.get(ratio_key)
+                if not crop_box:
+                    ratio_val = round(width / height, 4)
+                    for k, v in record.crops.items():
+                        if k.startswith("ratio:"):
+                            try:
+                                k_val = float(k.split(":")[1])
+                                if abs(ratio_val - k_val) < 0.01:
+                                    crop_box = v
+                                    break
+                            except (ValueError, IndexError):
+                                pass
+                if not crop_box:
+                    fallback_key = "portrait" if width < height else "landscape"
+                    crop_box = record.crops.get(fallback_key)
         effective_method = pack_method or "fast"
 
         # PanelCodec seam: resolution selects split-half vs sequential (7.3")
@@ -2133,6 +2180,9 @@ class LibraryManager:
                             pass
         else:
             crops[f"{width}x{height}"] = [float(v) for v in crop_box]
+            # Also update the aspect ratio key! (Goal 1)
+            ratio_val = round(width / height, 4)
+            crops[f"ratio:{ratio_val:.4f}"] = [float(v) for v in crop_box]
             # Also update the fallback orientation crop box!
             # If the user saved a crop for a specific resolution, we also copy it
             # to the corresponding generic orientation key, so that other frames of the same
@@ -2184,6 +2234,8 @@ class LibraryManager:
                             pass
         else:
             crops.pop(f"{width}x{height}", None)
+            ratio_val = round(width / height, 4)
+            crops.pop(f"ratio:{ratio_val:.4f}", None)
             await self._backend.async_delete_bin(image_id, width, height)
 
         await self._backend.async_update_image_fields(image_id, crops=crops)
@@ -2251,6 +2303,19 @@ class LibraryManager:
         normalized = _normalize_tags(tags)
         await self._backend.async_update_image_fields(image_id, tags=normalized)
         record.tags = normalized
+        return record.to_dict()
+
+    async def async_set_image_orientation_lock(
+        self, image_id: str, lock: str
+    ) -> dict[str, Any]:
+        """Update the orientation lock of one image."""
+        record = await self._find_image(image_id)
+        if record is None:
+            raise LibraryBackendError(f"Image '{image_id}' not found")
+        if lock not in ("unlocked", "portrait", "landscape"):
+            raise LibraryBackendError(f"Invalid orientation lock: {lock}")
+        await self._backend.async_update_image_fields(image_id, orientation_lock=lock)
+        record.orientation_lock = lock
         return record.to_dict()
 
     async def _async_apply_album_transform(

@@ -33,7 +33,7 @@ except ImportError:
     sys.exit(2)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-COMPONENT_DIR = REPO_ROOT / "custom_components" / "fraimic"
+COMPONENT_DIR = REPO_ROOT / "custom_components" / "digital_frames"
 
 
 def _load_component_modules():

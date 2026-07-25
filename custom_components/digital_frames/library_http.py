@@ -311,6 +311,40 @@ class DigitalFramesLibraryImageTagsView(HomeAssistantView):
 
 
 
+class DigitalFramesLibraryImageOrientationLockView(HomeAssistantView):
+    """Update the orientation lock on one library image."""
+
+    url = "/api/digital_frames/library/image/{image_id}/orientation_lock"
+    name = "api:digital_frames:library:image:orientation_lock"
+    requires_auth = True
+
+    async def post(self, request: web.Request, image_id: str) -> web.Response:
+        hass = request.app["hass"]
+        manager = _get_manager(hass)
+
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON body: {err}", status_code=400)
+
+        lock = (body or {}).get("orientation_lock")
+        if not isinstance(lock, str) or lock not in ("unlocked", "portrait", "landscape"):
+            return self.json_message("orientation_lock must be one of: unlocked, portrait, landscape", status_code=400)
+
+        from .library import LibraryBackendError  # noqa: PLC0415
+
+        try:
+            record = await manager.async_set_image_orientation_lock(image_id, lock)
+        except LibraryBackendError as err:
+            return self.json_message(str(err), status_code=404)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to set orientation lock for %s: %s", image_id, err)
+            return self.json_message(f"Failed to set orientation lock: {err}", status_code=500)
+
+        return self.json({"success": True, "image": record})
+
+
+
 class DigitalFramesLibrarySendView(HomeAssistantView):
     """Send an existing library image to a frame.
 

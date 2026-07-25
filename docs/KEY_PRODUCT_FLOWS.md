@@ -173,21 +173,21 @@ renderer — see KPF 28/29).
   has a standalone byte-identity script (`scripts/verify_packing.py`) run
   manually against real photos when touching either packer.
 
-## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags
+## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags, orientation lock
 Users upload photos into one shared pool; images are listed/streamed for
 the panel's grids with on-the-fly cached thumbnails, and can carry user-defined
-voice names and tags for Assist commands. Wire-payload (`.bin`) cache keys
+voice names, tags, and orientation locks (for compatibility filtering). Wire-payload (`.bin`) cache keys
 include PanelCodec id (`codec_id`) under
 `bin/<WxH[variant]>/<codec_id>/` so sequential vs split-half packs never
 collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
 - **Entry points**: `library.py` (`LibraryManager.async_upload` /
   `list_images` / `get_original` / `get_thumbnail` / `async_get_bin_for_send` /
-  `async_set_image_voice_name` / `async_set_image_tags`,
+  `async_set_image_voice_name` / `async_set_image_tags` / `async_set_image_orientation_lock`,
   `LocalLibraryBackend` / Dropbox / Drive `_bin_path` + `bin_file_ids`,
   `_safe_image_id`), `library_http.py` (`DigitalFramesLibraryImageVoiceNameView`,
-  `DigitalFramesLibraryImageTagsView`).
+  `DigitalFramesLibraryImageTagsView`, `DigitalFramesLibraryImageOrientationLockView`).
 - **If it silently breaks**: uploads silently fail per-file in a batch,
-  thumbnails go stale/broken, voice name/tag edits fail to persist, a
+  thumbnails go stale/broken, voice name/tag/orientation-lock edits fail to persist, a
   7.3" send reuses 13.3"-layout bytes (wrong codec cache), or — a real bug
   found and fixed in the July 2026 code review — an unsanitized `image_id`
   reaching `_bin_path`/`_thumb_path` directly (rather than via a manifest
@@ -199,13 +199,14 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   let an older, slower album load resolve after a newer one and leave the
   breadcrumb title naming a different album than the grid actually shows —
   both now share a token that discards a superseded load's result.
-- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `lazy-thumbs.spec.js`).
+- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `lazy-thumbs.spec.js`; `crop-aspect-ratio-lock.spec.js` covers orientation lock picker dimming and sending validation).
   **Backend-tested** (local backend) —
   `tests/python/library/test_library_local_backend.py` (single/multi
   upload, undecodable-bytes tolerance, thumbnail cache generation/reuse,
   delete purges original + thumbnails, voice name and tags updates);
   `tests/python/library/test_library_crop_albums_backfill.py` (codec-keyed
   bin cache + legacy path fallback);
+  `tests/python/library/test_crop_aspect_ratio_and_lock.py` (orientation lock persistence and send compatibility blocking);
   `tests/python/library/test_library_image_id_traversal.py` (traversal/malformed
   `image_id` rejected by send/thumbnail, no-ops on delete, a real id still
   works end to end, and — closing a July 2026 code-review test-coverage gap
@@ -285,9 +286,8 @@ backfill finishes still works via on-demand conversion+cache.
   + caching when uncached, cache-hit skips reconversion, `pack_method`
   override bypasses the cache without polluting it).
 
-## 12. Manual crop editing per image/resolution
-User can save a manual crop rectangle for one image at one frame
-resolution (or fallback per-orientation), invalidating cached renders.
+## 12. Manual crop editing per image/aspect ratio
+User can save a manual crop rectangle for one image. Crops are saved by aspect ratio keys (e.g. ratio:1.7778), making them shared across all frames with matching aspect ratios, with exact resolution and orientation fallbacks, invalidating cached renders.
 Reachable from three places: the Library shelf's crop editor, the wall
 image picker's "✂ Adjust Crop" (hands the staged/on-frame photo to the
 same editor pre-targeted at that frame), and the Lovelace card's own
@@ -319,11 +319,12 @@ immediately re-sends so the physical frame updates.
   `dashboard.spec.js` covers the Library shelf's editor: a stale fetch for
   a previously-open image cannot swap the picture back after closing and
   reopening for a different one, and Save Crop stays disabled until the
-  image finishes loading).
+  image finishes loading; `crop-aspect-ratio-lock.spec.js` covers aspect-ratio target options compatibility disablement).
   **Backend-tested** — `tests/python/library/test_library_crop_albums_backfill.py`
   (exact-resolution save invalidates that bin, fallback-orientation save
   invalidates every matching resolution, clear reverts + invalidates,
-  unknown image raises).
+  unknown image raises);
+  `tests/python/library/test_crop_aspect_ratio_and_lock.py` (saves ratio keys and resolves crops by exact/epsilon aspect ratio).
 
 ## 13. Album management (tag, rename, delete, batch-add)
 Photos can be tagged into any number of albums; albums are emergent from

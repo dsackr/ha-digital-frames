@@ -3099,6 +3099,14 @@
               <span class="editor-label">Target</span>
               <select id="editor-frame-select"></select>
             </div>
+            <div class="editor-row" id="editor-compat-row">
+              <span class="editor-label">Screen Compatibility</span>
+              <select id="editor-compat-select">
+                <option value="unlocked">🌐 Any Screen</option>
+                <option value="portrait">📱 Portrait Only</option>
+                <option value="landscape">🖥️ Landscape Only</option>
+              </select>
+            </div>
             <div class="editor-row">
               <span class="editor-hint" id="editor-frame-hint"></span>
             </div>
@@ -5376,15 +5384,21 @@
       }
 
       el.className = 'card lib-card';
-      const frameOptions = this._frames.map(f =>
-        `<option value="${this._esc(f.entityId)}">${this._esc(f.title)}</option>`
-      ).join('');
+      const lock = image.orientation_lock || 'unlocked';
+      const frameOptions = this._frames.map(f => {
+        let isMismatched = false;
+        if (lock === 'portrait' && f.orientation === 'landscape') isMismatched = true;
+        if (lock === 'landscape' && f.orientation === 'portrait') isMismatched = true;
+        const mismatchLabel = isMismatched ? ' (Incompatible)' : '';
+        return `<option value="${this._esc(f.entityId)}" ${isMismatched ? 'disabled style="color:var(--secondary-text-color);opacity:0.5"' : ''}>${this._esc(f.title)}${mismatchLabel}</option>`;
+      }).join('');
 
       el.innerHTML = `
         <div class="lib-thumb" id="thumb-${sid}">
           <div style="font-size:32px;text-align:center;padding:30px 0">🖼</div>
         </div>
         <div class="preview-name">${this._esc(image.filename)}</div>
+        ${image.orientation_lock && image.orientation_lock !== 'unlocked' ? `<div class="preview-lock" style="font-size:11px;color:#d97706;font-weight:bold;margin-top:2px">${image.orientation_lock === 'portrait' ? '📱 Portrait Only' : '🖥️ Landscape Only'}</div>` : ''}
         ${image.voice_name ? `<div class="preview-voice" style="font-size:11px;color:#10b981;font-weight:bold;margin-top:2px">🗣 "${this._esc(image.voice_name)}"</div>` : ''}
         ${image.tags && image.tags.length ? `<div class="preview-tags" style="font-size:11px;color:#3b82f6;margin-top:2px;display:flex;flex-wrap:wrap;gap:4px">${image.tags.map(t => `<span style="background:rgba(59,130,246,0.1);padding:1px 4px;border-radius:3px">#${this._esc(t)}</span>`).join('')}</div>` : ''}
         <div class="btns" style="margin-top:10px">
@@ -5761,8 +5775,25 @@
       btn.disabled = true;
       btn.textContent = '⏳ Sending…';
 
-      const form = new FormData();
+      const image = (this._library || []).find(img => img.image_id === imageId);
       const frame = (this._frames || []).find((f) => f.entityId === entityId);
+      const lock = (image && image.orientation_lock) || 'unlocked';
+      if (frame && lock !== 'unlocked') {
+        let isMismatched = false;
+        if (lock === 'portrait' && frame.orientation === 'landscape') isMismatched = true;
+        if (lock === 'landscape' && frame.orientation === 'portrait') isMismatched = true;
+        if (isMismatched) {
+          fb.className = 'feedback err';
+          fb.textContent = `Failed: Image is locked to ${lock} screens.`;
+          fb.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = prevText;
+          setTimeout(() => { fb.style.display = 'none'; }, 4000);
+          return;
+        }
+      }
+
+      const form = new FormData();
       if (frame && frame.entryId) form.append('entry_id', frame.entryId);
       if (entityId) form.append('entity_id', entityId);
       form.append('image_id', imageId);
@@ -6003,6 +6034,28 @@
         if (this._editorState) this._editorSetFrame(e.target.value);
       });
 
+      root.getElementById('editor-compat-select').addEventListener('change', async (e) => {
+        const st = this._editorState;
+        if (!st) return;
+        const val = e.target.value;
+        try {
+          const resp = await fetch(`/api/digital_frames/library/image/${st.image.image_id}/orientation_lock`, {
+            method: 'POST',
+            headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orientation_lock: val }),
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          st.image.orientation_lock = val;
+          const cached = this._library.find(img => img.image_id === st.image.image_id);
+          if (cached) cached.orientation_lock = val;
+          this._editorUpdateFrameSelectOptions(st.image);
+          this._renderLibrary();
+        } catch (err) {
+          this._editorShowFb('err', `Failed to update orientation compatibility: ${err.message}`);
+        }
+      });
+
       const cropEl = root.getElementById('editor-cropbox');
       cropEl.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('crop-handle')) return;
@@ -6081,6 +6134,8 @@
       select.innerHTML = optionsHtml;
       select.disabled = false;
       select.value = initialVal;
+      this.shadowRoot.getElementById('editor-compat-select').value = image.orientation_lock || 'unlocked';
+      this._editorUpdateFrameSelectOptions(image);
       const overlay = this.shadowRoot.getElementById('editor-overlay');
       overlay.style.display = 'flex';
 
@@ -6140,6 +6195,36 @@
       }
       this._editorDrag = null;
       this._editorState = null;
+    }
+
+    _editorUpdateFrameSelectOptions(image) {
+      const select = this.shadowRoot.getElementById('editor-frame-select');
+      if (!select) return;
+      const lock = image.orientation_lock || 'unlocked';
+      const frames = this._editorFrames();
+
+      [...select.querySelectorAll('option')].forEach(opt => {
+        const val = opt.value;
+        if (val === 'generic_portrait') {
+          opt.disabled = lock === 'landscape';
+          let text = opt.textContent.replace(' (Incompatible)', '');
+          opt.textContent = lock === 'landscape' ? text + ' (Incompatible)' : text;
+        } else if (val === 'generic_landscape') {
+          opt.disabled = lock === 'portrait';
+          let text = opt.textContent.replace(' (Incompatible)', '');
+          opt.textContent = lock === 'portrait' ? text + ' (Incompatible)' : text;
+        } else if (val && !val.startsWith('generic_')) {
+          const frame = frames.find(f => f.entityId === val);
+          if (frame) {
+            let isMismatched = false;
+            if (lock === 'portrait' && frame.orientation === 'landscape') isMismatched = true;
+            if (lock === 'landscape' && frame.orientation === 'portrait') isMismatched = true;
+            opt.disabled = isMismatched;
+            let text = opt.textContent.replace(' (Incompatible)', '');
+            opt.textContent = isMismatched ? text + ' (Incompatible)' : text;
+          }
+        }
+      });
     }
 
     _editorSetFrame(entityId) {
@@ -8037,6 +8122,8 @@
       this._wallCancelInProgressDrag();
       const dims = this._wallTileDims(frame);
 
+      const isQuadrant = e.composedPath && e.composedPath().some(el => el.classList && el.classList.contains('wall-tile-quadrant'));
+
       // Pressing a member of a multi-selection drags the whole group; one
       // ghost per member so the formation is visible while dragging.
       // (Modifier-clicks toggle selection on pointerup instead -- if this
@@ -8063,7 +8150,7 @@
           memberGhost.style.height = `${memberDims.height}px`;
           memberGhost.textContent = memberFrame.title;
           this.shadowRoot.appendChild(memberGhost);
-          tileEl.classList.add('dragging');
+          if (!isQuadrant) tileEl.classList.add('dragging');
           group.push({
             entryId: id,
             ghost: memberGhost,
@@ -8088,7 +8175,7 @@
         if (tileEl) {
           startLeft = parseFloat(tileEl.style.left) || 0;
           startTop  = parseFloat(tileEl.style.top) || 0;
-          tileEl.classList.add('dragging');
+          if (!isQuadrant) tileEl.classList.add('dragging');
         }
       }
 
@@ -8144,8 +8231,8 @@
         // never "place it here."
         if (drag.kind === 'tile') {
           if (!this._isAdmin()) return;
-          const target = e.composedPath()[0];
-          const quadrant = target.closest && target.closest('.wall-tile-quadrant');
+          const path = e.composedPath();
+          const quadrant = path.find(el => el.classList && el.classList.contains('wall-tile-quadrant'));
           if (quadrant) {
             const action = quadrant.dataset.action;
             const frame = this._frames.find(f => f.entryId === drag.entryId);
@@ -8571,10 +8658,27 @@
 
       grid.innerHTML = '';
       for (const image of images) {
+        const frame = this._frames.find(f => f.entryId === entryId);
+        const frameOrient = frame ? frame.orientation : 'auto';
+        const lock = image.orientation_lock || 'unlocked';
+        let isMismatched = false;
+        if (frameOrient === 'portrait' && lock === 'landscape') isMismatched = true;
+        if (frameOrient === 'landscape' && lock === 'portrait') isMismatched = true;
+
         const cell = document.createElement('div');
         cell.className = 'image-picker-cell';
+        if (isMismatched) {
+          cell.classList.add('incompatible');
+          cell.style.opacity = '0.3';
+          cell.style.cursor = 'not-allowed';
+        }
         cell.dataset.imageId = image.image_id;
-        cell.title = image.voice_name ? `${image.filename} (🗣 ${image.voice_name})` : image.filename;
+        
+        let titleText = image.filename;
+        if (image.voice_name) titleText += ` (🗣 ${image.voice_name})`;
+        if (isMismatched) titleText += ` (Incompatible with ${frameOrient} frame)`;
+        cell.title = titleText;
+        
         cell.innerHTML = `<div class="image-picker-thumb">🖼</div>`;
 
         this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'));
@@ -8582,22 +8686,29 @@
         if (image.image_id === this._wallEffectiveMapping(entryId)) {
           cell.classList.add('selected');
         }
-        cell.addEventListener('click', () => {
-          // Selecting only STAGES: the pending-mapping write that Save
-          // Scene has always merged from, plus the live preview on the
-          // tile. Nothing reaches the physical frame -- sending is always
-          // its own deliberate click. Picking is the picker's job done,
-          // so it closes itself; the tile preview is the confirmation.
-          this._wallPickerSelectedFile = null;
-          this._wallPendingMappings[entryId] = image.image_id;
-          // Recorded at the moment of picking, from whichever album filter
-          // was active right now -- not the image's own album tags -- so
-          // this stays a simple, predictable "did you leave the scene's
-          // locked album to make this pick" check (see _wallHasOffAlbumPick).
-          this._wallPendingPickAlbum[entryId] = album;
-          this._closeWallImagePicker();
-          this._renderWallCanvas();
-        });
+        if (isMismatched) {
+          cell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            alert(`This image is locked to ${lock} screens and cannot be placed on this ${frameOrient} frame.`);
+          });
+        } else {
+          cell.addEventListener('click', () => {
+            // Selecting only STAGES: the pending-mapping write that Save
+            // Scene has always merged from, plus the live preview on the
+            // tile. Nothing reaches the physical frame -- sending is always
+            // its own deliberate click. Picking is the picker's job done,
+            // so it closes itself; the tile preview is the confirmation.
+            this._wallPickerSelectedFile = null;
+            this._wallPendingMappings[entryId] = image.image_id;
+            // Recorded at the moment of picking, from whichever album filter
+            // was active right now -- not the image's own album tags -- so
+            // this stays a simple, predictable "did you leave the scene's
+            // locked album to make this pick" check (see _wallHasOffAlbumPick).
+            this._wallPendingPickAlbum[entryId] = album;
+            this._closeWallImagePicker();
+            this._renderWallCanvas();
+          });
+        }
         grid.appendChild(cell);
       }
       this._updateWallPickerSendButton();

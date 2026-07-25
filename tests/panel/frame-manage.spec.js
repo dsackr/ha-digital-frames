@@ -6,7 +6,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { createMockServer } = require('./fixtures/mock-server');
-const { gotoPanel, clickPanelButton } = require('./fixtures/panel-page');
+const { gotoPanel, clickPanelButton, clickWallTileQuadrant } = require('./fixtures/panel-page');
 
 const FRAMES = [
   { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10' },
@@ -277,5 +277,83 @@ test.describe('Frame management and discovery banner', () => {
     expect(visibility.overlayCount).toBe(0);
     expect(visibility.banner).toBe('none');
     expect(pageErrors).toEqual([]);
+  });
+});
+
+// Regression coverage for the hover-overlay quadrants routing to the wrong
+// action: `openInfoFor`/`openConfigureFor` above (and the tests that use
+// them) drive the overlay via element.click(), which synthesizes a bare
+// 'click' event directly on the quadrant div. That never exercises the
+// tile's real pointerdown -> _wallBeginDrag -> pointerup path, so it can't
+// catch a bug that only manifests there -- specifically, `_wallBeginDrag`
+// adds the `dragging` class to the tile as soon as the mouse goes down
+// (before it's known whether this will turn into an actual drag), and
+// `.wall-tile.dragging .wall-tile-hover-overlay` sets `pointer-events:
+// none !important`. That flips the instant the button is pressed, so by
+// pointerup the overlay is no longer hit-testable and
+// `e.composedPath()[0]` resolves to whatever is under it
+// (`.wall-tile-media`) instead of the quadrant -- `_onWallPointerUp` then
+// always falls through to its "default fallback" (open the image picker),
+// regardless of which quadrant was actually clicked. These tests click
+// each quadrant with real mouse move/down/up, the only way to observe that.
+test.describe('Frame management: hover overlay quadrants (real mouse input)', () => {
+  let mockServer;
+  let baseUrl;
+
+  test.beforeEach(async ({ page }) => {
+    mockServer = createMockServer({ frames: FRAMES });
+    baseUrl = await mockServer.start();
+    page.on('console', msg => console.log('BROWSER_LOG:', msg.text()));
+  });
+
+  test.afterEach(async () => {
+    await mockServer.stop();
+  });
+
+  test('select-image quadrant opens the image picker', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await clickWallTileQuadrant(page, 'entry_1', 'select-image');
+    await expect(page.locator('#panel')).toBeVisible();
+    const open = await page.evaluate(() => document.getElementById('panel').shadowRoot.getElementById('wall-image-picker-overlay').style.display === 'block');
+    expect(open).toBe(true);
+  });
+
+  test('info quadrant opens the Frame Info popup, not the image picker', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await clickWallTileQuadrant(page, 'entry_1', 'info');
+    const state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        infoOpen: root.getElementById('frame-settings-overlay').style.display === 'flex',
+        pickerOpen: root.getElementById('wall-image-picker-overlay').style.display === 'block',
+      };
+    });
+    expect(state.infoOpen).toBe(true);
+    expect(state.pickerOpen).toBe(false);
+  });
+
+  test('configure quadrant opens the options flow modal, not the image picker', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await clickWallTileQuadrant(page, 'entry_1', 'configure');
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('panel');
+      return panel._flowModal && panel._flowModal.step;
+    }, { timeout: 5000 });
+    const pickerOpen = await page.evaluate(() => document.getElementById('panel').shadowRoot.getElementById('wall-image-picker-overlay').style.display === 'block');
+    expect(pickerOpen).toBe(false);
+  });
+
+  test('remove-tile quadrant removes the frame from the wall, not the image picker', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await clickWallTileQuadrant(page, 'entry_1', 'remove-tile');
+    const state = await page.evaluate((id) => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        stillPlaced: !!root.querySelector(`.wall-tile[data-entry-id="${id}"]`),
+        pickerOpen: root.getElementById('wall-image-picker-overlay').style.display === 'block',
+      };
+    }, 'entry_1');
+    expect(state.stillPlaced).toBe(false);
+    expect(state.pickerOpen).toBe(false);
   });
 });

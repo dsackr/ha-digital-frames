@@ -898,13 +898,42 @@ class SkillManager:
         )
         return record["image_id"]
 
-    async def _async_pick_image_album(self, skill: Skill) -> str:
+    async def _async_pick_image_album(self, skill: Skill, entry: "ConfigEntry") -> str:
         album = skill.config.get("album")
         images = await self._library.async_list_images()
-        candidates = [img for img in images if album in (img.get("albums") or [])]
+
+        from .helpers import orientation_for_hass_entry  # noqa: PLC0415
+        from .const import ORIENTATION_PORTRAIT, ORIENTATION_LANDSCAPE  # noqa: PLC0415
+
+        frame_orient = orientation_for_hass_entry(self.hass, entry)
+
+        candidates = []
+        for img in images:
+            img_albums = img.albums if hasattr(img, "albums") else img.get("albums")
+            if album not in (img_albums or []):
+                continue
+
+            lock = getattr(img, "orientation_lock", None) or img.get("orientation_lock", "unlocked")
+            if frame_orient == ORIENTATION_PORTRAIT and lock == "landscape":
+                continue
+            if frame_orient == ORIENTATION_LANDSCAPE and lock == "portrait":
+                continue
+
+            candidates.append(img)
+
         if not candidates:
-            raise SkillError(f"Album '{album}' has no images")
-        return random.choice(candidates)["image_id"]
+            import logging  # noqa: PLC0415
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "No compatible images found in album '%s' for frame '%s' (locked to %s). Skipping rotation update.",
+                album,
+                entry.title,
+                frame_orient
+            )
+            raise SkillError(f"Album '{album}' has no images (or no compatible images found for frame orientation {frame_orient})")
+
+        picked = random.choice(candidates)
+        return picked.image_id if hasattr(picked, "image_id") else picked["image_id"]
 
     async def async_render_for_entry(
         self, skill_id: str, entry: "ConfigEntry"
@@ -926,7 +955,7 @@ class SkillManager:
             image_id = await self._async_fetch_image_feed(skill)
             return {"kind": "image_id", "image_id": image_id}
         if skill.content_mode == "image_album":
-            image_id = await self._async_pick_image_album(skill)
+            image_id = await self._async_pick_image_album(skill, entry)
             return {"kind": "image_id", "image_id": image_id}
         if skill.content_mode == _AGENDA_MODE:
             bin_bytes, rgb_png = await self._async_render_agenda(skill, entry)
