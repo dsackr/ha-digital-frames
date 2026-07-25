@@ -87,3 +87,4 @@ Notes on reading it:
 | 2026-07-24 | b7ed014 | backend-pytest | success | 471 passed in 80.30s (0:01:20) | 66% | CI |
 | 2026-07-25 | 6521e0a | panel-playwright | success | 151 passed | — | CI |
 | 2026-07-25 | 6521e0a | backend-pytest | success | 472 passed in 81.86s (0:01:21) | 66% | CI |
+| 2026-07-25 | e8d8a71 | panel-playwright | failure | 7 failed 150 passed | — | CI |
