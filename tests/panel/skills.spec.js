@@ -68,14 +68,14 @@ function frames() {
 
 function xotdTabButtonDisplay(page) {
   return page.evaluate(() => {
-    const btn = document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="xotd"]');
+    const btn = document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="widgets"]');
     return btn ? btn.style.display : null;
   });
 }
 
 async function openXotdTab(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="xotd"]').click();
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="widgets"]').click();
   });
   await page.waitForFunction(() => {
     const grid = document.getElementById('panel').shadowRoot.getElementById('xotd-grid');
@@ -84,6 +84,9 @@ async function openXotdTab(page) {
 }
 
 async function clickModeTile(page, mode) {
+  await page.evaluate(() => {
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="expansion_packs"]').click();
+  });
   await page.evaluate((m) => {
     const root = document.getElementById('panel').shadowRoot;
     const tiles = [...root.querySelectorAll('.xotd-mode-tile')];

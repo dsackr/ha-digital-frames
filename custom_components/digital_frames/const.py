@@ -102,12 +102,12 @@ SIGNAL_SCHEDULES_UPDATED = f"{DOMAIN}_schedules_updated"
 SIGNAL_SKILLS_UPDATED = f"{DOMAIN}_skills_updated"
 
 # Where scene pack content (manifest + source images) is fetched from at
-# install time. Content lives in a separate repository (dsackr/frame-addons)
+# install time. Content lives in a separate repository (dsackr/ha-digital-frames-expansion-packs)
 # under scene_packs/ so the integration stays lightweight. Deliberately
 # tracks `main` (not pinned) -- new art packs and image fixes should show up without a
 # ha-digital-frames release.
 SCENE_PACK_RAW_BASE = (
-    "https://raw.githubusercontent.com/dsackr/frame-addons/main"
+    "https://raw.githubusercontent.com/dsackr/ha-digital-frames-expansion-packs/main"
 )
 SCENE_PACK_INDEX_URL = f"{SCENE_PACK_RAW_BASE}/scene_packs/index.json"
 
@@ -116,29 +116,9 @@ SCENE_PACK_INDEX_URL = f"{SCENE_PACK_RAW_BASE}/scene_packs/index.json"
 # with a log warning until we add a new decoder.
 GALLERY_CATALOG_SCHEMA_VERSION = 1
 
-# The xOTD renderer script skills.py downloads and runs as a subprocess for
-# every text-mode skill render (see skills.py's _async_script_bytes). Unlike
-# SCENE_PACK_RAW_BASE above, this is pinned to a specific frame-addons
-# commit rather than tracking `main`: skills.py depends on that commit's
-# exact CLI contract (--render-only, --config <path>, writing xotd.bin next
-# to it) for its per-render subprocess isolation -- an unrelated frame-addons
-# change to main that altered or dropped those flags would otherwise break
-# every skill render for every installed user, with no coordinated rollout.
-# Bump this deliberately (to a new commit SHA or tag) only when a
-# frame-addons change adds a capability skills.py needs to start relying on.
-XOTD_RENDERER_PINNED_BASE = (
-    "https://raw.githubusercontent.com/dsackr/frame-addons/"
-    "49f0af0700c0bc6d8d271ee7d7b9023fae0eb84c"
-)
-XOTD_RENDERER_SCRIPT_PATH = "addons/xotd/xotd_renderer.py"
-
-# Daily Agenda Live skill renderer (Content Platform Phase 4). Same pin
-# policy as xOTD: bump only when the CLI contract changes.
-AGENDA_RENDERER_PINNED_BASE = (
-    "https://raw.githubusercontent.com/dsackr/frame-addons/"
-    "345294b8589124039210f3957357feb4a0b3e35a"
-)
-AGENDA_RENDERER_SCRIPT_PATH = "addons/daily_agenda/agenda_renderer.py"
+# The local relative paths of the renderers inside this integration
+XOTD_RENDERER_RELATIVE_PATH = "renderers/xotd/xotd_renderer.py"
+AGENDA_RENDERER_RELATIVE_PATH = "renderers/daily_agenda/agenda_renderer.py"
 
 # Orientation config options.
 #

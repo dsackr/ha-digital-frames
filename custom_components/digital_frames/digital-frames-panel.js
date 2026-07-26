@@ -17,7 +17,7 @@
   // Mirrors const.py's SCENE_PACK_RAW_BASE -- scene pack cover art is public
   // content, so the browser fetches it directly instead of proxying through
   // a Fraimic endpoint.
-  const SCENE_PACK_RAW_BASE = 'https://raw.githubusercontent.com/dsackr/frame-addons/main';
+  const SCENE_PACK_RAW_BASE = 'https://raw.githubusercontent.com/dsackr/ha-digital-frames-expansion-packs/main';
 
   // Labels for known Gallery category tags. The Gallery tab derives which
   // collection tiles to show from the tags in the remote pack catalog.
@@ -2117,7 +2117,7 @@
       this._galleryCatalog = {};      // { schema_version, catalog_version, ... } Phase 7
       this._gallerySearch = '';       // Gallery search query
       this._skills = [];              // [{ skill_id, name, content_mode, config }] -- loaded at boot and refreshed on tab activation, see _setTab; also feeds the wall picker's Skills section
-      this._activeTab     = 'dashboard'; // 'dashboard' | 'addons' | 'xotd'
+      this._activeTab     = 'walls'; // 'walls' | 'my_gallery' | 'art_gallery' | 'widgets' | 'expansion_packs'
       this._packCategory  = null;     // null = category-tile view; otherwise the category id being browsed
       this._packPreview   = null;     // { pack, index } while the read-only image gallery is open, else null
 
@@ -2394,7 +2394,7 @@
       const tile = canvas && this._wallTileEl(canvas, entryId);
       if (!tile) return;
 
-      this._setTab('dashboard');
+      this._setTab('walls');
       this._wallSelectTile(entryId);
       tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
       tile.classList.add('deep-link-highlight');
@@ -2444,13 +2444,13 @@
           this._renderScenePacks();
         });
       }
-      this._setTab('dashboard');
+      this._setTab('walls');
     }
 
     _setTab(name) {
       this._activeTab = name;
       const root = this.shadowRoot;
-      ['dashboard', 'addons', 'xotd'].forEach(tab => {
+      ['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs'].forEach(tab => {
         const content = root.getElementById(`tab-${tab}`);
         const btn     = root.querySelector(`.tab-btn[data-tab="${tab}"]`);
         if (content) content.classList.toggle('active', tab === name);
@@ -2458,8 +2458,12 @@
       });
       // Fire-and-forget: keeps the tab switch itself synchronous/instant,
       // re-rendering once the (throttled) refetch resolves.
-      if (name === 'addons') this._refreshScenePacksIfStale();
-      if (name === 'xotd') {
+      if (name === 'expansion_packs') this._refreshScenePacksIfStale();
+      if (name === 'my_gallery' || name === 'art_gallery') {
+        this._currentAlbum = null;
+        this._renderLibrary();
+      }
+      if (name === 'widgets') {
         this._loadXotdInstances().then(() => this._renderXotdInstances());
       }
     }
@@ -2469,12 +2473,14 @@
         <style>${CSS}</style>
 
         <div class="tab-bar" id="tab-bar">
-          <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-          <button class="tab-btn" data-tab="addons">Gallery</button>
-          <button class="tab-btn" data-tab="xotd">Live</button>
+          <button class="tab-btn active" data-tab="walls">Walls</button>
+          <button class="tab-btn" data-tab="my_gallery">My Gallery</button>
+          <button class="tab-btn" data-tab="art_gallery">Art Gallery</button>
+          <button class="tab-btn" data-tab="widgets">Widgets</button>
+          <button class="tab-btn" data-tab="expansion_packs">Expansion Packs</button>
         </div>
 
-        <div class="tab-content active" id="tab-dashboard">
+        <div class="tab-content active" id="tab-walls">
         <div class="update-banner" id="update-banner" style="display:none" role="status"></div>
         <div class="discovery-banner" id="discovery-banner" style="display:none"></div>
         <div class="lib-toolbar">
@@ -2570,51 +2576,95 @@
           </div>
           <div class="feedback" id="wall-scene-fb"></div>
         </div>
-        </div><!-- /tab-dashboard -->
+        </div><!-- /tab-walls -->
 
-        <div class="tab-content" id="tab-addons">
-        <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-          Curated public-domain art and seasonal collections for your frames.
-          Install a collection to add it to your library (and optionally create
-          a scene). Daily Agenda and other generators live under the <b>Live</b> tab.
-        </p>
-        <div class="modal-row" style="margin:0 0 12px;max-width:420px">
-          <input type="search" id="gallery-search" placeholder="Search collections…"
-                 style="width:100%" autocomplete="off">
-        </div>
-        <div class="feedback" id="pack-fb"></div>
-        <div class="addons-crumb" id="addons-crumb"></div>
-        <div class="lib-grid" id="pack-grid">
-          <div class="empty">
-            <div class="empty-icon">⋯</div>
-            <h2>Loading gallery…</h2>
+        <div class="tab-content" id="tab-my_gallery">
+          <div class="lib-toolbar">
+            <h3 style="margin:0;flex:1 1 auto">👤 My Gallery</h3>
+            <div class="lib-toolbar-actions">
+              <button class="btn-primary" id="lib-upload-btn" style="flex:0 0 auto">⬆ Upload to Gallery</button>
+              <button class="btn-ghost" id="album-create-btn" style="flex:0 0 auto">＋ Create Album</button>
+              <button class="btn-ghost" id="lib-discover-btn" style="display:none;flex:0 0 auto"
+                title="Adopt photos dropped into the Digital Frames Library/inbox folder in Dropbox">🔍 Discover</button>
+            </div>
           </div>
-        </div>
-        </div><!-- /tab-addons -->
+          <div class="feedback" id="lib-fb"></div>
+          <div class="lib-breadcrumb" id="lib-breadcrumb">
+            <button id="lib-back-btn">← Albums</button>
+            <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
+            <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
+          </div>
+          <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
+            <span class="lib-select-count" id="lib-select-count">0 selected</span>
+            <button class="btn-primary" id="lib-select-delete" style="flex:0 0 auto">🗑 Delete Selected</button>
+            <button class="btn-ghost" id="lib-select-cancel" style="flex:0 0 auto">Cancel</button>
+          </div>
+          <div class="lib-grid" id="lib-grid">
+            <div class="empty">
+              <div class="empty-icon">⋯</div>
+              <h2>Loading gallery…</h2>
+            </div>
+          </div>
+        </div><!-- /tab-my_gallery -->
 
-        <div class="tab-content" id="tab-xotd">
-        <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-          Daily and rotating content — jokes, quotes, scripture, words, or
-          photo feeds. Create a preset below, then send it like a photo: to
-          any frame, onto a wall tile, or on a schedule from the Schedules tab.
-        </p>
-        <div class="feedback" id="xotd-fb"></div>
-        <h3 style="margin:0 0 10px;font-size:14px">Compose a message</h3>
-        <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 10px">
-          Type a message, pick a style, and send it to a frame, a scene, or
-          a wall (composed as one banner and cropped per frame).
-        </p>
-        <button class="btn-primary" id="compose-message-btn" style="margin-bottom:20px">✉ Compose Message</button>
-        <h3 style="margin:0 0 10px;font-size:14px">Add live content</h3>
-        <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
-        <h3 style="margin:24px 0 10px;font-size:14px">Your live content</h3>
-        <div class="lib-grid" id="xotd-grid">
-          <div class="empty">
-            <div class="empty-icon">⋯</div>
-            <h2>Loading…</h2>
+        <div class="tab-content" id="tab-art_gallery">
+          <div class="lib-toolbar">
+            <h3 style="margin:0;flex:1 1 auto">🧩 Art Gallery</h3>
           </div>
-        </div>
-        </div><!-- /tab-xotd -->
+          <div class="feedback" id="art-fb"></div>
+          <div class="lib-breadcrumb" id="art-breadcrumb" style="display:none">
+            <button id="art-back-btn">← Collections</button>
+            <span class="lib-breadcrumb-title" id="art-breadcrumb-title"></span>
+          </div>
+          <div class="lib-grid" id="art-grid">
+            <div class="empty">
+              <div class="empty-icon">⋯</div>
+              <h2>Loading collections…</h2>
+            </div>
+          </div>
+        </div><!-- /tab-art_gallery -->
+
+        <div class="tab-content" id="tab-widgets">
+          <div class="lib-toolbar">
+            <h3 style="margin:0;flex:1 1 auto">⚙ Widgets</h3>
+            <div class="lib-toolbar-actions">
+              <button class="btn-primary" id="compose-message-btn" style="flex:0 0 auto">✉ Compose Message</button>
+            </div>
+          </div>
+          <div class="feedback" id="xotd-fb"></div>
+          <div class="lib-grid skill-grid" id="xotd-grid">
+            <div class="empty">
+              <div class="empty-icon">⋯</div>
+              <h2>Loading widgets…</h2>
+            </div>
+          </div>
+        </div><!-- /tab-widgets -->
+
+        <div class="tab-content" id="tab-expansion_packs">
+          <div class="lib-toolbar">
+            <h3 style="margin:0;flex:1 1 auto">📦 Expansion Packs</h3>
+          </div>
+          <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
+            Curated art collections and dynamic layout widgets for your frames.
+          </p>
+          
+          <h3 style="margin:16px 0 10px;font-size:14px">Art Collections</h3>
+          <div class="modal-row" style="margin:0 0 12px;max-width:420px">
+            <input type="search" id="gallery-search" placeholder="Search collections…"
+                   style="width:100%" autocomplete="off">
+          </div>
+          <div class="feedback" id="pack-fb"></div>
+          <div class="addons-crumb" id="addons-crumb"></div>
+          <div class="lib-grid" id="pack-grid" style="margin-bottom:24px">
+            <div class="empty">
+              <div class="empty-icon">⋯</div>
+              <h2>Loading gallery…</h2>
+            </div>
+          </div>
+          
+          <h3 style="margin:24px 0 10px;font-size:14px">Widgets</h3>
+          <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
+        </div><!-- /tab-expansion_packs -->
 
         <!-- Modals live outside the tab-content divs -- they're position:fixed
              overlays, so a tab switch (which sets display:none on an ancestor)
@@ -2742,44 +2792,7 @@
           </div>
         </div>
 
-        <!-- Manage Library: everything from the old Library tab except the
-             backend picker (now in Settings) and per-frame sends (now
-             inline on tile click) -- albums, upload, crop, tagging, bulk
-             delete, Dropbox Discover. Markup relocated verbatim; all
-             handlers find their elements by id and keep working. Sits at a
-             lower z-index than its sub-modals (upload/album/crop) so they
-             stack above it. -->
-        <div class="modal-overlay" id="library-modal-overlay" style="z-index:900">
-          <div class="modal-box" style="max-width:1100px;max-height:90vh;overflow-y:auto">
-            <div class="lib-toolbar">
-              <h3 style="margin:0;flex:1 1 auto">🖼 Library</h3>
-              <div class="lib-toolbar-actions">
-                <button class="btn-primary" id="lib-upload-btn" style="flex:0 0 auto">⬆ Upload to Library</button>
-                <button class="btn-ghost" id="album-create-btn" style="flex:0 0 auto">＋ Create Album</button>
-                <button class="btn-ghost" id="lib-discover-btn" style="display:none;flex:0 0 auto"
-                  title="Adopt photos dropped into the Digital Frames Library/inbox folder in Dropbox">🔍 Discover</button>
-                <button class="btn-ghost" id="library-modal-close" style="flex:0 0 auto">✕ Close</button>
-              </div>
-            </div>
-            <div class="feedback" id="lib-fb"></div>
-            <div class="lib-breadcrumb" id="lib-breadcrumb">
-              <button id="lib-back-btn">← Albums</button>
-              <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
-              <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
-            </div>
-            <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
-              <span class="lib-select-count" id="lib-select-count">0 selected</span>
-              <button class="btn-primary" id="lib-select-delete" style="flex:0 0 auto">🗑 Delete Selected</button>
-              <button class="btn-ghost" id="lib-select-cancel" style="flex:0 0 auto">Cancel</button>
-            </div>
-            <div class="lib-grid" id="lib-grid">
-              <div class="empty">
-                <div class="empty-icon">⋯</div>
-                <h2>Loading library…</h2>
-              </div>
-            </div>
-          </div>
-        </div>
+
 
         <!-- Settings: the library storage-backend picker (Local / Google
              Drive / Dropbox), relocated from the old Library tab. The
@@ -3956,14 +3969,11 @@
     }
 
     _openLibraryModal() {
-      this.shadowRoot.getElementById('library-modal-overlay').style.display = 'flex';
-      // The grid's lazy-thumbnail observers never fired while the modal was
-      // display:none -- nudge a render now that tiles can intersect.
-      this._renderLibrary();
+      this._setTab('my_gallery');
     }
 
     _closeLibraryModal() {
-      this.shadowRoot.getElementById('library-modal-overlay').style.display = 'none';
+      this._setTab('walls');
     }
 
     _wireSettingsModal() {
@@ -4800,25 +4810,21 @@
     _wireLibraryToolbar() {
       const uploadBtn       = this.shadowRoot.getElementById('lib-upload-btn');
       const backBtn         = this.shadowRoot.getElementById('lib-back-btn');
+      const artBackBtn      = this.shadowRoot.getElementById('art-back-btn');
       const albumCreateBtn  = this.shadowRoot.getElementById('album-create-btn');
       const discoverBtn     = this.shadowRoot.getElementById('lib-discover-btn');
       const selectToggleBtn = this.shadowRoot.getElementById('lib-select-toggle');
       const selectCancelBtn = this.shadowRoot.getElementById('lib-select-cancel');
       const selectDeleteBtn = this.shadowRoot.getElementById('lib-select-delete');
 
-      uploadBtn.addEventListener('click', () => this._openUploadModal());
-      backBtn.addEventListener('click', () => this._openAlbumFolders());
-      const libraryOverlay = this.shadowRoot.getElementById('library-modal-overlay');
-      this.shadowRoot.getElementById('library-modal-close')
-        .addEventListener('click', () => this._closeLibraryModal());
-      libraryOverlay.addEventListener('click', (e) => {
-        if (e.target === libraryOverlay) this._closeLibraryModal();
-      });
-      albumCreateBtn.addEventListener('click', () => this._openAlbumCreateModal());
-      discoverBtn.addEventListener('click', () => this._discoverLibrary());
-      selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
-      selectCancelBtn.addEventListener('click', () => this._setLibrarySelectMode(false));
-      selectDeleteBtn.addEventListener('click', () => this._deleteSelectedFromLibrary());
+      if (uploadBtn) uploadBtn.addEventListener('click', () => this._openUploadModal());
+      if (backBtn) backBtn.addEventListener('click', () => this._openAlbumFolders());
+      if (artBackBtn) artBackBtn.addEventListener('click', () => this._openAlbumFolders());
+      if (albumCreateBtn) albumCreateBtn.addEventListener('click', () => this._openAlbumCreateModal());
+      if (discoverBtn) discoverBtn.addEventListener('click', () => this._discoverLibrary());
+      if (selectToggleBtn) selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
+      if (selectCancelBtn) selectCancelBtn.addEventListener('click', () => this._setLibrarySelectMode(false));
+      if (selectDeleteBtn) selectDeleteBtn.addEventListener('click', () => this._deleteSelectedFromLibrary());
     }
 
     // -----------------------------------------------------------------------
@@ -5200,14 +5206,23 @@
       this._renderLibrary();
     }
 
+    _getLibraryElements() {
+      const isArt = this._activeTab === 'art_gallery';
+      return {
+        grid: this.shadowRoot.getElementById(isArt ? 'art-grid' : 'lib-grid'),
+        breadcrumb: this.shadowRoot.getElementById(isArt ? 'art-breadcrumb' : 'lib-breadcrumb'),
+        title: this.shadowRoot.getElementById(isArt ? 'art-breadcrumb-title' : 'lib-breadcrumb-title'),
+        fb: this.shadowRoot.getElementById(isArt ? 'art-fb' : 'lib-fb'),
+      };
+    }
+
     _renderLibrary() {
-      const breadcrumb     = this.shadowRoot.getElementById('lib-breadcrumb');
-      const title          = this.shadowRoot.getElementById('lib-breadcrumb-title');
+      const el = this._getLibraryElements();
       const albumCreateBtn = this.shadowRoot.getElementById('album-create-btn');
 
       if (this._currentAlbum === null) {
-        breadcrumb.style.display = 'none';
-        albumCreateBtn.style.display = '';
+        if (el.breadcrumb) el.breadcrumb.style.display = 'none';
+        if (albumCreateBtn) albumCreateBtn.style.display = (this._activeTab === 'my_gallery') ? '' : 'none';
         this._librarySelectMode = false;
         this._librarySelected = new Set();
         this._syncLibrarySelectUI();
@@ -5215,55 +5230,72 @@
         return;
       }
 
-      breadcrumb.style.display = 'flex';
-      albumCreateBtn.style.display = 'none';
-      title.textContent = `📁 ${this._currentAlbum}`;
+      if (el.breadcrumb) el.breadcrumb.style.display = 'flex';
+      if (albumCreateBtn) albumCreateBtn.style.display = 'none';
+      if (el.title) el.title.textContent = `📁 ${this._currentAlbum}`;
       this._syncLibrarySelectUI();
       this._renderLibraryGrid();
     }
 
     _renderAlbumFolders() {
-      const grid = this.shadowRoot.getElementById('lib-grid');
+      const el = this._getLibraryElements();
+      const grid = el.grid;
+      if (!grid) return;
 
-      // The default album is always present (even with 0 photos), so
-      // "library is empty" has to be judged by total photo count, not
-      // album count.
-      const totalPhotos = this._albums.reduce((sum, a) => sum + a.count, 0);
-      if (!totalPhotos) {
-        grid.innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">▤</div>
-            <h2>Library is empty</h2>
-            <p>Upload photos above to add them to the shared library. They're converted
-               once per frame resolution and reused by every frame that matches —
-               no need to re-upload per frame.</p>
-          </div>
-        `;
-        return;
-      }
+      const isArt = this._activeTab === 'art_gallery';
 
-      // An album created by a scene pack install shares its name with the
-      // pack (see ScenePackManager.async_install_pack: album = pack["name"]).
-      // Matching on that, rather than tracking a separate flag, means this
-      // stays correct even for packs installed before this grouping existed.
-      const addonAlbumNames = new Set(
-        (this._scenePacks || []).filter(p => p.installed).map(p => p.name)
-      );
-      const userAlbums  = this._albums.filter(a => !addonAlbumNames.has(a.name));
-      const addonAlbums = this._albums.filter(a => addonAlbumNames.has(a.name));
+      if (isArt) {
+        const addonAlbumNames = new Set(
+          (this._scenePacks || []).filter(p => p.installed).map(p => p.name)
+        );
+        const addonAlbums = this._albums.filter(a => addonAlbumNames.has(a.name));
 
-      grid.innerHTML = '';
-
-      grid.appendChild(this._buildSectionHeader('👤 Your Albums'));
-      if (userAlbums.length) {
-        for (const album of userAlbums) grid.appendChild(this._buildAlbumTile(album));
+        grid.innerHTML = '';
+        if (addonAlbums.length) {
+          for (const album of addonAlbums) grid.appendChild(this._buildAlbumTile(album));
+        } else {
+          grid.innerHTML = `
+            <div class="empty">
+              <div class="empty-icon">🧩</div>
+              <h2>No expansions installed</h2>
+              <p>For content, check out the <a href="#" id="go-to-expansions-link" style="color:var(--primary-color);text-decoration:underline">Expansion Packs</a> tab.</p>
+            </div>
+          `;
+          const link = grid.querySelector('#go-to-expansions-link');
+          if (link) {
+            link.addEventListener('click', (e) => {
+              e.preventDefault();
+              this._setTab('expansion_packs');
+            });
+          }
+        }
       } else {
-        grid.appendChild(this._buildSectionEmpty('📁', 'No albums yet', 'Upload a photo to create one.'));
-      }
+        const totalPhotos = this._albums.reduce((sum, a) => sum + a.count, 0);
+        if (!totalPhotos) {
+          grid.innerHTML = `
+            <div class="empty">
+              <div class="empty-icon">▤</div>
+              <h2>Library is empty</h2>
+              <p>Upload photos above to add them to the shared library. They're converted
+                 once per frame resolution and reused by every frame that matches —
+                 no need to re-upload per frame.</p>
+            </div>
+          `;
+          return;
+        }
 
-      if (addonAlbums.length) {
-        grid.appendChild(this._buildSectionHeader('🧩 Add-on Albums'));
-        for (const album of addonAlbums) grid.appendChild(this._buildAlbumTile(album));
+        const addonAlbumNames = new Set(
+          (this._scenePacks || []).filter(p => p.installed).map(p => p.name)
+        );
+        const userAlbums = this._albums.filter(a => !addonAlbumNames.has(a.name));
+
+        grid.innerHTML = '';
+        grid.appendChild(this._buildSectionHeader('👤 Your Albums'));
+        if (userAlbums.length) {
+          for (const album of userAlbums) grid.appendChild(this._buildAlbumTile(album));
+        } else {
+          grid.appendChild(this._buildSectionEmpty('📁', 'No albums yet', 'Upload a photo to create one.'));
+        }
       }
     }
 
@@ -5357,7 +5389,9 @@
     }
 
     _renderLibraryGrid() {
-      const grid = this.shadowRoot.getElementById('lib-grid');
+      const el = this._getLibraryElements();
+      const grid = el.grid;
+      if (!grid) return;
 
       if (!this._library.length) {
         grid.innerHTML = `
@@ -7578,7 +7612,7 @@
 
     _onWallKeydown(e) {
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) return;
-      if (this._activeTab !== 'dashboard') return;
+      if (this._activeTab !== 'walls') return;
       // Never steal keys from form fields.
       const target = e.composedPath ? e.composedPath()[0] : e.target;
       const tag = target && target.tagName;

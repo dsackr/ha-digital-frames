@@ -34,25 +34,22 @@ test.describe('Consolidated dashboard', () => {
     await mockServer.stop();
   });
 
-  test('Dashboard is the default content tab, alongside Add-ons and Daily Content', async ({ page }) => {
+  test('Walls is the default content tab, alongside Gallery and Expansion Pack tabs', async ({ page }) => {
     const state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const xotdBtn = root.querySelector('.tab-btn[data-tab="xotd"]');
+      const widgetsBtn = root.querySelector('.tab-btn[data-tab="widgets"]');
       return {
         tabs: [...root.querySelectorAll('.tab-btn')].map((b) => b.dataset.tab),
-        activeContent: root.getElementById('tab-dashboard').classList.contains('active'),
+        activeContent: root.getElementById('tab-walls').classList.contains('active'),
         headerButtons: ['frame-add-btn', 'library-open-btn', 'settings-open-btn']
           .map((id) => !!root.getElementById(id)),
-        // Daily Content (skills) has no install gate -- always visible,
-        // unlike the retired per-instance xOTD model's hidden-until-
-        // installed tab button.
-        xotdTabHidden: xotdBtn.style.display === 'none',
+        widgetsTabHidden: widgetsBtn.style.display === 'none',
       };
     });
-    expect(state.tabs).toEqual(['dashboard', 'addons', 'xotd']);
+    expect(state.tabs).toEqual(['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs']);
     expect(state.activeContent).toBe(true);
     expect(state.headerButtons).toEqual([true, true, true]);
-    expect(state.xotdTabHidden).toBe(false);
+    expect(state.widgetsTabHidden).toBe(false);
   });
 
   test('tiles carry a footer with the frame name and live status', async ({ page }) => {
@@ -76,31 +73,26 @@ test.describe('Consolidated dashboard', () => {
     expect(footer.hasHoverOverlay).toBe(true);
   });
 
-  test('Manage Library opens as a modal and the upload sub-modal stacks above it', async ({ page }) => {
+  test('Manage Library switches to My Gallery tab and the upload sub-modal opens above it', async ({ page }) => {
     await page.evaluate(() => {
       document.getElementById('panel').shadowRoot.getElementById('library-open-btn').click();
     });
-    const libOpen = await page.evaluate(() => {
-      const root = document.getElementById('panel').shadowRoot;
-      return root.getElementById('library-modal-overlay').style.display;
+    const activeTab = await page.evaluate(() => {
+      return document.getElementById('panel')._activeTab;
     });
-    expect(libOpen).toBe('flex');
+    expect(activeTab).toBe('my_gallery');
 
     await page.evaluate(() => {
       document.getElementById('panel').shadowRoot.getElementById('lib-upload-btn').click();
     });
     const stacking = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const lib = root.getElementById('library-modal-overlay');
       const upload = root.getElementById('upload-modal-overlay');
       return {
         uploadOpen: upload.style.display === 'flex',
-        libZ: parseInt(getComputedStyle(lib).zIndex, 10),
-        uploadZ: parseInt(getComputedStyle(upload).zIndex, 10),
       };
     });
     expect(stacking.uploadOpen).toBe(true);
-    expect(stacking.uploadZ).toBeGreaterThan(stacking.libZ);
   });
 
   test('Settings opens with the current backend selected', async ({ page }) => {

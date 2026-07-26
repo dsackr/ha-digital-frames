@@ -35,7 +35,7 @@ type in frame_types.py (FrameType.byte_layout) rather than inferred:
   image come first (every row, top to bottom), followed by ALL right-half
   bytes (every row, top to bottom) -- matching a panel physically built from
   two side-by-side half-width e-ink halves, each driven from its own
-  contiguous block of the buffer. Used by the 13.1"/13.3" (EL133UF1) and
+  contiguous block of the buffer. Used by the 13.3" (EL133UF1) and
   31.5" panels.
 - **Sequential** (confirmed against Waveshare's own epd7in3e.py reference
   driver for the 7.3" E6 panel): one single contiguous buffer, pixel pairs
@@ -333,7 +333,7 @@ def _pack_split_halves(quantized_image: "Image.Image") -> bytes:
     """
     Pack a quantized image for a panel built from two independent
     half-width e-ink halves (confirmed against Fraimic's own reference
-    converter for the EL133UF1 / 13.1"/13.3" and 31.5" panels): rows are
+    converter for the EL133UF1 / 13.3" and 31.5" panels): rows are
     visited top to bottom, columns left to right within each half. Each row
     is split at the midpoint into a left half and a right half. All
     left-half bytes for the whole image are emitted first (row by row, top

@@ -58,12 +58,10 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ADDONS_DIRNAME,
-    AGENDA_RENDERER_PINNED_BASE,
-    AGENDA_RENDERER_SCRIPT_PATH,
     DOMAIN,
     SIGNAL_SKILLS_UPDATED,
-    XOTD_RENDERER_PINNED_BASE,
-    XOTD_RENDERER_SCRIPT_PATH,
+    XOTD_RENDERER_RELATIVE_PATH,
+    AGENDA_RENDERER_RELATIVE_PATH,
 )
 from .panel_codec import panel_codec_for_resolution
 
@@ -209,10 +207,7 @@ class SkillManager:
         self._skills: dict[str, Skill] = {}
         # Built-in skill_ids the user deleted — never auto-seed again.
         self._deleted_builtins: set[str] = set()
-        self._script_cache: bytes | None = None
-        self._script_cache_time: float = 0.0
-        self._agenda_script_cache: bytes | None = None
-        self._agenda_script_cache_time: float = 0.0
+
         # (skill_id, local_date) -> (fields, fetched_at); see
         # _async_fetch_content_fields.
         self._content_cache: dict[tuple[str, str], tuple[dict[str, Any], float]] = {}
@@ -383,52 +378,7 @@ class SkillManager:
     # Rendering
     # ------------------------------------------------------------------
 
-    async def _async_fetch_pinned_script(
-        self, pinned_base: str, script_path: str
-    ) -> bytes:
-        script_url = f"{pinned_base}/{script_path}"
-        session = async_get_clientsession(self.hass)
-        try:
-            async with session.get(script_url, timeout=_DOWNLOAD_TIMEOUT) as resp:
-                if resp.status != 200:
-                    raise SkillError(f"HTTP {resp.status} fetching renderer script")
-                return await resp.read()
-        except aiohttp.ClientError as err:
-            raise SkillError(f"Failed to fetch renderer script: {err}") from err
 
-    async def _async_script_bytes(self) -> bytes:
-        """Fetch the xOTD renderer script from its pinned commit (see
-        XOTD_RENDERER_PINNED_BASE) -- NOT from the scene-pack catalog's own
-        (main-tracking) script_url field, since this method's caller
-        depends on that exact commit's CLI contract (--render-only,
-        --config) rather than whatever happens to be on main right now."""
-        now = time.time()
-        if (
-            self._script_cache is not None
-            and now - self._script_cache_time < _SCRIPT_CACHE_TTL
-        ):
-            return self._script_cache
-
-        script_content = await self._async_fetch_pinned_script(
-            XOTD_RENDERER_PINNED_BASE, XOTD_RENDERER_SCRIPT_PATH
-        )
-        self._script_cache = script_content
-        self._script_cache_time = now
-        return script_content
-
-    async def _async_agenda_script_bytes(self) -> bytes:
-        now = time.time()
-        if (
-            self._agenda_script_cache is not None
-            and now - self._agenda_script_cache_time < _SCRIPT_CACHE_TTL
-        ):
-            return self._agenda_script_cache
-        script_content = await self._async_fetch_pinned_script(
-            AGENDA_RENDERER_PINNED_BASE, AGENDA_RENDERER_SCRIPT_PATH
-        )
-        self._agenda_script_cache = script_content
-        self._agenda_script_cache_time = now
-        return script_content
 
     async def _async_fetch_content_fields(self, skill: Skill) -> dict[str, Any]:
         """Build the renderer config payload from the skill's stored config.
@@ -472,17 +422,16 @@ class SkillManager:
 
     async def _async_run_renderer_script(
         self,
-        script_content: bytes,
+        script_path: str,
         script_config: dict[str, Any],
         run_dir_parts: tuple[str, ...],
         error_label: str,
     ) -> tuple[bytes, bytes | None]:
-        """Shared subprocess-per-isolated-run-dir execution for any pinned
+        """Shared subprocess-per-isolated-run-dir execution for any local
         xOTD renderer invocation, skill-backed (Word/Joke/Quote/Scripture)
-        or ephemeral (a typed message, never a stored Skill) -- writes
-        renderer.py + config.json into a fresh directory, runs
-        --render-only, reads back xotd.bin + xotd_preview.png (if present),
-        and always cleans up the directory afterward.
+        or ephemeral (a typed message, never a stored Skill) -- runs
+        --render-only against script_path, reads back xotd.bin +
+        xotd_preview.png (if present), and always cleans up the directory afterward.
 
         *run_dir_parts* are path segments under ADDONS_DIRNAME identifying
         this run; callers must make each call's parts unique (e.g. include
@@ -491,18 +440,15 @@ class SkillManager:
         """
         run_dir = self.hass.config.path(ADDONS_DIRNAME, *run_dir_parts)
 
-        def _write_inputs() -> tuple[str, str]:
+        def _write_inputs() -> str:
             os.makedirs(run_dir, exist_ok=True)
-            script_path = os.path.join(run_dir, "renderer.py")
-            with open(script_path, "wb") as f:
-                f.write(script_content)
             config_path = os.path.join(run_dir, "config.json")
             with open(config_path, "w") as f:
                 json.dump(script_config, f)
-            return script_path, config_path
+            return config_path
 
         try:
-            script_path, config_path = await self.hass.async_add_executor_job(
+            config_path = await self.hass.async_add_executor_job(
                 _write_inputs
             )
 
@@ -556,13 +502,15 @@ class SkillManager:
     async def _async_render_text(
         self, skill: Skill, entry: "ConfigEntry"
     ) -> tuple[bytes, bytes | None]:
-        """Run the pinned xOTD renderer; return (spectra_bin, rgb_png|None).
+        """Run the local xOTD renderer; return (spectra_bin, rgb_png|None).
 
         The renderer writes ``xotd.bin`` (Spectra pack) and
         ``xotd_preview.png`` (full RGB composition before pack). RGB is used
         for Meural JPEG encode and sharper previews.
         """
-        script_content = await self._async_script_bytes()
+        script_path = os.path.join(
+            os.path.dirname(__file__), XOTD_RENDERER_RELATIVE_PATH
+        )
         content_fields = await self._async_fetch_content_fields(skill)
 
         from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
@@ -583,7 +531,7 @@ class SkillManager:
         # simultaneously) must never share a config.json/xotd.bin, or
         # concurrent renders clobber each other's files.
         return await self._async_run_renderer_script(
-            script_content,
+            script_path,
             script_config,
             (f"skill_{skill.skill_id}", f"run_{uuid.uuid4().hex[:8]}"),
             skill.name,
@@ -592,14 +540,16 @@ class SkillManager:
     async def _async_render_message(
         self, message_text: str, style: str, width: int, height: int
     ) -> tuple[bytes, bytes | None]:
-        """Run the pinned xOTD renderer's "message" content_mode for a
+        """Run the local xOTD renderer's "message" content_mode for a
         user-typed message -- never a stored Skill, so no content cache and
         no skill_id involved. *width*/*height* may be a real frame's own
         resolution (single-frame/scene send) or a synthesized wall-banner
         canvas size, in which case only the returned rgb_png matters to the
         caller -- the .bin is packed for that canvas as a whole and is
         never sent to any one frame as-is."""
-        script_content = await self._async_script_bytes()
+        script_path = os.path.join(
+            os.path.dirname(__file__), XOTD_RENDERER_RELATIVE_PATH
+        )
         try:
             layout = panel_codec_for_resolution(width, height).byte_layout
         except ValueError:
@@ -612,7 +562,7 @@ class SkillManager:
             "style": style,
         }
         return await self._async_run_renderer_script(
-            script_content,
+            script_path,
             script_config,
             ("message", f"run_{uuid.uuid4().hex[:8]}"),
             "message",
@@ -751,8 +701,10 @@ class SkillManager:
     async def _async_render_agenda(
         self, skill: Skill, entry: "ConfigEntry"
     ) -> tuple[bytes, bytes | None]:
-        """Run pinned agenda_renderer --render-only; return (bin, rgb_png)."""
-        script_content = await self._async_agenda_script_bytes()
+        """Run local agenda_renderer --render-only; return (bin, rgb_png)."""
+        script_path = os.path.join(
+            os.path.dirname(__file__), AGENDA_RENDERER_RELATIVE_PATH
+        )
         script_config = self._agenda_script_config(skill, entry)
 
         ha_events: list[dict[str, Any]] = []
@@ -763,21 +715,18 @@ class SkillManager:
             ADDONS_DIRNAME, f"skill_{skill.skill_id}", f"run_{uuid.uuid4().hex[:8]}"
         )
 
-        def _write_inputs() -> tuple[str, str]:
+        def _write_inputs() -> str:
             os.makedirs(run_dir, exist_ok=True)
-            script_path = os.path.join(run_dir, "renderer.py")
-            with open(script_path, "wb") as f:
-                f.write(script_content)
             config_path = os.path.join(run_dir, "config.json")
             with open(config_path, "w") as f:
                 json.dump(script_config, f)
             if ha_events is not None:
                 with open(os.path.join(run_dir, "ha_events.json"), "w") as f:
                     json.dump(ha_events, f)
-            return script_path, config_path
+            return config_path
 
         try:
-            script_path, config_path = await self.hass.async_add_executor_job(
+            config_path = await self.hass.async_add_executor_job(
                 _write_inputs
             )
             try:

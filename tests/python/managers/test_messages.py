@@ -77,17 +77,7 @@ def skill_manager(hass, fake_library, fake_scene_packs):
 
 @pytest.fixture
 def mock_script_download(aioclient_mock):
-    """Every message render fetches the pinned xOTD renderer script over
-    HTTP first (see SkillManager._async_script_bytes) -- register that
-    response so tests exercising the render path don't hit a real network
-    call."""
-    from custom_components.digital_frames.const import (
-        XOTD_RENDERER_PINNED_BASE,
-        XOTD_RENDERER_SCRIPT_PATH,
-    )
-
-    script_url = f"{XOTD_RENDERER_PINNED_BASE}/{XOTD_RENDERER_SCRIPT_PATH}"
-    aioclient_mock.get(script_url, content=b"fake-script-bytes")
+    """Local renderer script execution - no network downloads to mock."""
     return aioclient_mock
 
 

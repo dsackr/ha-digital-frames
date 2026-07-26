@@ -18,7 +18,7 @@ function frames() {
 
 async function openXotdTab(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="xotd"]').click();
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="widgets"]').click();
   });
   await page.waitForFunction(() => {
     const grid = document.getElementById('panel').shadowRoot.getElementById('xotd-grid');

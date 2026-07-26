@@ -97,9 +97,9 @@ FRAME_TYPES: dict[str, FrameType] = {
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_OFFICIAL,
     ),
-    "13.1": FrameType(
-        id="13.1",
-        display_name='13.1" Community Clone',
+    "13.3_clone": FrameType(
+        id="13.3_clone",
+        display_name='13.3" Community Clone',
         resolution=(1200, 1600),
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_CLONE,

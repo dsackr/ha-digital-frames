@@ -98,16 +98,7 @@ def skill_manager(hass, fake_library, fake_scene_packs):
 
 @pytest.fixture
 def mock_script_download(aioclient_mock):
-    """Every text-mode render fetches the renderer script over HTTP first
-    (see SkillManager._async_script_bytes) -- register that response so
-    tests exercising the render path don't hit a real network call."""
-    from custom_components.digital_frames.const import (
-        XOTD_RENDERER_PINNED_BASE,
-        XOTD_RENDERER_SCRIPT_PATH,
-    )
-
-    script_url = f"{XOTD_RENDERER_PINNED_BASE}/{XOTD_RENDERER_SCRIPT_PATH}"
-    aioclient_mock.get(script_url, content=b"fake-script-bytes")
+    """Local renderer script execution - no network downloads to mock."""
     return aioclient_mock
 
 
@@ -687,24 +678,4 @@ async def test_text_skill_fields_come_from_config_not_catalog(
     assert fake_scene_packs.get_pack_calls == 0
 
 
-async def test_script_bytes_cached_across_calls(
-    hass, skill_manager, aioclient_mock
-):
-    from custom_components.digital_frames.const import (
-        XOTD_RENDERER_PINNED_BASE,
-        XOTD_RENDERER_SCRIPT_PATH,
-    )
 
-    await skill_manager.async_load()
-    script_url = f"{XOTD_RENDERER_PINNED_BASE}/{XOTD_RENDERER_SCRIPT_PATH}"
-    aioclient_mock.get(script_url, content=b"fake-script-bytes")
-
-    first_bytes = await skill_manager._async_script_bytes()
-    assert first_bytes == b"fake-script-bytes"
-
-    second_bytes = await skill_manager._async_script_bytes()
-    assert second_bytes == first_bytes
-    # The TTL cache short-circuits before ever re-fetching -- aioclient_mock
-    # only has one registered response, so a second real request would
-    # raise "No mock registered".
-    assert len(aioclient_mock.mock_calls) == 1

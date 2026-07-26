@@ -24,7 +24,7 @@ const PACK_TWO = {
 
 async function openAddons(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="addons"]').click();
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="expansion_packs"]').click();
   });
 }
 

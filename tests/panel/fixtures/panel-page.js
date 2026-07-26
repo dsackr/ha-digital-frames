@@ -30,7 +30,7 @@ async function gotoPanel(page, baseUrl, { frames = [], query = '' } = {}) {
 // readable and are robust to the default tab ever changing.
 async function openDashboard(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="dashboard"]').click();
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="walls"]').click();
   });
 }
 const openScenesTab = openDashboard;

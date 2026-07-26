@@ -19,7 +19,7 @@ const IMAGES = [
 // does), so the thumbnail paints on its canvas tile.
 async function openScenesTabAndWaitForCover(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="dashboard"]').click();
+    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="walls"]').click();
   });
   await page.waitForFunction(() => {
     const sel = document.getElementById('panel').shadowRoot.getElementById('wall-scene-select');
@@ -158,7 +158,7 @@ test.describe('Panel element lifecycle', () => {
     // Trigger the wall-tile cover thumbnail fetch (same _loadThumbnail /
     // _fetchThumb path every thumbnail in the panel uses).
     await page.evaluate(() => {
-      document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="dashboard"]').click();
+      document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="walls"]').click();
     });
     await page.waitForFunction(() => {
       const sel = document.getElementById('panel').shadowRoot.getElementById('wall-scene-select');

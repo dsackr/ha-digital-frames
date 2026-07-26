@@ -286,10 +286,10 @@ def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
     signals, in order:
 
     1. display.device_type -- newer clone firmware states it outright
-       (e.g. '13.1" E-Ink').
+       (e.g. '13.3" E-Ink').
     2. Reported pixel dimensions matched against the frame-type registry
        (orientation-agnostic, like byte_layout_for_resolution). Resolutions
-       shared by multiple types (13.3" official vs 13.1" clone, both
+       shared by multiple types (13.3" official vs 13.3" clone, both
        1200x1600) are disambiguated by MAC OUI -- functionally either
        answer renders identically (the registry validates shared
        resolutions agree on byte layout), so that tiebreak only affects
@@ -298,8 +298,13 @@ def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
     display = info.get("display") or {}
     device_type = display.get("device_type") or ""
     inches = _SIZE_INCHES_RE.search(device_type)
-    if inches and inches.group(1) in FRAME_TYPES:
-        return inches.group(1)
+    if inches:
+        size_str = inches.group(1)
+        is_official = mac_from_info(info).startswith(_OFFICIAL_MAC_PREFIXES)
+        if not is_official and f"{size_str}_clone" in FRAME_TYPES:
+            return f"{size_str}_clone"
+        if size_str in FRAME_TYPES:
+            return size_str
 
     dims = dimensions_from_info(info)
     if dims is None:

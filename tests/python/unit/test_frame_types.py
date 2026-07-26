@@ -34,7 +34,7 @@ def test_every_registered_resolution_resolves_to_its_declared_layout():
 def test_every_registered_resolution_resolves_to_its_codec_id():
     for frame_type in FRAME_TYPES.values():
         width, height = frame_type.resolution
-        # Shared resolutions (13.3 vs 13.1) may return either FrameType id;
+        # Shared resolutions (13.3 vs 13.3_clone) may return either FrameType id;
         # codecs must still agree (enforced by _validate_registry).
         assert codec_id_for_resolution(width, height) == frame_type.codec_id
         assert (
