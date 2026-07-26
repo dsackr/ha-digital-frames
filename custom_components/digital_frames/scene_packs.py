@@ -170,22 +170,39 @@ class ScenePackManager:
             return self._index_cache
 
         session = async_get_clientsession(self.hass)
+        data = None
         try:
             async with session.get(SCENE_PACK_INDEX_URL, timeout=_FETCH_TIMEOUT) as resp:
-                if resp.status != 200:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                elif resp.status != 404:
                     raise ScenePackError(
                         f"Scene pack catalog returned HTTP {resp.status}"
                     )
-                # raw.githubusercontent.com serves this as text/plain, not
-                # application/json -- content_type=None skips aiohttp's
-                # strict content-type check on an otherwise-valid JSON body.
-                data = await resp.json(content_type=None)
         except ScenePackError:
             raise
-        except Exception as err:  # noqa: BLE001
-            raise ScenePackError(
-                f"Couldn't reach the scene pack catalog: {err}"
-            ) from err
+        except AssertionError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
+
+        if data is None:
+            fallback_url = "https://raw.githubusercontent.com/dsackr/frame-addons/main/scene_packs/index.json"
+            try:
+                async with session.get(fallback_url, timeout=_FETCH_TIMEOUT) as resp:
+                    if resp.status != 200:
+                        raise ScenePackError(
+                            f"Scene pack catalog returned HTTP {resp.status}"
+                        )
+                    data = await resp.json(content_type=None)
+            except ScenePackError:
+                raise
+            except AssertionError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                raise ScenePackError(
+                    f"Couldn't reach the scene pack catalog (fallback): {err}"
+                ) from err
 
         if not isinstance(data, dict):
             raise ScenePackError("Scene pack catalog is malformed")
@@ -289,10 +306,34 @@ class ScenePackManager:
         filename = image_spec.get("filename") or "image.jpg"
         path = image_spec.get("path")
         url = f"{SCENE_PACK_RAW_BASE}/{path}"
-        async with session.get(url, timeout=_DOWNLOAD_TIMEOUT) as resp:
-            if resp.status != 200:
-                raise ScenePackError(f"HTTP {resp.status} fetching {filename}")
-            raw_bytes = await resp.read()
+        raw_bytes = None
+        try:
+            async with session.get(url, timeout=_DOWNLOAD_TIMEOUT) as resp:
+                if resp.status == 200:
+                    raw_bytes = await resp.read()
+                elif resp.status != 404:
+                    raise ScenePackError(f"HTTP {resp.status} fetching {filename}")
+        except ScenePackError:
+            raise
+        except AssertionError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
+
+        if raw_bytes is None:
+            fallback_base = "https://raw.githubusercontent.com/dsackr/frame-addons/main"
+            url2 = f"{fallback_base}/{path}"
+            try:
+                async with session.get(url2, timeout=_DOWNLOAD_TIMEOUT) as resp:
+                    if resp.status != 200:
+                        raise ScenePackError(f"HTTP {resp.status} fetching {filename}")
+                    raw_bytes = await resp.read()
+            except ScenePackError:
+                raise
+            except AssertionError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                raise ScenePackError(f"Couldn't fetch image {filename} (fallback): {err}") from err
 
         expected = image_spec.get("sha256")
         if expected:

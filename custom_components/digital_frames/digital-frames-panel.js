@@ -3145,7 +3145,7 @@
           </div>
           <div class="editor-stage" id="pack-preview-stage">
             <button class="pack-preview-nav pack-preview-prev" id="pack-preview-prev" title="Previous image">‹</button>
-            <img id="pack-preview-img" alt="">
+            <img id="pack-preview-img" alt="" onerror="if (this.src.includes('ha-digital-frames-expansion-packs')) this.src = this.src.replace('ha-digital-frames-expansion-packs', 'frame-addons')">
             <button class="pack-preview-nav pack-preview-next" id="pack-preview-next" title="Next image">›</button>
           </div>
           <div class="pack-preview-caption" id="pack-preview-caption"></div>
@@ -9315,7 +9315,7 @@
       const el = document.createElement('div');
       el.className = 'card category-tile';
       el.innerHTML = `
-        <img class="category-tile-cover" src="${this._esc(coverUrl)}" alt="${this._esc(info.label)}" loading="lazy">
+        <img class="category-tile-cover" src="${this._esc(coverUrl)}" alt="${this._esc(info.label)}" loading="lazy" onerror="if (this.src.includes('ha-digital-frames-expansion-packs')) this.src = this.src.replace('ha-digital-frames-expansion-packs', 'frame-addons')">
         <div class="category-tile-overlay">
           <div class="category-tile-title">${this._esc(info.label)}</div>
           <div class="category-tile-summary">
@@ -9360,7 +9360,7 @@
       }
 
       el.innerHTML = `
-        <img class="pack-cover" src="${this._esc(coverUrl)}" alt="${this._esc(pack.name)}" loading="lazy" title="Preview this collection">
+        <img class="pack-cover" src="${this._esc(coverUrl)}" alt="${this._esc(pack.name)}" loading="lazy" title="Preview this collection" onerror="if (this.src.includes('ha-digital-frames-expansion-packs')) this.src = this.src.replace('ha-digital-frames-expansion-packs', 'frame-addons')">
         <div class="scene-card-title">${this._esc(pack.name)}${pack.featured ? ' ★' : ''}</div>
         <div class="pack-desc">${this._esc(pack.description || '')}</div>
         <div class="scene-card-summary">${summaryText}</div>
