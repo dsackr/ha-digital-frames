@@ -92,3 +92,4 @@ Notes on reading it:
 | 2026-07-25 | a75323d | panel-playwright | success | 157 passed | — | CI |
 | 2026-07-26 | 5790bea | panel-playwright | success | 158 passed | — | CI |
 | 2026-07-26 | 9a6417c | panel-playwright | success | 158 passed | — | CI |
+| 2026-07-26 | 9a6417c | backend-pytest | success | 475 passed in 64.09s (0:01:04) | 66% | CI |
