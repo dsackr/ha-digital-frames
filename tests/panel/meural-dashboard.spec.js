@@ -73,4 +73,20 @@ test.describe('Meural on dashboard (ip send entity)', () => {
     expect(entryIds.has('entry_fraimic')).toBe(true);
     expect(entryIds.has('entry_meural')).toBe(true);
   });
+
+  test('Meural does not show a battery percentage or icon in its status footer', async ({ page }) => {
+    const tiles = await getWallTiles(page);
+    const meuralTile = tiles.find((t) => t.entryId === 'entry_meural');
+    expect(meuralTile).toBeDefined();
+
+    // Check status text
+    const statusText = await page.evaluate((id) => {
+      const root = document.getElementById('panel').shadowRoot;
+      const tile = [...root.querySelectorAll('.wall-tile')].find((t) => t.dataset.entryId === id);
+      return tile.querySelector('.wall-tile-status').textContent;
+    }, 'entry_meural');
+
+    // The status text should only be the online dot (●) and should NOT contain the battery emoji or %
+    expect(statusText).toBe('●');
+  });
 });

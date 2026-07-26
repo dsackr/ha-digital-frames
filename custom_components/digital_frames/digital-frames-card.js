@@ -895,7 +895,12 @@
       let html;
       if (st && st.state !== 'unavailable' && st.state !== 'unknown') {
         const pct = parseFloat(st.state);
-        const battText = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'} ${pct}% `;
+        const hasBattery = st.attributes && (
+          st.attributes.device_class === 'battery' ||
+          st.attributes.unit_of_measurement === '%' ||
+          (battEid || '').includes('battery')
+        );
+        const battText = (hasBattery && !isNaN(pct)) ? `${pct >= 20 ? '🔋' : '🪫'} ${pct}% ` : '';
         html = `${battText}<span class="dot-online">● Online</span>`;
       } else if (!st && this._frame) {
         html = this._frame.online

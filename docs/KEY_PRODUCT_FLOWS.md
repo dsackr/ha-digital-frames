@@ -798,7 +798,8 @@ to display details correctly when waving up). Sleep-queue does not apply
 (send resumes the display if suspended).
 Meural has no battery sensor — the dashboard and send APIs identify the
 frame by its `_ip` sensor (same fallback as `battery_entity_id` on
-`GET /api/digital_frames/frames`).
+`GET /api/digital_frames/frames`), and the UI filters out this diagnostic
+fallback so it does not format the IP address as a battery percentage (showing N/A instead).
 
 **Local device features (no Meural cloud):**
 

@@ -3405,7 +3405,12 @@
         html = '<span class="dot-off">●</span>';
       } else {
         const pct = parseFloat(state.state);
-        const bat = isNaN(pct) ? '' : `${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
+        const hasBattery = state.attributes && (
+          state.attributes.device_class === 'battery' ||
+          state.attributes.unit_of_measurement === '%' ||
+          (frame.entityId || '').includes('battery')
+        );
+        const bat = (hasBattery && !isNaN(pct)) ? `${pct >= 20 ? '🔋' : '🪫'}${pct}% ` : '';
         html = `${bat}<span class="dot-on">●</span>`;
       }
       // hass is re-assigned on every state change of ANY entity in the
@@ -4227,14 +4232,21 @@
       const orient = frame.orientation ? (frame.orientation.charAt(0).toUpperCase() + frame.orientation.slice(1)) : 'Auto';
       this.shadowRoot.getElementById('frame-info-orientation').textContent = orient;
 
-      const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
-      let batteryText = 'N/A';
-      if (state && state.state !== 'unavailable' && state.state !== 'unknown') {
-        const pct = parseFloat(state.state);
-        if (!isNaN(pct)) {
-          batteryText = `${pct}%`;
-        }
-      }
+       const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
+       let batteryText = 'N/A';
+       if (state && state.state !== 'unavailable' && state.state !== 'unknown') {
+         const hasBattery = state.attributes && (
+           state.attributes.device_class === 'battery' ||
+           state.attributes.unit_of_measurement === '%' ||
+           (frame.entityId || '').includes('battery')
+         );
+         if (hasBattery) {
+           const pct = parseFloat(state.state);
+           if (!isNaN(pct)) {
+             batteryText = `${pct}%`;
+           }
+         }
+       }
       this.shadowRoot.getElementById('frame-info-battery').textContent = batteryText;
 
       const fb = this.shadowRoot.getElementById('frame-settings-fb');
