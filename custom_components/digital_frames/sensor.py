@@ -194,6 +194,20 @@ class DigitalFramesBatterySensor(DigitalFramesBaseSensor):
         except (KeyError, TypeError, ValueError):
             return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, any] | None:
+        """Return the extra state attributes."""
+        if not self.coordinator.data:
+            return None
+        data = self.coordinator.data
+        try:
+            raw = data["battery"]["charging"]
+            if isinstance(raw, bool):
+                return {"charging": raw}
+            return {"charging": str(raw).lower() == "true"}
+        except (KeyError, TypeError):
+            return None
+
 
 class DigitalFramesWifiRssiSensor(DigitalFramesBaseSensor):
     """WiFi signal strength sensor (dBm)."""

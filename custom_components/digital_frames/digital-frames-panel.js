@@ -3627,18 +3627,42 @@
 
       const state = this._hass.states[frame.entityId];
       let html;
-      if (!state || state.state === 'unavailable' || state.state === 'unknown') {
+
+      const isChargingByAttr = state && state.attributes && (state.attributes.charging === true || state.attributes.is_charging === true);
+      let isCharging = isChargingByAttr;
+      if (!isCharging && frame.entityId) {
+        const chargingEntityId = frame.entityId.replace('_battery', '_charging');
+        const chargingState = this._hass && this._hass.states[chargingEntityId];
+        if (chargingState && (chargingState.state === 'on' || chargingState.state === 'true' || chargingState.state === 'True')) {
+          isCharging = true;
+        }
+      }
+
+      const pct = state ? parseFloat(state.state) : NaN;
+      const hasBattery = state && state.attributes && (
+        state.attributes.device_class === 'battery' ||
+        state.attributes.unit_of_measurement === '%' ||
+        (frame.entityId || '').includes('battery')
+      );
+
+      const isOnline = state && state.state !== 'unavailable' && state.state !== 'unknown';
+
+      if (!isOnline && !isCharging) {
         html = '<span class="dot-off">●</span>';
       } else {
-        const pct = parseFloat(state.state);
-        const hasBattery = state.attributes && (
-          state.attributes.device_class === 'battery' ||
-          state.attributes.unit_of_measurement === '%' ||
-          (frame.entityId || '').includes('battery')
-        );
-        const bat = (hasBattery && !isNaN(pct)) ? `${pct >= 20 ? '🔋' : '🪫'}${pct}% ` : '';
+        let bat = '';
+        if (isCharging) {
+          if (isNaN(pct) || pct === 0 || !hasBattery) {
+            bat = `<span style="color:#4caf50;font-size:14px;margin-right:2px" title="Plugged in">🔌</span>`;
+          } else {
+            bat = `<span title="Charging">⚡</span>${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
+          }
+        } else if (hasBattery && !isNaN(pct)) {
+          bat = `${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
+        }
         html = `${bat}<span class="dot-on">●</span>`;
       }
+
       // hass is re-assigned on every state change of ANY entity in the
       // house -- skip the DOM write when this frame's status text is
       // unchanged, or the constant innerHTML churn janks whatever screen
@@ -4456,21 +4480,38 @@
       this.shadowRoot.getElementById('frame-info-orientation').textContent = orient;
 
        const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
-       let batteryText = 'N/A';
-       if (state && state.state !== 'unavailable' && state.state !== 'unknown') {
+       let batteryHtml = 'N/A';
+       if (state) {
+         const isChargingByAttr = state.attributes && (state.attributes.charging === true || state.attributes.is_charging === true);
+         let isCharging = isChargingByAttr;
+         if (!isCharging && frame.entityId) {
+           const chargingEntityId = frame.entityId.replace('_battery', '_charging');
+           const chargingState = this._hass.states[chargingEntityId];
+           if (chargingState && (chargingState.state === 'on' || chargingState.state === 'true' || chargingState.state === 'True')) {
+             isCharging = true;
+           }
+         }
+
+         const pct = parseFloat(state.state);
          const hasBattery = state.attributes && (
            state.attributes.device_class === 'battery' ||
            state.attributes.unit_of_measurement === '%' ||
            (frame.entityId || '').includes('battery')
          );
-         if (hasBattery) {
-           const pct = parseFloat(state.state);
-           if (!isNaN(pct)) {
-             batteryText = `${pct}%`;
+
+         const isOnline = state.state !== 'unavailable' && state.state !== 'unknown';
+
+         if (isCharging) {
+           if (isNaN(pct) || pct === 0 || !hasBattery) {
+             batteryHtml = '<span style="color:#4caf50">🔌 Plugged in</span>';
+           } else {
+             batteryHtml = `<span style="color:#4caf50">⚡ Charging (${pct}%)</span>`;
            }
+         } else if (isOnline && hasBattery && !isNaN(pct)) {
+           batteryHtml = `${pct}%`;
          }
        }
-      this.shadowRoot.getElementById('frame-info-battery').textContent = batteryText;
+       this.shadowRoot.getElementById('frame-info-battery').innerHTML = batteryHtml;
 
       const fb = this.shadowRoot.getElementById('frame-settings-fb');
       fb.style.display = 'none';
