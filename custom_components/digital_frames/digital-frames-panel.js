@@ -964,6 +964,46 @@
       margin-top: 2px;
     }
 
+    /* ---- addons hub grid and tiles ---- */
+    .addons-hub-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-top: 16px;
+    }
+    .addons-hub-tile {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+      cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease;
+      border: 1px solid var(--divider-color, rgba(0,0,0,.12));
+    }
+    .addons-hub-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    }
+    .addons-hub-tile-icon {
+      font-size: 36px;
+      flex-shrink: 0;
+    }
+    .addons-hub-tile-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .addons-hub-tile-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      margin-bottom: 4px;
+    }
+    .addons-hub-tile-desc {
+      font-size: 13px;
+      color: var(--secondary-text-color);
+      line-height: 1.4;
+    }
+
     /* ---- xOTD "Daily Content" tab: one tile per content type ---- */
     .xotd-mode-grid {
       display: grid;
@@ -2119,6 +2159,7 @@
       this._skills = [];              // [{ skill_id, name, content_mode, config }] -- loaded at boot and refreshed on tab activation, see _setTab; also feeds the wall picker's Skills section
       this._activeTab     = 'walls'; // 'walls' | 'my_gallery' | 'art_gallery' | 'widgets' | 'expansion_packs'
       this._packCategory  = null;     // null = category-tile view; otherwise the category id being browsed
+      this._packCategoryView = 'root'; // 'root' | 'curated_art' | 'widgets'
       this._packPreview   = null;     // { pack, index } while the read-only image gallery is open, else null
 
       // The Scenes tab *is* the Walls workflow -- a wall is just a saved
@@ -2270,6 +2311,7 @@
       // consumes arrow keys for its own navigation) can stopPropagation
       // it away from us. Guards in _onWallKeydown keep it polite.
       window.addEventListener('keydown', this._onWallKeydown, { signal, capture: true });
+      window.addEventListener('popstate', () => this._applyStateFromUrl(), { signal });
       if (this._sweepUploadInput) {
         window.addEventListener('focus', this._sweepUploadInput, { signal });
         document.addEventListener('visibilitychange', this._onDocVisibility, { signal });
@@ -2421,6 +2463,96 @@
       }
     }
 
+    _pushState(replace = false) {
+      try {
+        const params = new URLSearchParams();
+        if (this._activeTab) params.set('tab', this._activeTab);
+        
+        if (this._activeTab === 'expansion_packs') {
+          if (this._packCategoryView) params.set('pack_view', this._packCategoryView);
+          if (this._packCategory) params.set('pack_cat', this._packCategory);
+          if (this._packPreview) {
+            params.set('pack_preview', this._packPreview.pack.id);
+            params.set('pack_preview_idx', String(this._packPreview.index));
+          }
+        } else if (this._activeTab === 'my_gallery' || this._activeTab === 'art_gallery') {
+          if (this._currentAlbum) params.set('album', this._currentAlbum);
+        }
+        
+        const newSearch = params.toString();
+        const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '');
+        
+        if (window.location.search !== (newSearch ? '?' + newSearch : '')) {
+          if (replace) {
+            window.history.replaceState(null, '', newUrl);
+          } else {
+            window.history.pushState(null, '', newUrl);
+          }
+        }
+      } catch (err) {
+        console.error('[fraimic-panel] failed to push state:', err);
+      }
+    }
+
+    async _applyStateFromUrl() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab') || 'walls';
+        const packView = params.get('pack_view') || 'root';
+        const packCat = params.get('pack_cat');
+        const packPreviewId = params.get('pack_preview');
+        const packPreviewIdx = parseInt(params.get('pack_preview_idx') || '0', 10);
+        const album = params.get('album');
+        
+        // 1. Apply active tab
+        if (this._activeTab !== tab) {
+          this._setTab(tab, true); // skipPushState = true
+        }
+        
+        // 2. Apply album state (for my_gallery / art_gallery)
+        if (tab === 'my_gallery' || tab === 'art_gallery') {
+          if (album) {
+            if (this._currentAlbum !== album) {
+              const token = (this._libraryLoadToken = (this._libraryLoadToken || 0) + 1);
+              await this._loadLibrary(album, token);
+              if (token === this._libraryLoadToken) {
+                this._currentAlbum = album;
+                this._renderLibrary();
+              }
+            }
+          } else {
+            if (this._currentAlbum !== null) {
+              this._currentAlbum = null;
+              this._renderLibrary();
+            }
+          }
+        }
+        
+        // 3. Apply expansion packs sub-state
+        if (tab === 'expansion_packs') {
+          this._packCategoryView = packView;
+          this._packCategory = packCat;
+          
+          if (packPreviewId) {
+            const pack = (this._scenePacks || []).find(p => p.id === packPreviewId);
+            if (pack) {
+              if (!this._packPreview || this._packPreview.pack.id !== packPreviewId || this._packPreview.index !== packPreviewIdx) {
+                this._openPackPreview(pack, packPreviewIdx, true);
+              }
+            } else {
+              this._closePackPreview(true);
+            }
+          } else {
+            this._closePackPreview(true);
+          }
+          
+          this._renderScenePacks();
+        }
+      } catch (err) {
+        console.error('[fraimic-panel] failed to apply state from URL:', err);
+      }
+    }
+
     _wireNav() {
       this.shadowRoot.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => this._setTab(btn.dataset.tab));
@@ -2444,10 +2576,47 @@
           this._renderScenePacks();
         });
       }
-      this._setTab('walls');
+
+      // Wire Expansion Packs hub tiles
+      const hubArt = this.shadowRoot.getElementById('hub-tile-art');
+      if (hubArt) {
+        hubArt.addEventListener('click', () => {
+          this._packCategoryView = 'curated_art';
+          this._packCategory = null;
+          this._pushState();
+          this._renderScenePacks();
+        });
+      }
+      const hubWidgets = this.shadowRoot.getElementById('hub-tile-widgets');
+      if (hubWidgets) {
+        hubWidgets.addEventListener('click', () => {
+          this._packCategoryView = 'widgets';
+          this._pushState();
+          this._renderScenePacks();
+        });
+      }
+      const artBack = this.shadowRoot.getElementById('addons-art-back-btn');
+      if (artBack) {
+        artBack.addEventListener('click', () => {
+          this._packCategoryView = 'root';
+          this._packCategory = null;
+          this._pushState();
+          this._renderScenePacks();
+        });
+      }
+      const widgetsBack = this.shadowRoot.getElementById('addons-widgets-back-btn');
+      if (widgetsBack) {
+        widgetsBack.addEventListener('click', () => {
+          this._packCategoryView = 'root';
+          this._pushState();
+          this._renderScenePacks();
+        });
+      }
+
+      this._applyStateFromUrl();
     }
 
-    _setTab(name) {
+    _setTab(name, skipPushState = false) {
       this._activeTab = name;
       const root = this.shadowRoot;
       ['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs'].forEach(tab => {
@@ -2456,6 +2625,11 @@
         if (content) content.classList.toggle('active', tab === name);
         if (btn)     btn.classList.toggle('active', tab === name);
       });
+
+      if (!skipPushState) {
+        this._pushState();
+      }
+
       // Fire-and-forget: keeps the tab switch itself synchronous/instant,
       // re-rendering once the (throttled) refetch resolves.
       if (name === 'expansion_packs') this._refreshScenePacksIfStale();
@@ -2647,23 +2821,62 @@
           <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
             Curated art collections and dynamic layout widgets for your frames.
           </p>
-          
-          <h3 style="margin:16px 0 10px;font-size:14px">Art Collections</h3>
-          <div class="modal-row" style="margin:0 0 12px;max-width:420px">
-            <input type="search" id="gallery-search" placeholder="Search collections…"
-                   style="width:100%" autocomplete="off">
-          </div>
           <div class="feedback" id="pack-fb"></div>
-          <div class="addons-crumb" id="addons-crumb"></div>
-          <div class="lib-grid" id="pack-grid" style="margin-bottom:24px">
-            <div class="empty">
-              <div class="empty-icon">⋯</div>
-              <h2>Loading gallery…</h2>
+
+          <div id="addons-root-view">
+            <div class="addons-section" id="addons-featured-section" style="display:none">
+              <h2 class="addons-section-title">Featured</h2>
+              <div class="lib-grid" id="gallery-featured-grid"></div>
+            </div>
+            
+            <div class="addons-section" style="margin-top:24px">
+              <h2 class="addons-section-title">Explore Add-ons</h2>
+              <div class="addons-hub-grid">
+                <div class="card addons-hub-tile" id="hub-tile-art">
+                  <div class="addons-hub-tile-icon">🎨</div>
+                  <div class="addons-hub-tile-content">
+                    <div class="addons-hub-tile-title">Curated Art</div>
+                    <div class="addons-hub-tile-desc">Masterpieces, historic catalogs, and seasonal collections. Browse by category or search.</div>
+                  </div>
+                </div>
+                <div class="card addons-hub-tile" id="hub-tile-widgets">
+                  <div class="addons-hub-tile-icon">⚙️</div>
+                  <div class="addons-hub-tile-content">
+                    <div class="addons-hub-tile-title">Widgets</div>
+                    <div class="addons-hub-tile-desc">Dynamic layout widgets including daily quotes, verses, agenda, calendar, and image feeds.</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          
-          <h3 style="margin:24px 0 10px;font-size:14px">Widgets</h3>
-          <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
+
+          <div id="addons-art-view" style="display:none">
+            <div class="addons-crumb" id="addons-art-crumb" style="display:flex;margin-bottom:12px">
+              <button class="btn-ghost" id="addons-art-back-btn">← Expansion Packs</button>
+              <span class="addons-crumb-label">Curated Art</span>
+            </div>
+            
+            <div class="modal-row" style="margin:0 0 16px;max-width:420px">
+              <input type="search" id="gallery-search" placeholder="Search collections…"
+                     style="width:100%" autocomplete="off">
+            </div>
+            
+            <div class="addons-crumb" id="addons-crumb" style="margin-top:10px"></div>
+            <div class="lib-grid" id="pack-grid" style="margin-bottom:24px">
+              <div class="empty">
+                <div class="empty-icon">⋯</div>
+                <h2>Loading gallery…</h2>
+              </div>
+            </div>
+          </div>
+
+          <div id="addons-widgets-view" style="display:none">
+            <div class="addons-crumb" id="addons-widgets-crumb" style="display:flex;margin-bottom:16px">
+              <button class="btn-ghost" id="addons-widgets-back-btn">← Expansion Packs</button>
+              <span class="addons-crumb-label">Widgets</span>
+            </div>
+            <div class="xotd-mode-grid" id="xotd-mode-grid"></div>
+          </div>
         </div><!-- /tab-expansion_packs -->
 
         <!-- Modals live outside the tab-content divs -- they're position:fixed
@@ -9120,6 +9333,18 @@
         this._scenePacks = result.packs || [];
         this._galleryCatalog = result.catalog || {};
         this._scenePacksLoadedAt = Date.now();
+
+        // Check for deep-linked preview in URL search params
+        const params = new URLSearchParams(window.location.search);
+        const packPreviewId = params.get('pack_preview');
+        const packPreviewIdx = parseInt(params.get('pack_preview_idx') || '0', 10);
+        if (packPreviewId && !this._packPreview) {
+          const pack = this._scenePacks.find(p => p.id === packPreviewId);
+          if (pack) {
+            this._openPackPreview(pack, packPreviewIdx, true);
+          }
+        }
+
         return true;
       } catch (err) {
         console.error('[fraimic-panel] scene packs load failed:', err);
@@ -9171,98 +9396,146 @@
     }
 
     _renderScenePacks() {
+      const root = this.shadowRoot;
+      const rootView = root.getElementById('addons-root-view');
+      const artView = root.getElementById('addons-art-view');
+      const widgetsView = root.getElementById('addons-widgets-view');
+
+      if (rootView) rootView.style.display = 'none';
+      if (artView) artView.style.display = 'none';
+      if (widgetsView) widgetsView.style.display = 'none';
+
+      const view = this._packCategoryView || 'root';
+
+      if (view === 'root') {
+        if (rootView) rootView.style.display = 'block';
+        this._renderExpansionPacksRoot();
+      } else if (view === 'curated_art') {
+        if (artView) artView.style.display = 'block';
+        this._renderExpansionPacksArt();
+      } else if (view === 'widgets') {
+        if (widgetsView) widgetsView.style.display = 'block';
+        this._renderExpansionPacksWidgets();
+      }
+    }
+
+    _renderExpansionPacksRoot() {
+      const root = this.shadowRoot;
+      const featuredSec = root.getElementById('addons-featured-section');
+      const featuredGrid = root.getElementById('gallery-featured-grid');
+      
+      const featured = (this._scenePacks || []).filter(p => p.type !== 'widget' && p.featured);
+      
+      if (featured.length) {
+        if (featuredSec) featuredSec.style.display = 'block';
+        if (featuredGrid) {
+          featuredGrid.innerHTML = '';
+          for (const pack of featured) {
+            featuredGrid.appendChild(this._buildAnyPackCard(pack));
+          }
+        }
+      } else {
+        if (featuredSec) featuredSec.style.display = 'none';
+      }
+    }
+
+    _renderExpansionPacksWidgets() {
+      this._renderXotdModeTiles();
+    }
+
+    _renderExpansionPacksArt() {
       const grid = this.shadowRoot.getElementById('pack-grid');
       const crumb = this.shadowRoot.getElementById('addons-crumb');
       const q = this._gallerySearch || '';
       let visiblePacks = (this._scenePacks || []).filter((p) => p.type !== 'widget');
       visiblePacks = visiblePacks.filter((p) => this._galleryPackMatchesSearch(p, q));
 
-      if (!visiblePacks.length) {
-        crumb.style.display = 'none';
-        grid.className = 'lib-grid';
-        grid.innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">◈</div>
-            <h2>${q ? 'No matches' : 'No gallery collections available'}</h2>
-            <p>${q
-              ? 'Try another search term, or clear the search box.'
-              : "Couldn't reach the art catalog right now — check your internet connection and reload the page."}</p>
-          </div>
-        `;
-        return;
-      }
-
-      // Search: flat grid across the catalog.
-      if (q) {
-        crumb.style.display = 'none';
-        grid.className = 'lib-grid';
-        grid.innerHTML = '';
-        for (const pack of visiblePacks) {
-          grid.appendChild(this._buildAnyPackCard(pack));
-        }
-        return;
-      }
-
-      if (!this._packCategory) {
-        crumb.style.display = 'none';
-        grid.className = '';
-        const featured = visiblePacks.filter((p) => p.featured);
-        let html = '';
-        if (featured.length) {
-          html += `
-            <div class="addons-section">
-              <h2 class="addons-section-title">Featured</h2>
-              <div class="lib-grid" id="gallery-featured-grid"></div>
+      if (!this._scenePacks || !this._scenePacks.length) {
+        if (crumb) crumb.style.display = 'none';
+        if (grid) {
+          grid.className = 'lib-grid';
+          grid.innerHTML = `
+            <div class="empty">
+              <div class="empty-icon">⋯</div>
+              <h2>Loading art collections…</h2>
             </div>
           `;
         }
-        html += `
-          <div class="addons-section" style="${featured.length ? 'margin-top:32px' : ''}">
-            <h2 class="addons-section-title">Browse by category</h2>
-            <div class="category-grid" id="art-categories-grid"></div>
-          </div>
-        `;
-        const meta = this._galleryCatalog || {};
-        if (meta.catalog_version) {
-          html += `<p style="font-size:11px;color:var(--secondary-text-color);margin:16px 0 0">
-            Catalog ${this._esc(String(meta.catalog_version))}${meta.schema_version != null ? ` · schema v${this._esc(String(meta.schema_version))}` : ''}
-          </p>`;
-        }
-        grid.innerHTML = html;
+        return;
+      }
 
-        if (featured.length) {
-          const featGrid = grid.querySelector('#gallery-featured-grid');
-          for (const pack of featured) {
-            featGrid.appendChild(this._buildAnyPackCard(pack));
+      if (!visiblePacks.length) {
+        if (crumb) crumb.style.display = 'none';
+        if (grid) {
+          grid.className = 'lib-grid';
+          grid.innerHTML = `
+            <div class="empty">
+              <div class="empty-icon">◈</div>
+              <h2>No matches</h2>
+              <p>Try another search term, or clear the search box.</p>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      // Search: flat grid across the catalog
+      if (q) {
+        if (crumb) crumb.style.display = 'none';
+        if (grid) {
+          grid.className = 'lib-grid';
+          grid.innerHTML = '';
+          for (const pack of visiblePacks) {
+            grid.appendChild(this._buildAnyPackCard(pack));
           }
         }
-        const artGrid = grid.querySelector('#art-categories-grid');
-        for (const catId of this._artPackCategoryIds(visiblePacks)) {
-          const packs = visiblePacks.filter((p) => this._packCategoryTags(p).includes(catId));
-          if (packs.length > 0) {
-            artGrid.appendChild(this._buildCategoryTile(catId, packs));
+        return;
+      }
+
+      // Category browse
+      if (!this._packCategory) {
+        if (crumb) crumb.style.display = 'none';
+        if (grid) {
+          grid.className = 'category-grid';
+          grid.innerHTML = '';
+          for (const catId of this._artPackCategoryIds(visiblePacks)) {
+            const packs = visiblePacks.filter((p) => this._packCategoryTags(p).includes(catId));
+            if (packs.length > 0) {
+              const tile = this._buildCategoryTile(catId, packs);
+              tile.addEventListener('click', () => {
+                this._packCategory = catId;
+                this._pushState();
+                this._renderScenePacks();
+              });
+              grid.appendChild(tile);
+            }
           }
         }
         return;
       }
 
       const catInfo = this._packCategoryInfo(this._packCategory);
-      crumb.style.display = 'flex';
-      crumb.innerHTML = `
-        <button class="btn-ghost" id="addons-crumb-back">← Categories</button>
-        <span class="addons-crumb-label">${this._esc(catInfo.label)}</span>
-      `;
-      crumb.querySelector('#addons-crumb-back').addEventListener('click', () => {
-        this._packCategory = null;
-        this._renderScenePacks();
-      });
+      if (crumb) {
+        crumb.style.display = 'flex';
+        crumb.innerHTML = `
+          <button class="btn-ghost" id="addons-crumb-back">← Categories</button>
+          <span class="addons-crumb-label">${this._esc(catInfo.label)}</span>
+        `;
+        crumb.querySelector('#addons-crumb-back').addEventListener('click', () => {
+          this._packCategory = null;
+          this._pushState();
+          this._renderScenePacks();
+        });
+      }
 
-      grid.className = 'lib-grid';
-      grid.innerHTML = '';
-      for (const pack of visiblePacks.filter((p) =>
-        this._packCategoryTags(p).includes(this._packCategory)
-      )) {
-        grid.appendChild(this._buildAnyPackCard(pack));
+      if (grid) {
+        grid.className = 'lib-grid';
+        grid.innerHTML = '';
+        for (const pack of visiblePacks.filter((p) =>
+          this._packCategoryTags(p).includes(this._packCategory)
+        )) {
+          grid.appendChild(this._buildAnyPackCard(pack));
+        }
       }
     }
 
@@ -10484,17 +10757,23 @@
       };
     }
 
-    _openPackPreview(pack, index) {
+    _openPackPreview(pack, index, skipPushState = false) {
       const images = pack.images || [];
       if (!images.length) return;
       this._packPreview = { pack, index };
       this.shadowRoot.getElementById('pack-preview-overlay').style.display = 'flex';
       this._renderPackPreview();
+      if (!skipPushState) {
+        this._pushState();
+      }
     }
 
-    _closePackPreview() {
+    _closePackPreview(skipPushState = false) {
       this.shadowRoot.getElementById('pack-preview-overlay').style.display = 'none';
       this._packPreview = null;
+      if (!skipPushState) {
+        this._pushState();
+      }
     }
 
     _packPreviewStep(delta) {
@@ -10503,6 +10782,7 @@
       const total = pack.images.length;
       this._packPreview.index = (index + delta + total) % total;
       this._renderPackPreview();
+      this._pushState(true); // replace state to avoid polluting back history
     }
 
     _renderPackPreview() {
