@@ -98,8 +98,10 @@ to "catch" it awake.
 3. When the frame wakes (timer), it **GETs** that URL and paints, then deep
    sleeps again (unless always-on).
 4. On setup / send / options save, HA best-effort **provisions** the frame
-   with `POST /pullurl` and `POST /sleepconfig`
-   (`minutes`, `active_sec`, `always_on`).
+   with `POST /sleepconfig` first (`minutes`, `active_sec`, `always_on`)
+   then `POST /pullurl`. Sleep/always-on is applied even if pullurl fails.
+   Requires clone firmware that understands `always_on` (pre-always-on
+   builds ignore the field and keep battery sleep).
 
 **Secondary (immediate update if the frame is already online):**
 HA still `POST /api/image` after staging so an awake panel updates without

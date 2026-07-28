@@ -337,7 +337,49 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             url = self.pull_bin_url()
 
         session = async_get_clientsession(self.hass)
-        ok = False
+        # Power mode first so always_on/sleep stick even if pullurl fails.
+        sleep_body = urlencode(
+            {
+                "minutes": str(sleep_minutes),
+                "active_sec": str(active_sec),
+                "always_on": "1" if always_on else "0",
+            }
+        )
+        sleep_ok = False
+        try:
+            async with session.post(
+                self._base_url(FRAME_API_SLEEPCONFIG),
+                data=sleep_body,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=_REQUEST_TIMEOUT,
+            ) as resp:
+                sleep_text = await resp.text()
+                sleep_ok = resp.status < 400
+                if not sleep_ok:
+                    _LOGGER.warning(
+                        "Frame %s rejected sleepconfig (%s): %s",
+                        self.host,
+                        resp.status,
+                        sleep_text[:200],
+                    )
+                elif always_on and "always_on=true" not in sleep_text.lower():
+                    # Old firmware ignores always_on — surface that clearly.
+                    _LOGGER.warning(
+                        "Frame %s sleepconfig OK but always_on not confirmed "
+                        "(response=%r). Flash fraimic-clone firmware that "
+                        "supports always_on.",
+                        self.host,
+                        sleep_text[:120],
+                    )
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.debug(
+                "Could not provision sleepconfig on %s (likely asleep): %s",
+                self.host,
+                err,
+            )
+            return False
+
+        pull_ok = False
         try:
             async with session.post(
                 self._base_url(FRAME_API_PULLURL),
@@ -345,8 +387,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=_REQUEST_TIMEOUT,
             ) as resp:
-                ok = resp.status < 400
-                if not ok:
+                pull_ok = resp.status < 400
+                if not pull_ok:
                     body = await resp.text()
                     _LOGGER.warning(
                         "Frame %s rejected pull URL provision (%s): %s",
@@ -355,42 +397,26 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         body[:200],
                     )
         except (aiohttp.ClientError, TimeoutError) as err:
-            _LOGGER.debug(
-                "Could not provision pull URL on %s (likely asleep): %s",
+            _LOGGER.warning(
+                "Frame %s sleepconfig applied but pullurl failed: %s",
                 self.host,
                 err,
             )
-            return False
+            # Still count as provisioned enough to try push if sleep stuck.
+            return sleep_ok
 
-        try:
-            async with session.post(
-                self._base_url(FRAME_API_SLEEPCONFIG),
-                data=urlencode(
-                    {
-                        "minutes": str(sleep_minutes),
-                        "active_sec": str(active_sec),
-                        "always_on": "1" if always_on else "0",
-                    }
-                ),
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=_REQUEST_TIMEOUT,
-            ) as resp:
-                if resp.status >= 400:
-                    _LOGGER.debug(
-                        "Frame %s sleepconfig returned %s", self.host, resp.status
-                    )
-        except (aiohttp.ClientError, TimeoutError):
-            pass
-
-        if ok:
+        if sleep_ok or pull_ok:
             _LOGGER.info(
-                "Provisioned frame %s: pull=%s sleep=%smin always_on=%s",
+                "Provisioned frame %s: pull=%s sleep=%smin always_on=%s "
+                "(sleepconfig=%s pullurl=%s)",
                 self.host,
                 url,
                 sleep_minutes,
                 always_on,
+                sleep_ok,
+                pull_ok,
             )
-        return ok
+        return sleep_ok or pull_ok
 
     # ------------------------------------------------------------------
     # Queued sends -- delivered once a sleeping frame answers again

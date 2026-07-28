@@ -220,8 +220,12 @@ async def test_pull_token_and_url_shape(coordinator):
 
 
 async def test_provision_sends_always_on_flag(coordinator, aioclient_mock):
+    aioclient_mock.post(
+        f"http://{coordinator.host}/sleepconfig",
+        status=200,
+        text="OK sleep_minutes=30 active_window_sec=8 always_on=true",
+    )
     aioclient_mock.post(f"http://{coordinator.host}/pullurl", status=200, text="ok")
-    aioclient_mock.post(f"http://{coordinator.host}/sleepconfig", status=200, text="ok")
 
     with patch.object(coordinator, "frame_always_on", return_value=True), patch.object(
         coordinator, "frame_sleep_minutes", return_value=30
@@ -241,3 +245,21 @@ async def test_provision_sends_always_on_flag(coordinator, aioclient_mock):
         found = True
         break
     assert found, f"sleepconfig not called: {aioclient_mock.mock_calls}"
+
+
+async def test_provision_sleepconfig_runs_even_if_pullurl_fails(
+    coordinator, aioclient_mock
+):
+    """always_on must still be written when only sleepconfig succeeds."""
+    aioclient_mock.post(
+        f"http://{coordinator.host}/sleepconfig",
+        status=200,
+        text="OK always_on=true",
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/pullurl", exc=aiohttp.ClientConnectionError()
+    )
+
+    with patch.object(coordinator, "frame_always_on", return_value=True):
+        ok = await coordinator.async_provision_frame_pull()
+    assert ok is True
