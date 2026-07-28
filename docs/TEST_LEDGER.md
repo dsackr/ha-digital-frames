@@ -102,3 +102,4 @@ Notes on reading it:
 | 2026-07-28 | 19f86b4 | backend-pytest | success | 475 passed in 85.21s (0:01:25) | 66% | CI |
 | 2026-07-28 | a00f183 | backend-pytest | failure | 476 passed, 29 errors in 85.44s (0:01:25) | 66% | CI |
 | 2026-07-28 | 28123b7 | backend-pytest | failure | 476 passed, 29 errors in 66.22s (0:01:06) | 66% | CI |
+| 2026-07-28 | 0a40eac | backend-pytest | failure | 1 failed, 479 passed, 29 errors in 88.24s (0:01:28) | 66% | CI |
