@@ -107,3 +107,4 @@ Notes on reading it:
 | 2026-07-28 | 47ffe3b | backend-pytest | failure | 1 failed, 479 passed, 29 errors in 87.27s (0:01:27) | 66% | CI |
 | 2026-07-28 | d4b4c46 | panel-playwright | failure | 2 failed 156 passed | — | CI |
 | 2026-07-28 | d4b4c46 | backend-pytest | success | 488 passed in 85.62s (0:01:25) | 64% | CI |
+| 2026-07-28 | 917e26b | panel-playwright | failure | 2 failed 156 passed | — | CI |
