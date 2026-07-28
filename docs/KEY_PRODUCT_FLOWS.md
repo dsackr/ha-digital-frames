@@ -151,6 +151,23 @@ successful online provision applies them.
   `tests/python/config_flow/test_config_flow_options.py` (schema exposes
   both keys, defaults, save round-trip, validation).
 
+## 4c. Spectra 6 color test pattern (built-in library asset)
+On integration load, Digital Frames seeds a **six-box Spectra E6 color test**
+into the shared library (album **Test Patterns**, voice name
+**Spectra 6 Color Test**, tag `spectra6_color_test`) if it is not already
+present. Boxes use the same real-world RGB targets as
+`image_converter.SPECTRA6_REAL_WORLD_RGB` (black / white / yellow / red /
+blue / green) so each region quantizes to one hardware nibble — useful for
+verifying panel wiring, orientation, and packing on clones (e.g. 7.3" ESP32).
+
+- **Entry points**: `test_patterns.py` (`build_spectra6_color_test_png`,
+  `async_seed_spectra6_color_test`), packaged
+  `assets/spectra6_color_test.png`, seeded from `__init__.async_setup`.
+- **If it silently breaks**: library missing Test Patterns after install;
+  colours dithered wrong (RGB table drifted from converter).
+- **Test status**: **Backend-tested** —
+  `tests/python/unit/test_test_patterns.py`.
+
 ## 5. HA services (send_image, send_scene, restart, sleep, refresh, generate_ai_image)
 Lets automations/scripts drive a frame: send an arbitrary media item, send
 a named scene, or issue restart/sleep/refresh commands.

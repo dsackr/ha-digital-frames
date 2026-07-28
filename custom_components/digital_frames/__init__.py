@@ -155,6 +155,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await library_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["_library"] = library_manager
 
+    # Seed the Spectra 6 six-box color test into the library once (album
+    # "Test Patterns") so users can send a hardware palette check to any
+    # frame without uploading files. Idempotent across restarts.
+    from .test_patterns import async_seed_spectra6_color_test  # noqa: PLC0415
+
+    hass.async_create_task(
+        async_seed_spectra6_color_test(hass, library_manager)
+    )
+
     # Voice/LLM: "generate an image of X and send it to [frame]" as a single
     # Assist tool, available the moment an LLM-backed conversation agent is
     # configured -- no user-authored script needed.
