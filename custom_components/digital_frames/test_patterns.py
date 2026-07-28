@@ -113,13 +113,29 @@ async def async_seed_spectra6_color_test(
 
     for img in images:
         tags = getattr(img, "tags", None) or []
-        if COLOR_TEST_TAG in tags:
-            return img.to_dict() if hasattr(img, "to_dict") else None
-        if getattr(img, "voice_name", None) == COLOR_TEST_VOICE_NAME:
-            return img.to_dict() if hasattr(img, "to_dict") else None
-        # Filename match for older seeds without tags.
-        if getattr(img, "filename", None) == COLOR_TEST_FILENAME:
-            return img.to_dict() if hasattr(img, "to_dict") else None
+        is_seed = (
+            COLOR_TEST_TAG in tags
+            or getattr(img, "voice_name", None) in (
+                COLOR_TEST_VOICE_NAME,
+                "Spectra 6 Color Test",  # legacy voice name
+            )
+            or getattr(img, "filename", None) == COLOR_TEST_FILENAME
+        )
+        if not is_seed:
+            continue
+        # Keep voice name in sync if we renamed it after an earlier seed.
+        if (
+            getattr(img, "voice_name", None) != COLOR_TEST_VOICE_NAME
+            and getattr(img, "image_id", None)
+        ):
+            try:
+                await library.async_set_image_voice_name(
+                    img.image_id, COLOR_TEST_VOICE_NAME
+                )
+                img.voice_name = COLOR_TEST_VOICE_NAME
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Could not rename color test voice name: %s", err)
+        return img.to_dict() if hasattr(img, "to_dict") else None
 
     try:
         png_bytes = await hass.async_add_executor_job(_load_or_build_color_test_png)
