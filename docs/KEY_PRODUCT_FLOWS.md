@@ -154,7 +154,7 @@ successful online provision applies them.
 ## 4c. Spectra 6 color test pattern (built-in library asset)
 On integration load, Digital Frames seeds a **six-box Spectra E6 color test**
 into the shared library (album **Test Patterns**, voice name
-**Spectra 6 Color Test**, tag `spectra6_color_test`) if it is not already
+**color test**, tag `spectra6_color_test`) if it is not already
 present. Boxes use the same real-world RGB targets as
 `image_converter.SPECTRA6_REAL_WORLD_RGB` (black / white / yellow / red /
 blue / green) so each region quantizes to one hardware nibble — useful for

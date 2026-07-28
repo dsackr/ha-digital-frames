@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Stable identity so we re-seed at most once per library (not every restart).
 COLOR_TEST_TAG = "spectra6_color_test"
-COLOR_TEST_VOICE_NAME = "Spectra 6 Color Test"
+COLOR_TEST_VOICE_NAME = "color test"
 COLOR_TEST_ALBUM = "Test Patterns"
 COLOR_TEST_FILENAME = "spectra6_color_test.png"
 
