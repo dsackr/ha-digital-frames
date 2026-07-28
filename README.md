@@ -4,7 +4,11 @@ Turn your digital photo frames into a gallery wall that Home Assistant actually 
 
 **Digital Frames** is the product name and HA domain (`digital_frames`, package `custom_components/digital_frames/`). Official Spectra e‑ink panels remain manufacturer **Fraimic** in the device registry. The photo library lives under `config/digital_frames_library/` (a leftover `config/fraimic_library/` is renamed on first load).
 
-**Scope is local LAN only.** Meural cloud / Cognito is **out of scope** — use [HA-meural](https://github.com/GuySie/ha-meural) if you need cloud playlists. Drivers talk to devices on your network.
+**Scope is primarily local LAN.** Fraimic drivers stay local-only. Meural
+sends always use the local postcard API; when you link a Netgear account
+on a Meural frame’s Configure options, sends also pin to Meural cloud
+(single-image gallery, no rotation) and you can push HA albums for
+slideshow rotation. Drivers talk to devices on your network.
 
 ## Why you'll want this
 
@@ -37,15 +41,14 @@ We develop against hardware the maintainers own. Other vendors (and panel sizes 
 | Meural Canvas **local** LAN | Implemented; volunteer reports welcome |
 | Samsung EM32DX (MDC local) | Experimental; **needs volunteer hardware** |
 | InkJoy | Out of scope for now (MQTT control plane) |
-| Meural **cloud** | **Out of scope** (use HA-meural) |
+| Meural **cloud pin / album push** | Optional (link Netgear account on Meural options) |
 
 ## Credits
 
-**Meural Canvas local protocol** — endpoint inventory for the on-device
-`/remote/` HTTP API was published by **Guy Sie** in
-[HA-meural](https://github.com/GuySie/ha-meural) (MIT). Our driver is
-**local-only**, inspired by that documentation; we do not use Meural cloud
-and do not vendor HA-meural code.
+**Meural Canvas** — local `/remote/` HTTP inventory from **Guy Sie**’s
+[HA-meural](https://github.com/GuySie/ha-meural) (MIT); our local driver is
+an independent reimplementation. Optional cloud pin/album push uses
+`api.meural.com` (Cognito + REST) without vendoring HA-meural code.
 
 **Samsung EM32DX (experimental)** — MDC layout and WoL notes from
 [fayep/Joyous](https://github.com/fayep/Joyous). Independent HA reimplementation;

@@ -70,6 +70,10 @@ DRIVER_SAMSUNG = "samsung"  # Samsung EM32DX e-paper (experimental; MDC)
 MEURAL_DEFAULT_WIDTH = 1920
 MEURAL_DEFAULT_HEIGHT = 1080
 MEURAL_SIZE_LABEL = "meural"
+# Shared Netgear/Meural cloud account (options flow on any Meural entry).
+CONF_MEURAL_EMAIL = "meural_email"
+CONF_MEURAL_PASSWORD = "meural_password"
+CONF_MEURAL_UNLINK = "meural_unlink_cloud"
 
 # Samsung EM32DX (Joyous / fayep protocol notes). Landscape native.
 SAMSUNG_DEFAULT_WIDTH = 2560

@@ -757,6 +757,8 @@ class DigitalFramesFramesView(HomeAssistantView):
                         "online": bool(
                             getattr(coordinator, "last_update_success", False)
                         ),
+                        # Filled below for Meural after the loop if needed.
+                        "meural_cloud_linked": False,
                         # Library image_id of the last Library/Scene send to
                         # this frame -- UI-only preview hint, not persisted
                         # (see DigitalFramesCoordinator.last_image_id). None until
@@ -775,7 +777,34 @@ class DigitalFramesFramesView(HomeAssistantView):
                         "queued": getattr(coordinator, "pending_send", None) is not None,
                     }
                 )
-        return self.json({"frames": frames})
+
+        # Shared Meural cloud link status (one account for all Meural frames).
+        meural_linked = False
+        meural_username = None
+        try:
+            from .meural_cloud_store import (  # noqa: PLC0415
+                async_get_meural_cloud_store,
+            )
+
+            cloud_store = await async_get_meural_cloud_store(hass)
+            meural_linked = cloud_store.is_linked
+            meural_username = cloud_store.username if meural_linked else None
+        except Exception:  # noqa: BLE001
+            pass
+        for frame in frames:
+            if frame.get("driver") == "meural" or frame.get("origin") == "meural":
+                frame["meural_cloud_linked"] = meural_linked
+                frame["meural_cloud_username"] = meural_username
+
+        return self.json(
+            {
+                "frames": frames,
+                "meural_cloud": {
+                    "linked": meural_linked,
+                    "username": meural_username,
+                },
+            }
+        )
 
 
 class DigitalFramesFrameThumbnailView(HomeAssistantView):
@@ -1060,3 +1089,123 @@ class DigitalFramesFrameReloadView(HomeAssistantView):
 
         result = await hass.config_entries.async_reload(entry_id)
         return self.json({"success": result})
+
+
+class DigitalFramesMeuralPushAlbumView(HomeAssistantView):
+    """Push an HA library album to a Meural as a multi-image cloud gallery.
+
+    POST /api/digital_frames/meural/push_album
+    body: { entry_id, album, image_duration_s? }
+
+    Requires a linked Meural cloud account. Full-mirrors the album (upload
+    all images, delete previous items tracked for this album on this frame)
+    and makes the gallery live so Canvas rotation advances between images.
+    """
+
+    url = "/api/digital_frames/meural/push_album"
+    name = "api:digital_frames:meural:push_album"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON: {err}", status_code=400)
+
+        entry_id = (body.get("entry_id") or "").strip()
+        album = (body.get("album") or "").strip()
+        if not entry_id or not album:
+            return self.json_message(
+                "entry_id and album are required", status_code=400
+            )
+
+        duration = body.get("image_duration_s", 1800)
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            duration = 1800
+
+        from .const import CONF_DRIVER, DRIVER_MEURAL  # noqa: PLC0415
+        from .meural_cloud import MeuralCloudError  # noqa: PLC0415
+        from .panel_codec import panel_codec_for_entry  # noqa: PLC0415
+
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            return self.json_message("Frame not found", status_code=404)
+        if entry.data.get(CONF_DRIVER) != DRIVER_MEURAL:
+            return self.json_message(
+                "Push album is only supported on Meural frames", status_code=400
+            )
+
+        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+        if coordinator is None or not hasattr(coordinator, "async_push_ha_album"):
+            return self.json_message(
+                "Meural coordinator not loaded for this frame", status_code=404
+            )
+
+        manager = _get_manager(hass)
+        images = await manager.async_list_images()
+
+        def _img_id(img) -> str | None:
+            if isinstance(img, dict):
+                return img.get("id") or img.get("image_id")
+            return getattr(img, "id", None) or getattr(img, "image_id", None)
+
+        def _img_albums(img) -> list:
+            if isinstance(img, dict):
+                return img.get("albums") or []
+            return list(getattr(img, "albums", None) or [])
+
+        album_ids = [
+            _img_id(img)
+            for img in images
+            if album in _img_albums(img) and _img_id(img)
+        ]
+        if not album_ids:
+            return self.json_message(
+                f"Album '{album}' has no images", status_code=400
+            )
+
+        try:
+            codec_id = panel_codec_for_entry(entry).id
+        except ValueError:
+            codec_id = "jpeg_q90"
+        spec = render_spec_for_hass_entry(hass, entry)
+
+        payloads: list[tuple[bytes, str]] = []
+        for image_id in album_ids:
+            try:
+                wire = await manager.async_get_bin_for_send(
+                    image_id, spec, codec_id=codec_id
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error(
+                    "Meural album push encode failed for %s: %s", image_id, err
+                )
+                return self.json_message(
+                    f"Failed to encode image {image_id}: {err}", status_code=500
+                )
+            ctype = "image/png" if wire[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+            payloads.append((wire, ctype))
+
+        try:
+            result = await coordinator.async_push_ha_album(
+                album,
+                payloads,
+                image_duration_s=duration,
+            )
+        except MeuralCloudError as err:
+            return self.json_message(str(err), status_code=502)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("Meural push album failed")
+            return self.json_message(str(err), status_code=502)
+
+        return self.json(
+            {
+                "success": True,
+                "gallery_id": result.get("gallery_id"),
+                "gallery_name": result.get("gallery_name"),
+                "item_count": len(result.get("item_ids") or []),
+            }
+        )

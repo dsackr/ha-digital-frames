@@ -34,6 +34,9 @@ def _no_real_network(monkeypatch):
         async def json(self):
             return {"battery": 90, "width": 1200, "height": 1600}
 
+        async def text(self):
+            return ""
+
     class _FakeSession:
         def get(self, *a, **kw):
             return _FakeResponse()

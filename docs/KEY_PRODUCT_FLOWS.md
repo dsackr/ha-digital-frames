@@ -845,93 +845,86 @@ Automatically analyzes uploaded or discovered images using Home Assistant's conf
 - **If it silently breaks**: Photos are uploaded or discovered but no tags are generated even when an AI Task entity is active and the option is enabled.
 - **Test status**: **Backend-tested** — `tests/python/library/test_media_source_and_tagging.py`.
 
-## 32. Meural Canvas (local) as a second FramePort driver
-User adds a NETGEAR Meural by LAN IP (no Meural cloud account). The frame
-gets a `driver=meural` config entry, JPEG codec (`jpeg_q90`), and
-participates in walls, scenes, library send, and raw upload like Fraimic
-frames. Images are delivered via the local `/remote/postcard` multipart
-API (preserving original EXIF metadata like Artist/Title, with the EXIF Orientation
-tag reset to 1 to prevent double-rotation, allowing the on-screen photo info card
-to display details correctly when waving up). Sleep-queue does not apply
-(send resumes the display if suspended).
-Meural has no battery sensor — the dashboard and send APIs identify the
-frame by its `_ip` sensor (same fallback as `battery_entity_id` on
-`GET /api/digital_frames/frames`), and the UI filters out this diagnostic
-fallback so it does not format the IP address as a battery percentage (showing N/A instead).
+## 32. Meural Canvas (local + optional cloud pin) as a second FramePort driver
+User adds a NETGEAR Meural by LAN IP. The frame gets a `driver=meural`
+config entry, JPEG codec (`jpeg_q90`), and participates in walls, scenes,
+library send, raw upload, and Live skills like Fraimic frames.
 
-**Local device features (no Meural cloud):**
+**Send path (two layers):**
 
-- **Orientation (gsensor):** identify / system report hang; Device
-  orientation sensor; follow-device default for crop/send; Orientation
-  select Follow / Portrait / Landscape (manual pin also calls
-  `set_orientation` on the Canvas). Sends use
-  `render_spec_for_hass_entry` so **live gsensor** picks portrait vs
-  landscape library crops (not stale options alone). Meural composition
-  is hang-sized JPEG (no Spectra native-buffer rotation). On hang change
-  the Canvas firmware switches to orientation-scoped **Recents** (often
-  last official-app image); we **re-postcard** the last HA library image
-  (or last wire bytes) via `async_redisplay_last` so our content stays on
-  screen.
-- **Backlight light entity:** brightness 0–100; off = suspend, on =
-  resume (+ optional brightness).
-- **Ambient light (lux)** from ALS; diagnostic free space + WiFi RSSI.
-- **Services:** `fraimic.sleep` → suspend, `fraimic.wake` → resume
-  (Meural only). Restart is unsupported on Meural.
+1. **Postcard (always):** local `POST /remote/postcard` multipart JPEG/PNG
+   for immediate pixels (EXIF Artist/Title preserved; Orientation reset to 1).
+2. **Cloud pin (when Netgear account linked):** upload to
+   `api.meural.com/v0/items`, place alone in a stable per-frame pin gallery
+   (`Digital Frames · {title} · Pin · {landscape|portrait}`), remove/delete
+   the previous pin item, load that gallery on the device, set
+   `imageDuration=0` / `galleryRotation=false` so the Canvas does not
+   rotate. Daily skills (agenda, xOTD) reuse the same pin gallery — each
+   render **replaces** the prior cloud item (no stack of stale agendas).
 
-Text skills (xOTD) are re-encoded to JPEG for Meural via
-`text_skill_payload_for_codec` (KPF 28). Image skills already used the
-library JPEG path.
+**Fail-closed when cloud is linked:** postcard alone is not success. If
+cloud pin fails after a good postcard, `async_send_image_or_queue` returns
+`success: false` (`postcard_ok: true`, `cloud_ok: false`). Unlinked frames
+remain postcard-only (local-only).
 
-**Explicitly not implemented:** Meural cloud account, playlists, next/prev
-artwork, shuffle, media browser, membership gallery sync.
-- **Entry points**: `config_flow.py` (`async_step_add_meural`),
-  `meural.py` (probe, postcard, backlight/suspend/resume/orientation
-  helpers),
-  `meural_coordinator.py` (poll stats, command map, follow-device),
-  `light.py` (`MeuralBacklightLight`),
-  `sensor.py` (device orientation, ambient light, free space, WiFi),
-  `select.py` (`MeuralOrientationSelect`),
+**Link account:** Meural frame **Configure** options — Netgear email +
+password (Cognito, with legacy `/authenticate` fallback). One shared
+account for all Meural frames (`meural_cloud_store` + HA Store). Unlink
+returns to postcard-only.
+
+**HA album → Meural (rotation on):** panel album tile **Meural** button or
+`POST /api/digital_frames/meural/push_album` full-mirrors an HA library
+album into a multi-image cloud gallery and loads it live with a non-zero
+`imageDuration`.
+
+Sleep-queue does not apply (send resumes if suspended). Meural has no
+battery sensor — dashboard/send use `_ip` as the send entity fallback
+(UI shows N/A for battery).
+
+**Local device features:**
+
+- **Orientation (gsensor):** Device orientation sensor; follow-device default;
+  Orientation select Follow / Portrait / Landscape. Hang change re-sends
+  last content via `async_redisplay_last` (postcard + cloud pin when linked).
+- **Backlight light entity;** lux; free space; WiFi RSSI.
+- **Services:** sleep/wake mapped to suspend/resume. Restart unsupported.
+
+Text skills re-encode to JPEG via `text_skill_payload_for_codec` (KPF 28).
+
+**Not implemented:** next/prev media player chrome, membership gallery
+browse, 2FA Netgear login.
+- **Entry points**: `config_flow.py` (`async_step_add_meural`, options
+  Meural cloud fields),
+  `meural.py` (local probe/postcard/control),
+  `meural_cloud.py` (Cognito/legacy auth, upload, galleries, device load),
+  `meural_cloud_store.py` (shared credentials + pin/album ids),
+  `meural_coordinator.py` (`async_send_image` pin pipeline,
+  `async_push_ha_album`),
+  `library_http.py` (`DigitalFramesMeuralPushAlbumView`, frames
+  `meural_cloud` status),
+  `light.py` / `sensor.py` / `select.py`,
   `panel_codec.py` (`CODEC_JPEG_Q90`),
-  `__init__.py` (driver branch, wake service),
-  `library_http.py` frames list,
-  `digital-frames-panel.js` (`_discoverFrames` battery-or-`_ip`).
-- **If it silently breaks**: Meural cannot be added, sends fail or send
-  Spectra `.bin`, frame missing on dashboard, crop aspect wrong after
-  rotate, backlight/sleep services no-op or hit Fraimic `/api/*` paths
-  on the Canvas, lux/backlight stuck after firmware field renames, or —
-  a real bug fixed in the July 2026 code review — every orientation
-  change (physical rotate via gsensor-follow, or picking Portrait/
-  Landscape/Follow on the select entity) re-postcards twice: both the
-  coordinator/select call site and `__init__.py`'s `_async_update_listener`
-  called `async_redisplay_last()` off the same options update, since
-  `async_update_entry` schedules the listener regardless of who else also
-  awaits a redisplay. The listener is now the single trigger; the
-  coordinator/select call sites only persist the option change. That fix
-  introduced its own edge case (issue #11, July 2026 code review): HA's
-  `async_update_entry` never invokes `_async_update_listener` when the new
-  options dict is identical to the one already stored, so re-selecting the
-  orientation that's already active (e.g. to force a re-postcard after
-  Canvas drifted to a Recents thumbnail on its own) silently did nothing —
-  neither the listener nor the select entity redisplayed. Fixed by having
-  `MeuralOrientationSelect.async_select_option` compare its computed
-  `new_options` against the entry's current options and call
-  `async_redisplay_last()` itself only when they're identical, leaving the
-  listener as the sole trigger for every actual change.
+  `digital-frames-panel.js` (`_pushAlbumToMeural`, album Meural button).
+- **If it silently breaks**: Meural cannot be added; sends fail or send
+  Spectra `.bin`; empty-album banner returns because cloud pin never ran
+  (unlinked or fail not surfaced); cloud link accepted but device not
+  matched to LAN host; pin galleries accumulate items because replace/
+  delete failed; album push encodes wrong codec; orientation redisplay
+  double-sends (listener vs select — historical fix: listener is sole
+  trigger on real option change; select redisplays only when re-selecting
+  the already-active option); or options form drops orientation lock when
+  saving cloud fields.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_meural.py` (JPEG codec preserving EXIF metadata with
-  Orientation reset to 1, orientation, follow-device,
-  system stats parse, suspend/backlight command mapping, orientation
-  change persists options without redisplaying directly,
-  `_async_update_listener` redisplays exactly once per real orientation
-  change and not for an unrelated option change or a repeat call),
-  `tests/python/unit/test_select_meural_orientation.py`
-  (`MeuralOrientationSelect.async_select_option` for both Portrait and
-  Follow device persists options without redisplaying directly on a real
-  change, and redisplays directly when re-selecting the already-active
-  Portrait or Follow option),
+  `tests/python/unit/test_meural.py` (JPEG codec/EXIF, orientation,
+  follow-device, system stats, command map, redisplay listener once),
+  `tests/python/unit/test_meural_cloud.py` (gallery naming, legacy auth
+  mock, pin replace + imageDuration 0, empty album reject, fail-closed
+  cloud error, postcard-only when unlinked),
+  `tests/python/unit/test_select_meural_orientation.py`,
   `tests/python/config_flow/test_config_flow_user_scan.py` (Meural add).
-  **Frontend-tested** — `tests/panel/meural-dashboard.spec.js`. Live
-  Canvas hardware is manual (**Gap** for CI).
+  **Frontend-tested** — `tests/panel/meural-dashboard.spec.js` (dashboard;
+  album Meural button / push flow not Playwright-covered yet — **Gap**).
+  Live Canvas + real Netgear cloud is manual (**Gap** for CI).
 
 ## 34. Samsung EM32DX local MDC driver (experimental)
 User adds a Samsung E-Paper (EM32DX-class) panel by LAN IP, MDC PIN, and

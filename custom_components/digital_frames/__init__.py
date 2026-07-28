@@ -172,6 +172,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.async_create_task(async_setup_intents(hass))
 
     from .library_http import (  # noqa: PLC0415
+        DigitalFramesMeuralPushAlbumView,
         DigitalFramesFramesView,
         DigitalFramesFrameThumbnailView,
         DigitalFramesLibraryAlbumImagesView,
@@ -212,6 +213,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesLibraryGoogleOAuthStartView())
     hass.http.register_view(DigitalFramesLibraryGoogleOAuthCallbackView())
     hass.http.register_view(DigitalFramesFrameReloadView())
+    hass.http.register_view(DigitalFramesMeuralPushAlbumView())
 
     # Scenes: named (frame, image) assignment lists sendable all at once.
     # Pure local state -- config entry_ids are meaningless off this HA

@@ -21,6 +21,9 @@ from .const import (
     CONF_HEIGHT,
     CONF_HOST,
     CONF_MAC,
+    CONF_MEURAL_EMAIL,
+    CONF_MEURAL_PASSWORD,
+    CONF_MEURAL_UNLINK,
     CONF_NAME,
     CONF_SIZE,
     CONF_WIDTH,
@@ -635,13 +638,53 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DigitalFramesOptionsFlow(OptionsFlow):
-    """Allow changing scan interval, battery-frame sleep period, size, rotation."""
+    """Allow changing scan interval, battery-frame sleep period, size, rotation.
+
+    Meural entries also offer Netgear cloud account link/unlink (shared across
+    all Meural frames) for permanent pin + album push.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
+        is_meural = self.config_entry.data.get(CONF_DRIVER) == DRIVER_MEURAL
+        errors: dict[str, str] = {}
+
         if user_input is not None:
+            # Meural cloud fields are not entry options — apply side effects
+            # then strip them so they never land in options.
+            meural_email = (user_input.pop(CONF_MEURAL_EMAIL, None) or "").strip()
+            meural_password = user_input.pop(CONF_MEURAL_PASSWORD, None) or ""
+            meural_unlink = bool(user_input.pop(CONF_MEURAL_UNLINK, False))
+
+            if is_meural and (meural_email or meural_password or meural_unlink):
+                from .meural_cloud import MeuralCloudAuthError, MeuralCloudError  # noqa: PLC0415
+                from .meural_cloud_store import (  # noqa: PLC0415
+                    async_get_meural_cloud_store,
+                )
+
+                store = await async_get_meural_cloud_store(self.hass)
+                try:
+                    if meural_unlink:
+                        await store.async_unlink()
+                    elif meural_email and meural_password:
+                        await store.async_link(meural_email, meural_password)
+                    elif meural_email or meural_password:
+                        errors["base"] = "meural_cloud_incomplete"
+                except MeuralCloudAuthError:
+                    errors["base"] = "meural_cloud_auth"
+                except MeuralCloudError:
+                    errors["base"] = "meural_cloud_auth"
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception("Meural cloud link failed")
+                    errors["base"] = "meural_cloud_auth"
+
+                if errors:
+                    return await self._async_show_options_form(
+                        is_meural=is_meural, errors=errors
+                    )
+
             # Unlike name/scan_interval (stored as options), size belongs in
             # entry.data alongside width/height/host -- it's frame identity,
             # not a runtime preference.
@@ -661,9 +704,19 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             )
             if orientation != ORIENTATION_AUTO:
                 user_input[CONF_ORIENTATION] = orientation
+            # Preserve Meural follow-device flag (not on this form).
+            if CONF_ORIENTATION_FOLLOW_DEVICE in self.config_entry.options:
+                user_input[CONF_ORIENTATION_FOLLOW_DEVICE] = (
+                    self.config_entry.options[CONF_ORIENTATION_FOLLOW_DEVICE]
+                )
 
             return self.async_create_entry(title="", data=user_input)
 
+        return await self._async_show_options_form(is_meural=is_meural, errors=errors)
+
+    async def _async_show_options_form(
+        self, *, is_meural: bool, errors: dict[str, str]
+    ) -> FlowResult:
         current_interval: int = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
@@ -707,36 +760,58 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             EDGE_RIGHT: "Right edge up",
         }
 
+        schema_dict: dict[Any, Any] = {}
+        if is_meural:
+            linked_hint = ""
+            try:
+                from .meural_cloud_store import (  # noqa: PLC0415
+                    async_get_meural_cloud_store,
+                )
+
+                store = await async_get_meural_cloud_store(self.hass)
+                if store.is_linked:
+                    linked_hint = store.username
+            except Exception:  # noqa: BLE001
+                linked_hint = ""
+            schema_dict[vol.Optional(CONF_MEURAL_EMAIL, default=linked_hint)] = str
+            schema_dict[vol.Optional(CONF_MEURAL_PASSWORD, default="")] = str
+            schema_dict[vol.Optional(CONF_MEURAL_UNLINK, default=False)] = bool
+        else:
+            # Battery / keep-awake controls (Fraimic family only).
+            schema_dict[
+                vol.Optional(CONF_FRAME_ALWAYS_ON, default=current_always_on)
+            ] = bool
+            schema_dict[
+                vol.Optional(CONF_FRAME_SLEEP_MINUTES, default=current_sleep_min)
+            ] = vol.All(int, vol.Range(min=1, max=24 * 60))
+
         # No name field here: renaming goes through config_entries/update
         # (entry.title), driven by the panel's frame-settings menu. The old
         # CONF_NAME option was written but never read (CODE_REVIEW #14).
-        # frame_sleep_minutes: battery clones deep-sleep between pull checks;
-        # HA provisions this onto the frame when it is next online.
-        schema = vol.Schema(
-            {
-                # Battery / keep-awake controls first (main UI fields).
-                vol.Optional(
-                    CONF_FRAME_ALWAYS_ON, default=current_always_on
-                ): bool,
-                vol.Optional(
-                    CONF_FRAME_SLEEP_MINUTES, default=current_sleep_min
-                ): vol.All(int, vol.Range(min=1, max=24 * 60)),
-                vol.Optional(
-                    CONF_SCAN_INTERVAL, default=current_interval
-                ): vol.All(int, vol.Range(min=30)),
-                vol.Optional(
-                    CONF_RESOLUTION, default=current_size or ""
-                ): vol.In(size_options),
-                vol.Optional(
-                    CONF_ROTATION_EDGE, default=current_edge
-                ): vol.In(edge_options),
+        schema_dict[
+            vol.Optional(CONF_SCAN_INTERVAL, default=current_interval)
+        ] = vol.All(int, vol.Range(min=30))
+
+        if not is_meural:
+            schema_dict[
+                vol.Optional(CONF_RESOLUTION, default=current_size or "")
+            ] = vol.In(size_options)
+            schema_dict[
+                vol.Optional(CONF_ROTATION_EDGE, default=current_edge)
+            ] = vol.In(edge_options)
+            schema_dict[
                 vol.Optional(
                     CONF_ROTATE_PORTRAIT_180, default=current_rotate_portrait
-                ): bool,
+                )
+            ] = bool
+            schema_dict[
                 vol.Optional(
                     CONF_ROTATE_LANDSCAPE_180, default=current_rotate_landscape
-                ): bool,
-            }
-        )
+                )
+            ] = bool
 
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+        )

@@ -3544,6 +3544,7 @@
         const result = await resp.json();
         const byEntry = {};
         for (const f of (result.frames || [])) byEntry[f.entry_id] = f;
+        this._meuralCloud = result.meural_cloud || { linked: false };
         // Prefer server-side battery_entity_id (Meural → IP) over WS discovery
         // when present — avoids stale/missing entity links after reloads.
         for (const frame of this._frames) {
@@ -3559,6 +3560,8 @@
             frame.host     = match.host;
             frame.origin   = match.origin;
             frame.platform = match.platform;
+            frame.driver   = match.driver;
+            frame.meuralCloudLinked = !!match.meural_cloud_linked;
             frame.orientation  = match.orientation;
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
@@ -3580,6 +3583,8 @@
             host: f.host,
             origin: f.origin,
             platform: f.platform,
+            driver: f.driver,
+            meuralCloudLinked: !!f.meural_cloud_linked,
             orientation: f.orientation,
             lastImageId: f.last_image_id,
             hasThumbnail: f.has_thumbnail,
@@ -3590,6 +3595,77 @@
         healthy = false;
       }
       return healthy;
+    }
+
+    _meuralFramesWithCloud() {
+      return (this._frames || []).filter(
+        (f) => (f.driver === 'meural' || f.origin === 'meural') && f.meuralCloudLinked
+      );
+    }
+
+    async _pushAlbumToMeural(albumName) {
+      const targets = this._meuralFramesWithCloud();
+      const fb = this.shadowRoot.getElementById('lib-fb');
+      if (!targets.length) {
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent =
+            'No Meural frame with a linked Netgear account. Open the frame’s Configure options and link Meural cloud first.';
+          fb.style.display = 'block';
+        }
+        return;
+      }
+      let frame = targets[0];
+      if (targets.length > 1) {
+        const labels = targets.map((f, i) => `${i + 1}. ${f.title}`).join('\n');
+        const pick = window.prompt(
+          `Push album "${albumName}" to which Meural?\n${labels}\n\nEnter number:`,
+          '1'
+        );
+        const idx = parseInt(pick, 10) - 1;
+        if (!Number.isFinite(idx) || idx < 0 || idx >= targets.length) return;
+        frame = targets[idx];
+      } else if (
+        !window.confirm(
+          `Push album "${albumName}" to Meural "${frame.title}"?\n` +
+            'Images will be uploaded to Meural cloud and the album will play with rotation.'
+        )
+      ) {
+        return;
+      }
+
+      if (fb) {
+        fb.className = 'feedback';
+        fb.textContent = `Pushing "${albumName}" to Meural…`;
+        fb.style.display = 'block';
+      }
+      try {
+        const resp = await fetch('/api/digital_frames/meural/push_album', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry_id: frame.entryId, album: albumName }),
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (fb) {
+          if (resp.ok && result.success) {
+            fb.className = 'feedback ok';
+            fb.textContent =
+              `Album live on ${frame.title} (${result.item_count || 0} images` +
+              (result.gallery_name ? ` · ${result.gallery_name}` : '') +
+              ').';
+          } else {
+            fb.className = 'feedback err';
+            fb.textContent = `Meural album push failed: ${result.message || resp.statusText || resp.status}`;
+          }
+          fb.style.display = 'block';
+        }
+      } catch (err) {
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent = `Meural album push error: ${err.message}`;
+          fb.style.display = 'block';
+        }
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -5579,18 +5655,24 @@
       const sid = this._sid(album.name);
       const isDefault = album.name === DEFAULT_ALBUM;
 
+      const meuralPush =
+        this._meuralFramesWithCloud().length && album.count > 0
+          ? `<button class="btn-ghost" id="album-meural-${sid}" title="Upload album to Meural cloud and play with rotation">🖼 Meural</button>`
+          : '';
+
       el.innerHTML = `
         <div class="lib-thumb" id="album-thumb-${sid}">
           <div style="font-size:32px;text-align:center;padding:30px 0">📁</div>
         </div>
         <div class="album-name">${this._esc(album.name)}</div>
         <div class="album-count">${album.count} photo${album.count === 1 ? '' : 's'}</div>
-        ${isDefault ? '' : `
-          <div class="album-tile-actions">
+        <div class="album-tile-actions">
+          ${meuralPush}
+          ${isDefault ? '' : `
             <button class="btn-ghost" id="album-rename-${sid}">✎ Rename</button>
             <button class="btn-ghost" id="album-delete-${sid}">🗑 Delete</button>
-          </div>
-        `}
+          `}
+        </div>
       `;
 
       if (album.cover_image_id) {
@@ -5601,6 +5683,13 @@
       el.querySelector(`#album-thumb-${sid}`).addEventListener('click', open);
       el.querySelector('.album-name').addEventListener('click', open);
 
+      const meuralBtn = el.querySelector(`#album-meural-${sid}`);
+      if (meuralBtn) {
+        meuralBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._pushAlbumToMeural(album.name);
+        });
+      }
       const renameBtn = el.querySelector(`#album-rename-${sid}`);
       if (renameBtn) renameBtn.addEventListener('click', e => { e.stopPropagation(); this._renameAlbum(album.name); });
       const deleteBtn = el.querySelector(`#album-delete-${sid}`);

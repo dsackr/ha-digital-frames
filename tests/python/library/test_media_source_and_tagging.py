@@ -34,6 +34,9 @@ def _no_real_network(monkeypatch):
         async def json(self):
             return {"battery": 90, "width": 1200, "height": 1600}
 
+        async def text(self):
+            return ""
+
     class _FakeSession:
         def get(self, *a, **kw):
             return _FakeResponse()
@@ -230,6 +233,5 @@ async def test_auto_tag_all_service(
         blocking=True,
     )
     await hass.async_block_till_done()
-
-    # Verify mock AI task was called for both images
-    assert len(mock_ai_task) == 2
+    # Verify mock AI task was called for both images + seeded color test pattern
+    assert len(mock_ai_task) == 3

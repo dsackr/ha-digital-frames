@@ -371,8 +371,20 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         session = async_get_clientsession(self.hass)
         await meural_set_orientation(session, self.host, orientation)
 
+    def _image_content_type(self, image_bytes: bytes) -> str:
+        if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        return "image/jpeg"
+
     async def async_send_image(self, image_bytes: bytes) -> int:
-        """Upload JPEG (or other image) bytes as a Meural postcard."""
+        """Deliver *image_bytes* to the Canvas.
+
+        Always postcards over LAN first (immediate pixels). When a Meural
+        cloud account is linked, also pin the image in a single-image cloud
+        gallery and make that gallery live (no rotation). Fail-closed:
+        cloud failure after a successful postcard still raises so the
+        caller reports the send as failed.
+        """
         session = async_get_clientsession(self.hass)
         if self.data and self.data.get("sleeping"):
             try:
@@ -380,15 +392,180 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except (aiohttp.ClientError, ValueError) as err:
                 _LOGGER.debug("Meural resume-before-send: %s", err)
 
-        content_type = "image/jpeg"
-        if image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
-            content_type = "image/png"
+        content_type = self._image_content_type(image_bytes)
         await send_meural_postcard(
             session, self.host, image_bytes, content_type=content_type
         )
         if self.data is not None:
             self.data = {**self.data, "sleeping": False}
+
+        await self._async_cloud_pin_after_postcard(
+            image_bytes, content_type=content_type
+        )
         return 200
+
+    async def _async_cloud_pin_after_postcard(
+        self,
+        image_bytes: bytes,
+        *,
+        content_type: str,
+    ) -> None:
+        """If cloud is linked, pin permanently; raise on cloud failure."""
+        from .meural_cloud import (  # noqa: PLC0415
+            MeuralCloudError,
+            gallery_orientation_for_hang,
+            pin_gallery_name,
+        )
+        from .meural_cloud_store import async_get_meural_cloud_store  # noqa: PLC0415
+
+        store = await async_get_meural_cloud_store(self.hass)
+        if not store.is_linked:
+            return
+
+        client = store.get_client()
+        if client is None:
+            raise MeuralCloudError("Meural cloud linked but client unavailable")
+
+        hang = None
+        if self.data:
+            hang = self.data.get("device_orientation") or self.data.get("orientation")
+        if not hang:
+            hang = self.config_entry.options.get(CONF_ORIENTATION)
+        g_orient = gallery_orientation_for_hang(
+            hang if isinstance(hang, str) else None
+        )
+        title = self.config_entry.title or self.host
+        g_name = pin_gallery_name(title, g_orient)
+
+        frame_state = store.frame_state(self.config_entry.entry_id)
+        device_id = frame_state.get("device_id")
+        serial = None
+        if self.data and isinstance(self.data.get("identify"), dict):
+            identify = self.data["identify"]
+            serial = identify.get("serial") or identify.get("serialNumber")
+
+        if device_id is None:
+            dev = await client.find_device_for_host(self.host, serial=serial)
+            if dev is None or dev.get("id") is None:
+                raise MeuralCloudError(
+                    f"No Meural cloud device matches LAN host {self.host!r}"
+                )
+            device_id = dev["id"]
+            await store.async_update_frame_state(
+                self.config_entry.entry_id, {"device_id": device_id}
+            )
+            frame_state = store.frame_state(self.config_entry.entry_id)
+
+        pin_key = f"pin_{g_orient}"
+        pin_meta = frame_state.get(pin_key) if isinstance(
+            frame_state.get(pin_key), dict
+        ) else {}
+        prev_item = pin_meta.get("item_id")
+        prev_gallery = pin_meta.get("gallery_id")
+
+        result = await client.pin_image_on_device(
+            device_id=device_id,
+            image_bytes=image_bytes,
+            gallery_name=g_name,
+            gallery_orientation=g_orient,
+            previous_item_id=prev_item,
+            previous_gallery_id=prev_gallery,
+            content_type=content_type,
+            set_no_rotation=True,
+        )
+        await store.async_update_frame_state(
+            self.config_entry.entry_id,
+            {
+                "device_id": device_id,
+                pin_key: {
+                    "item_id": result["item_id"],
+                    "gallery_id": result["gallery_id"],
+                    "gallery_name": result["gallery_name"],
+                },
+            },
+        )
+        _LOGGER.info(
+            "Meural %s: cloud pin gallery %s item %s",
+            self.host,
+            result["gallery_id"],
+            result["item_id"],
+        )
+
+    async def async_push_ha_album(
+        self,
+        album_name: str,
+        image_payloads: list[tuple[bytes, str]],
+        *,
+        hang: str | None = None,
+        image_duration_s: int = 1800,
+    ) -> dict[str, Any]:
+        """Mirror an HA library album to Meural and make it live (rotation on)."""
+        from .meural_cloud import (  # noqa: PLC0415
+            MeuralCloudError,
+            album_gallery_name,
+            gallery_orientation_for_hang,
+        )
+        from .meural_cloud_store import async_get_meural_cloud_store  # noqa: PLC0415
+
+        store = await async_get_meural_cloud_store(self.hass)
+        if not store.is_linked:
+            raise MeuralCloudError(
+                "Link a Meural / Netgear account in frame options first"
+            )
+        client = store.get_client()
+        if client is None:
+            raise MeuralCloudError("Meural cloud client unavailable")
+
+        if hang is None and self.data:
+            hang = self.data.get("device_orientation") or self.data.get("orientation")
+        if hang is None:
+            hang = self.config_entry.options.get(CONF_ORIENTATION)
+        g_orient = gallery_orientation_for_hang(
+            hang if isinstance(hang, str) else None
+        )
+        g_name = album_gallery_name(album_name, g_orient)
+
+        frame_state = store.frame_state(self.config_entry.entry_id)
+        device_id = frame_state.get("device_id")
+        if device_id is None:
+            serial = None
+            if self.data and isinstance(self.data.get("identify"), dict):
+                identify = self.data["identify"]
+                serial = identify.get("serial") or identify.get("serialNumber")
+            dev = await client.find_device_for_host(self.host, serial=serial)
+            if dev is None or dev.get("id") is None:
+                raise MeuralCloudError(
+                    f"No Meural cloud device matches LAN host {self.host!r}"
+                )
+            device_id = dev["id"]
+
+        album_key = f"album:{album_name}:{g_orient}"
+        prev = frame_state.get(album_key) if isinstance(
+            frame_state.get(album_key), dict
+        ) else {}
+        prev_ids = list(prev.get("item_ids") or [])
+
+        result = await client.push_album_to_device(
+            device_id=device_id,
+            gallery_name=g_name,
+            gallery_orientation=g_orient,
+            image_payloads=image_payloads,
+            previous_item_ids=prev_ids,
+            enable_rotation=True,
+            image_duration_s=image_duration_s,
+        )
+        await store.async_update_frame_state(
+            self.config_entry.entry_id,
+            {
+                "device_id": device_id,
+                album_key: {
+                    "gallery_id": result["gallery_id"],
+                    "gallery_name": result["gallery_name"],
+                    "item_ids": result["item_ids"],
+                },
+            },
+        )
+        return result
 
     async def async_send_image_or_queue(
         self,
@@ -397,9 +574,23 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         image_id: str | None = None,
         thumbnail: bytes | None = None,
     ) -> dict[str, Any]:
-        """Send immediately. Meural has no Fraimic-style queue-if-asleep."""
+        """Send immediately (postcard + optional cloud pin). No sleep queue.
+
+        Fail-closed when cloud is linked: postcard alone is not enough.
+        """
+        from .meural_cloud import MeuralCloudError  # noqa: PLC0415
+
         try:
             await self.async_send_image(image_bytes)
+        except MeuralCloudError as err:
+            _LOGGER.error("Meural cloud pin to %s failed: %s", self.host, err)
+            return {
+                "success": False,
+                "queued": False,
+                "message": str(err),
+                "postcard_ok": True,
+                "cloud_ok": False,
+            }
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             _LOGGER.error("Meural send to %s failed: %s", self.host, err)
             return {"success": False, "queued": False, "message": str(err)}
