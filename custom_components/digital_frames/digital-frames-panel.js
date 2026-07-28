@@ -10208,7 +10208,8 @@
         });
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {
-          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+          const errMsg = (result.results && result.results[0] && result.results[0].message) || result.message || resp.statusText;
+          throw new Error(errMsg || `HTTP ${resp.status}`);
         }
         fb.className = 'feedback ok';
         fb.textContent = 'Sent!';
@@ -10345,7 +10346,8 @@
           });
           const result = await resp.json().catch(() => ({}));
           if (!resp.ok || !result.success) {
-            throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+            const errMsg = (result.results && result.results[0] && result.results[0].message) || result.message || resp.statusText;
+            throw new Error(errMsg || `HTTP ${resp.status}`);
           }
           fb.className = 'feedback ok';
           fb.textContent = result.saved_image_id ? 'Sent and saved to library!' : 'Sent!';
