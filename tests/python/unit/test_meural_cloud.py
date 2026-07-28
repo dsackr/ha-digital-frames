@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -112,10 +113,107 @@ async def test_pin_image_on_device_replaces_previous():
     assert result["gallery_id"] == 10
     client.delete_item.assert_any_call(100)
     client.device_load_gallery.assert_awaited_with(7, 10)
+    client.ensure_named_gallery.assert_awaited_once_with(
+        "Digital Frames · X · Pin · landscape",
+        orientation="horizontal",
+        description="Managed by Digital Frames (single-image pin; no rotation).",
+        expected_gallery_id=10,
+    )
     client.update_device.assert_awaited()
     opts = client.update_device.await_args.args[1]
     assert opts["imageDuration"] == 0
     assert opts["galleryRotation"] is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_named_gallery_reuses_by_id_despite_orientation_drift():
+    """expected_gallery_id must win even if the cloud's orientation vocabulary
+    doesn't match ours (e.g. API echoes "landscape" instead of "horizontal"),
+    so a stored gallery is always reused instead of re-created."""
+    client = MeuralCloudClient(
+        MagicMock(), username="u", password="p", access_token="tok"
+    )
+    client.get_user_galleries = AsyncMock(
+        return_value=[{"id": 10, "name": "Pin", "orientation": "landscape"}]
+    )
+    client.create_gallery = AsyncMock()
+
+    gallery = await client.ensure_named_gallery(
+        "Pin", orientation="horizontal", expected_gallery_id=10
+    )
+
+    assert gallery["id"] == 10
+    client.create_gallery.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_named_gallery_dedupes_multiple_name_matches():
+    """If duplicate galleries with the same name already exist (the reported
+    bug), keep the oldest (lowest id) and clean up the rest instead of
+    letting them pile up forever."""
+    client = MeuralCloudClient(
+        MagicMock(), username="u", password="p", access_token="tok"
+    )
+    client.get_user_galleries = AsyncMock(
+        return_value=[
+            {"id": 30, "name": "Pin", "orientation": "horizontal"},
+            {"id": 10, "name": "Pin", "orientation": "horizontal"},
+            {"id": 20, "name": "Pin", "orientation": "horizontal"},
+        ]
+    )
+    client.get_gallery_items = AsyncMock(return_value=[{"id": 555}])
+    client.delete_item = AsyncMock()
+    client.delete_gallery = AsyncMock()
+    client.create_gallery = AsyncMock()
+
+    gallery = await client.ensure_named_gallery("Pin", orientation="horizontal")
+
+    assert gallery["id"] == 10
+    client.create_gallery.assert_not_awaited()
+    deleted_galleries = {c.args[0] for c in client.delete_gallery.await_args_list}
+    assert deleted_galleries == {20, 30}
+    client.delete_item.assert_any_call(555)
+
+
+@pytest.mark.asyncio
+async def test_ensure_named_gallery_creates_when_no_match():
+    client = MeuralCloudClient(
+        MagicMock(), username="u", password="p", access_token="tok"
+    )
+    client.get_user_galleries = AsyncMock(return_value=[])
+    client.create_gallery = AsyncMock(return_value={"id": 99, "name": "Pin"})
+
+    gallery = await client.ensure_named_gallery("Pin", orientation="horizontal")
+
+    assert gallery["id"] == 99
+    client.create_gallery.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_named_gallery_serializes_concurrent_creates():
+    """Two overlapping calls for the same never-before-seen gallery name
+    must not race into creating two galleries."""
+    client = MeuralCloudClient(
+        MagicMock(), username="u", password="p", access_token="tok"
+    )
+    created: list[dict] = []
+    client.get_user_galleries = AsyncMock(side_effect=lambda: list(created))
+
+    async def _slow_create(name, *, orientation, description=""):
+        await asyncio.sleep(0.01)
+        gallery = {"id": len(created) + 1, "name": name, "orientation": orientation}
+        created.append(gallery)
+        return gallery
+
+    client.create_gallery = AsyncMock(side_effect=_slow_create)
+
+    results = await asyncio.gather(
+        client.ensure_named_gallery("Pin", orientation="horizontal"),
+        client.ensure_named_gallery("Pin", orientation="horizontal"),
+    )
+
+    assert client.create_gallery.await_count == 1
+    assert results[0]["id"] == results[1]["id"] == 1
 
 
 @pytest.mark.asyncio
@@ -130,6 +228,75 @@ async def test_push_album_rejects_empty():
             gallery_orientation="horizontal",
             image_payloads=[],
         )
+
+
+@pytest.mark.asyncio
+async def test_push_album_to_device_forwards_previous_gallery_id():
+    client = MeuralCloudClient(
+        MagicMock(), username="u", password="p", access_token="tok"
+    )
+    client.ensure_named_gallery = AsyncMock(return_value={"id": 55, "name": "Album"})
+    client.upload_item = AsyncMock(return_value={"id": 1})
+    client.add_item_to_gallery = AsyncMock()
+    client.get_gallery_items = AsyncMock(return_value=[])
+    client.device_load_gallery = AsyncMock()
+    client.update_device = AsyncMock()
+    client.sync_device = AsyncMock()
+
+    await client.push_album_to_device(
+        device_id=1,
+        gallery_name="Album",
+        gallery_orientation="horizontal",
+        image_payloads=[(b"\xff\xd8\xff", "image/jpeg")],
+        previous_gallery_id=55,
+    )
+
+    client.ensure_named_gallery.assert_awaited_once_with(
+        "Album",
+        orientation="horizontal",
+        description="Managed by Digital Frames (HA album; rotation enabled).",
+        expected_gallery_id=55,
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_async_push_ha_album_forwards_stored_gallery_id():
+    from custom_components.digital_frames.meural_coordinator import MeuralCoordinator
+
+    hass = MagicMock()
+    hass.data = {}
+    entry = MagicMock()
+    entry.entry_id = "meural1"
+    entry.title = "Canvas"
+    entry.data = {CONF_HOST: "192.168.1.32", CONF_DRIVER: DRIVER_MEURAL}
+    entry.options = {}
+    coord = MeuralCoordinator(hass, entry)
+    coord.data = {"device_orientation": "landscape", "online": True}
+
+    client = MagicMock()
+    client.push_album_to_device = AsyncMock(
+        return_value={"gallery_id": 55, "gallery_name": "Album", "item_ids": [1]}
+    )
+    frame_state = {
+        "device_id": 9,
+        "album:Family:horizontal": {"gallery_id": 55, "item_ids": [1]},
+    }
+    store = SimpleNamespace(
+        is_linked=True,
+        get_client=lambda: client,
+        frame_state=lambda entry_id: frame_state,
+        async_update_frame_state=AsyncMock(),
+    )
+
+    with patch(
+        "custom_components.digital_frames.meural_cloud_store.async_get_meural_cloud_store",
+        new=AsyncMock(return_value=store),
+    ):
+        await coord.async_push_ha_album("Family", [(b"\xff\xd8\xff", "image/jpeg")])
+
+    client.push_album_to_device.assert_awaited_once()
+    _, kwargs = client.push_album_to_device.await_args
+    assert kwargs["previous_gallery_id"] == 55
 
 
 @pytest.mark.asyncio

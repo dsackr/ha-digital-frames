@@ -864,6 +864,19 @@ library send, raw upload, and Live skills like Fraimic frames.
    rotate. Daily skills (agenda, xOTD) reuse the same pin gallery — each
    render **replaces** the prior cloud item (no stack of stale agendas).
 
+**Gallery reuse (`ensure_named_gallery`):** the Netgear cloud API's
+orientation vocabulary on `GET user/galleries` is not guaranteed to match
+what we send on create, so name+orientation matching alone was found to
+under-match and spawn duplicate galleries with the same name on every push.
+`ensure_named_gallery` now checks the stored `gallery_id` from the previous
+push first (authoritative reuse, immune to name/orientation drift) before
+falling back to a name+orientation scan. A per-gallery-name `asyncio.Lock`
+serializes creation so two overlapping sends can't race into duplicate
+galleries. If a name+orientation scan still turns up more than one gallery
+with the same name (pre-existing duplicates from the old bug), the oldest
+(lowest id) is kept and the rest are deleted (items + gallery) so affected
+installs self-heal over subsequent pushes.
+
 **Fail-closed when cloud is linked:** postcard alone is not success. If
 cloud pin fails after a good postcard, `async_send_image_or_queue` returns
 `success: false` (`postcard_ok: true`, `cloud_ok: false`). Unlinked frames
@@ -911,17 +924,20 @@ browse, 2FA Netgear login.
   Spectra `.bin`; empty-album banner returns because cloud pin never ran
   (unlinked or fail not surfaced); cloud link accepted but device not
   matched to LAN host; pin galleries accumulate items because replace/
-  delete failed; album push encodes wrong codec; orientation redisplay
-  double-sends (listener vs select — historical fix: listener is sole
-  trigger on real option change; select redisplays only when re-selecting
-  the already-active option); or options form drops orientation lock when
-  saving cloud fields.
+  delete failed; duplicate cloud galleries with the same name pile up
+  because id-based reuse/dedup in `ensure_named_gallery` regresses; album
+  push encodes wrong codec; orientation redisplay double-sends (listener vs
+  select — historical fix: listener is sole trigger on real option change;
+  select redisplays only when re-selecting the already-active option); or
+  options form drops orientation lock when saving cloud fields.
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_meural.py` (JPEG codec/EXIF, orientation,
   follow-device, system stats, command map, redisplay listener once),
   `tests/python/unit/test_meural_cloud.py` (gallery naming, legacy auth
   mock, pin replace + imageDuration 0, empty album reject, fail-closed
-  cloud error, postcard-only when unlinked),
+  cloud error, postcard-only when unlinked, gallery reuse by id despite
+  orientation drift, duplicate-gallery dedup/cleanup, concurrent-create
+  lock),
   `tests/python/unit/test_select_meural_orientation.py`,
   `tests/python/config_flow/test_config_flow_user_scan.py` (Meural add).
   **Frontend-tested** — `tests/panel/meural-dashboard.spec.js` (dashboard;

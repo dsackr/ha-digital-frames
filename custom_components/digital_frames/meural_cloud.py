@@ -14,6 +14,7 @@ done by matching ``localIp`` / serial from ``user/devices``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable
 
@@ -31,6 +32,24 @@ _COGNITO_URL = f"https://cognito-idp.{_COGNITO_REGION}.amazonaws.com/"
 # Gallery orientation values required by POST /galleries.
 ORIENT_HORIZONTAL = "horizontal"  # landscape
 ORIENT_VERTICAL = "vertical"  # portrait
+
+# The cloud API's own vocabulary for orientation on GET responses is not
+# documented and may not echo back "horizontal"/"vertical" verbatim (some
+# Meural endpoints use "landscape"/"portrait" instead). Treat both spellings
+# as equivalent so a vocabulary mismatch never causes ensure_named_gallery to
+# miss an existing gallery and create a duplicate.
+_ORIENTATION_ALIASES = {
+    ORIENT_HORIZONTAL: {ORIENT_HORIZONTAL, "landscape"},
+    ORIENT_VERTICAL: {ORIENT_VERTICAL, "portrait"},
+}
+
+
+def _orientation_matches(gallery_orientation: str, target_orientation: str) -> bool:
+    if not gallery_orientation:
+        return True
+    aliases = _ORIENTATION_ALIASES.get(target_orientation, {target_orientation})
+    return gallery_orientation in aliases
+
 
 _TIMEOUT = aiohttp.ClientTimeout(total=60)
 _UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=180)
@@ -87,6 +106,17 @@ class MeuralCloudClient:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self._token_update_callback = token_update_callback
+        # Keyed by gallery name; serializes ensure_named_gallery so two
+        # overlapping sends for the same gallery can't both miss each
+        # other's in-flight create and each spawn a duplicate.
+        self._gallery_locks: dict[str, asyncio.Lock] = {}
+
+    def _gallery_lock(self, name: str) -> asyncio.Lock:
+        lock = self._gallery_locks.get(name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._gallery_locks[name] = lock
+        return lock
 
     # ------------------------------------------------------------------
     # Auth
@@ -419,20 +449,73 @@ class MeuralCloudClient:
         *,
         orientation: str,
         description: str = "",
+        expected_gallery_id: int | str | None = None,
     ) -> dict[str, Any]:
-        """Return existing user gallery with *name* or create one."""
-        galleries = await self.get_user_galleries()
-        for g in galleries:
-            if not isinstance(g, dict):
-                continue
-            if (g.get("name") or "").strip() == name:
-                # Prefer matching orientation when present
-                g_or = (g.get("orientation") or "").strip().lower()
-                if not g_or or g_or == orientation:
-                    return g
-        return await self.create_gallery(
-            name, orientation=orientation, description=description
-        )
+        """Return existing user gallery with *name* or create one.
+
+        *expected_gallery_id*, when given (the id stored from a prior push),
+        is checked first and returned as-is if still present — this is the
+        authoritative reuse path and sidesteps any drift in name/orientation
+        matching. Falls back to a name+orientation scan, and if that scan
+        turns up more than one gallery with the same name (e.g. duplicates
+        created by a past matching bug), keeps the oldest (lowest id) and
+        best-effort deletes the rest so installs self-heal over time.
+        """
+        async with self._gallery_lock(name):
+            galleries = await self.get_user_galleries()
+            valid_galleries = [g for g in galleries if isinstance(g, dict)]
+
+            if expected_gallery_id is not None:
+                for g in valid_galleries:
+                    if str(g.get("id")) == str(expected_gallery_id):
+                        return g
+
+            matches = [
+                g
+                for g in valid_galleries
+                if (g.get("name") or "").strip() == name
+                and _orientation_matches(
+                    (g.get("orientation") or "").strip().lower(), orientation
+                )
+            ]
+            if not matches:
+                return await self.create_gallery(
+                    name, orientation=orientation, description=description
+                )
+
+            matches.sort(key=lambda g: g.get("id") if g.get("id") is not None else 0)
+            canonical, *duplicates = matches
+            if duplicates:
+                _LOGGER.warning(
+                    "Meural gallery %r has %d duplicate(s); keeping id %s and "
+                    "removing the rest",
+                    name,
+                    len(duplicates),
+                    canonical.get("id"),
+                )
+                for dup in duplicates:
+                    dup_id = dup.get("id")
+                    if dup_id is None:
+                        continue
+                    try:
+                        items = await self.get_gallery_items(dup_id)
+                    except MeuralCloudAPIError:
+                        items = []
+                    for item in items:
+                        item_id = item.get("id") if isinstance(item, dict) else None
+                        if item_id is None:
+                            continue
+                        try:
+                            await self.delete_item(item_id)
+                        except MeuralCloudAPIError:
+                            pass
+                    try:
+                        await self.delete_gallery(dup_id)
+                    except MeuralCloudAPIError as err:
+                        _LOGGER.debug(
+                            "Meural delete duplicate gallery %s: %s", dup_id, err
+                        )
+            return canonical
 
     async def pin_image_on_device(
         self,
@@ -458,6 +541,7 @@ class MeuralCloudClient:
             gallery_name,
             orientation=gallery_orientation,
             description="Managed by Digital Frames (single-image pin; no rotation).",
+            expected_gallery_id=previous_gallery_id,
         )
         gallery_id = gallery["id"]
 
@@ -540,6 +624,7 @@ class MeuralCloudClient:
         gallery_orientation: str,
         image_payloads: list[tuple[bytes, str]],
         previous_item_ids: list[int | str] | None = None,
+        previous_gallery_id: int | str | None = None,
         enable_rotation: bool = True,
         image_duration_s: int = 1800,
     ) -> dict[str, Any]:
@@ -556,6 +641,7 @@ class MeuralCloudClient:
             gallery_name,
             orientation=gallery_orientation,
             description="Managed by Digital Frames (HA album; rotation enabled).",
+            expected_gallery_id=previous_gallery_id,
         )
         gallery_id = gallery["id"]
 

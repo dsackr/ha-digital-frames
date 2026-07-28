@@ -544,6 +544,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             frame_state.get(album_key), dict
         ) else {}
         prev_ids = list(prev.get("item_ids") or [])
+        prev_gallery = prev.get("gallery_id")
 
         result = await client.push_album_to_device(
             device_id=device_id,
@@ -551,6 +552,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             gallery_orientation=g_orient,
             image_payloads=image_payloads,
             previous_item_ids=prev_ids,
+            previous_gallery_id=prev_gallery,
             enable_rotation=True,
             image_duration_s=image_duration_s,
         )
