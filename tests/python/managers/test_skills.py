@@ -678,4 +678,58 @@ async def test_text_skill_fields_come_from_config_not_catalog(
     assert fake_scene_packs.get_pack_calls == 0
 
 
+async def test_agenda_render_handles_dict_and_string_calendar_formats(
+    hass, skill_manager, make_frame_entry, monkeypatch,
+):
+    entry = make_frame_entry(entry_id="e1")
+    entry.add_to_hass(hass)
+    await skill_manager.async_load()
+
+    created = await skill_manager.async_save_skill(
+        "My Agenda", "agenda", {
+            "calendar_source": "ha",
+            "ha_calendar_entities": "calendar.personal"
+        }
+    )
+
+    mock_response = {
+        "calendar.personal": {
+            "events": [
+                {
+                    "start": {"dateTime": "2026-07-28T09:00:00-07:00"},
+                    "end": {"dateTime": "2026-07-28T10:00:00-07:00"},
+                    "summary": "Workout (dict)"
+                },
+                {
+                    "start": "2026-07-28T11:00:00-07:00",
+                    "end": "2026-07-28T12:00:00-07:00",
+                    "summary": "Meeting (string)"
+                }
+            ]
+        }
+    }
+
+    async def _mock_async_call(self, domain, service, service_data=None, *args, **kwargs):
+        assert domain == "calendar"
+        assert service == "get_events"
+        return mock_response
+
+    monkeypatch.setattr("homeassistant.core.ServiceRegistry.async_call", _mock_async_call)
+
+    async def _fake_exec(*args, **kwargs):
+        config_path = args[4]
+        run_dir = os.path.dirname(config_path)
+        with open(os.path.join(run_dir, "agenda.bin"), "wb") as f:
+            f.write(b"mock-bin")
+        with open(os.path.join(run_dir, "agenda_preview.png"), "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+        return _FakeProcess(returncode=0)
+
+    monkeypatch.setattr("custom_components.digital_frames.skills.asyncio.create_subprocess_exec", _fake_exec)
+
+    result = await skill_manager.async_render_for_entry(created["skill_id"], entry)
+    assert result["kind"] == "bin"
+
+
+
 

@@ -627,11 +627,16 @@ class SkillManager:
                 events.extend(
                     (response.get(entity_id) or {}).get("events") or []
                 )
-        events.sort(
-            key=lambda e: (e.get("start") or {}).get("dateTime")
-            or (e.get("start") or {}).get("date")
-            or ""
-        )
+
+        def _get_start_time(e: dict[str, Any]) -> str:
+            start = e.get("start")
+            if isinstance(start, str):
+                return start
+            if isinstance(start, dict):
+                return start.get("dateTime") or start.get("date") or ""
+            return ""
+
+        events.sort(key=_get_start_time)
         _LOGGER.debug(
             "Agenda skill '%s': prefetched %d events from %s (tz=%s)",
             skill.skill_id,

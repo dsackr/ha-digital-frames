@@ -705,7 +705,9 @@ at the target frame's composition size. The script writes Spectra
 `xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
 **Agenda mode (Phase 4):** pinned `agenda_renderer.py --render-only` writes
 `agenda.bin` + `agenda_preview.png`; HA calendar events are prefetched
-into `ha_events.json` before the subprocess. Both paths use
+into `ha_events.json` before the subprocess. Both prefetching and parsing
+handle both dictionary-style and string-style calendar event start/end times
+to support different HA versions. Both paths use
 `text_skill_payload_for_codec` for Spectra vs Meural JPEG.
 Image modes resolve to a library image_id (feeds upload the fetched photo
 into the library first) and use the normal library codec path.

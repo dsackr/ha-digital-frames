@@ -301,12 +301,21 @@ def fetch_ha_events(
         
     events = []
     for item in data:
-        start_raw = item["start"].get("dateTime") or item["start"].get("date")
-        end_raw = item["end"].get("dateTime") or item["end"].get("date")
+        start_val = item["start"]
+        end_val = item["end"]
         
-        # Check if all day
-        is_all_day = "dateTime" not in item["start"]
-        
+        if isinstance(start_val, dict):
+            start_raw = start_val.get("dateTime") or start_val.get("date")
+            is_all_day = "dateTime" not in start_val
+        else:
+            start_raw = str(start_val)
+            is_all_day = "T" not in start_raw
+            
+        if isinstance(end_val, dict):
+            end_raw = end_val.get("dateTime") or end_val.get("date")
+        else:
+            end_raw = str(end_val)
+            
         if is_all_day:
             start_dt = datetime.datetime.strptime(start_raw, "%Y-%m-%d").replace(tzinfo=target_tz)
             end_dt = datetime.datetime.strptime(end_raw, "%Y-%m-%d").replace(tzinfo=target_tz)
