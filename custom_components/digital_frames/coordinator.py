@@ -317,7 +317,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self,
         *,
         sleep_minutes: int | None = None,
-        active_sec: int = 8,
+        active_sec: int = 120,
         always_on: bool | None = None,
     ) -> bool:
         """Tell the frame its HA pull URL and power mode.
