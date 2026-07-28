@@ -92,13 +92,15 @@ def orientation_for_entry(
     (*device_orientation*) so library portrait/landscape crops match the hang
     even if entry.options is briefly stale between polls.
     """
-    if entry.data.get(CONF_DRIVER) in (DRIVER_MEURAL, DRIVER_SAMSUNG):
-        follow = entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
-        if follow and device_orientation in (
-            ORIENTATION_PORTRAIT,
-            ORIENTATION_LANDSCAPE,
-        ):
-            return device_orientation
+    follow = entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
+    if entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO) == ORIENTATION_AUTO:
+        follow = True
+
+    if follow and device_orientation in (
+        ORIENTATION_PORTRAIT,
+        ORIENTATION_LANDSCAPE,
+    ):
+        return device_orientation
     return entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
 
 

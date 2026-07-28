@@ -2033,13 +2033,64 @@ class LibraryManager:
         images = await self._backend.async_list_images()
         return next((img for img in images if img.image_id == image_id), None)
 
+    def _determine_natural_orientation(self, record: LibraryImage, orig_w: int, orig_h: int) -> str:
+        # Find landscape crops and portrait crops
+        land_crops = []
+        port_crops = []
+        if record and record.crops:
+            for k, v in record.crops.items():
+                if not isinstance(v, list) or len(v) != 4:
+                    continue
+                area = (v[2] - v[0]) * (v[3] - v[1])
+                if k == "landscape":
+                    land_crops.append(area)
+                elif k == "portrait":
+                    port_crops.append(area)
+                elif k.startswith("ratio:"):
+                    try:
+                        ratio = float(k.split(":")[1])
+                        if ratio >= 1.0:
+                            land_crops.append(area)
+                        else:
+                            port_crops.append(area)
+                    except (ValueError, IndexError):
+                        pass
+                elif "x" in k:
+                    try:
+                        w, h = map(int, k.split("x"))
+                        if w >= h:
+                            land_crops.append(area)
+                        else:
+                            port_crops.append(area)
+                    except ValueError:
+                        pass
+
+        has_landscape_crop = len(land_crops) > 0
+        has_portrait_crop = len(port_crops) > 0
+
+        if has_landscape_crop and has_portrait_crop:
+            max_land_area = max(land_crops)
+            max_port_area = max(port_crops)
+            if max_land_area >= max_port_area:
+                return "landscape"
+            else:
+                return "portrait"
+        elif has_landscape_crop:
+            return "landscape"
+        elif has_portrait_crop:
+            return "portrait"
+        else:
+            return "landscape" if orig_w >= orig_h else "portrait"
+
     async def async_get_bin_for_send(
         self,
         image_id: str,
         spec: RenderSpec,
+        *,
         pack_method: str | None = None,
         codec_id: str | None = None,
         crop_box_override: tuple[float, ...] | list[float] | None = None,
+        entry: "ConfigEntry" | None = None,
     ) -> bytes:
         """Return a cached .bin for this render spec, generating + caching it
         on the fly if this render hasn't been seen for this image before
@@ -2073,10 +2124,40 @@ class LibraryManager:
         silently read back the first frame's crop. Used by the scene
         mapping type {"type": "image_crop", ...} (see scenes.py); never set
         by the ordinary manual-crop editor path."""
-        width, height = spec.width, spec.height
         record = await self._find_image(image_id)
         if record is None:
             raise LibraryBackendError(f"Image '{image_id}' not found")
+
+        width, height = spec.width, spec.height
+
+        # Natural orientation selection for unlocked and non-reporting frames
+        if not spec.locked:
+            raw_bytes, _content_type = await self._backend.async_get_original(image_id)
+            from PIL import Image  # noqa: PLC0415
+            import io  # noqa: PLC0415
+            def _get_image_size(b: bytes) -> tuple[int, int]:
+                with Image.open(io.BytesIO(b)) as img:
+                    return img.size
+            orig_w, orig_h = await self.hass.async_add_executor_job(_get_image_size, raw_bytes)
+            natural_orient = self._determine_natural_orientation(record, orig_w, orig_h)
+
+            native_portrait = height >= width
+            native_orient = "portrait" if native_portrait else "landscape"
+
+            if natural_orient != native_orient:
+                if entry is not None:
+                    from .helpers import render_spec_for_entry  # noqa: PLC0415
+                    spec = render_spec_for_entry(entry, orientation=natural_orient)
+                    width, height = spec.width, spec.height
+                else:
+                    # Fallback if no entry is passed
+                    width, height = height, width
+                    spec = RenderSpec(
+                        width=width,
+                        height=height,
+                        rotation=90,
+                        locked=True,
+                    )
 
         # Compatibility Check (Goal 2)
         if spec.locked:

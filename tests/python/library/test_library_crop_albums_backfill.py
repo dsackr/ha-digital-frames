@@ -180,7 +180,7 @@ async def test_backfill_generates_bin_for_configured_frame_resolution(
 async def test_get_bin_for_send_generates_on_the_fly_when_uncached(
     library_manager, sample_image_bytes
 ):
-    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
     spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
 
     bin_bytes = await library_manager.async_get_bin_for_send(record["image_id"], spec)
@@ -198,7 +198,7 @@ async def test_get_bin_for_send_generates_on_the_fly_when_uncached(
 async def test_get_bin_for_send_cache_hit_skips_conversion(
     library_manager, sample_image_bytes, monkeypatch
 ):
-    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
     spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
     await library_manager.async_get_bin_for_send(record["image_id"], spec)
 
@@ -219,7 +219,7 @@ async def test_get_bin_for_send_cache_hit_skips_conversion(
 async def test_get_bin_for_send_pack_method_override_bypasses_cache(
     library_manager, sample_image_bytes
 ):
-    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
     spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
     normal = await library_manager.async_get_bin_for_send(record["image_id"], spec)
 
@@ -252,9 +252,9 @@ async def test_get_bin_for_send_crop_box_override_wins_and_bypasses_cache(
     from PIL import Image
     import io
 
-    banner = Image.new("RGB", (2000, 1000), (0, 0, 0))
+    banner = Image.new("RGB", (1000, 2000), (0, 0, 0))
     banner.paste(Image.new("RGB", (1000, 1000), (178, 19, 24)), (0, 0))
-    banner.paste(Image.new("RGB", (1000, 1000), (33, 87, 186)), (1000, 0))
+    banner.paste(Image.new("RGB", (1000, 1000), (33, 87, 186)), (0, 1000))
     buf = io.BytesIO()
     banner.save(buf, format="PNG")
 
@@ -266,10 +266,10 @@ async def test_get_bin_for_send_crop_box_override_wins_and_bypasses_cache(
     await library_manager.async_set_crop(image_id, 1200, 1600, [0.0, 0.0, 1.0, 1.0])
 
     left_half = await library_manager.async_get_bin_for_send(
-        image_id, spec, crop_box_override=(0.0, 0.0, 0.5, 1.0)
+        image_id, spec, crop_box_override=(0.0, 0.0, 1.0, 0.5)
     )
     right_half = await library_manager.async_get_bin_for_send(
-        image_id, spec, crop_box_override=(0.5, 0.0, 1.0, 1.0)
+        image_id, spec, crop_box_override=(0.0, 0.5, 1.0, 1.0)
     )
     assert left_half != right_half  # distinct crops, not one clobbering the other
 

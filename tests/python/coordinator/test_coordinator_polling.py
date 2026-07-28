@@ -158,5 +158,50 @@ async def test_legacy_entry_backfills_device_key_and_mac(
     assert coordinator.config_entry.data.get("mac_address") == "112233445566"
 
 
+async def test_accelerometer_polling_success(hass, coordinator, aioclient_mock):
+    # Mock /api/info
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 1200, "height": 1600}, # Portrait-native (13.3")
+    )
+    # Mock accel_start
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_start",
+        json={"status": "ok"},
+    )
+    # Mock accel GET: gravity mostly on X, so rotated orientation -> landscape
+    aioclient_mock.get(
+        f"http://{coordinator.host}/test?action=accel",
+        json={"x": -0.99, "y": 0.01, "z": 0.18},
+    )
+    # Mock accel_stop
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_stop",
+        json={"status": "ok"},
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["device_orientation"] == "landscape"
+    # Follow device is enabled by default, so CONF_ORIENTATION option should be updated to landscape
+    from custom_components.digital_frames.const import CONF_ORIENTATION
+    assert coordinator.config_entry.options.get(CONF_ORIENTATION) == "landscape"
+
+
+async def test_accelerometer_polling_sensor_not_available(hass, coordinator, aioclient_mock):
+    # Mock /api/info
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 1200, "height": 1600},
+    )
+    # Mock accel_start (fails/error)
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_start",
+        json={"error": "failed"},
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["device_orientation"] is None
+
+
 async def _noop(*args, **kwargs):
     return None

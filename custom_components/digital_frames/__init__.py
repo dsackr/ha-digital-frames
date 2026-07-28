@@ -1094,7 +1094,7 @@ def _register_services(hass: HomeAssistant) -> None:
         except ValueError:
             codec_id = None
         bin_bytes = await manager.async_get_bin_for_send(
-            image_id, spec, codec_id=codec_id
+            image_id, spec, codec_id=codec_id, entry=entry
         )
         result = await coordinator.async_send_image_or_queue(
             bin_bytes, image_id=image_id

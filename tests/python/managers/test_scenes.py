@@ -112,7 +112,7 @@ class _FakeLibrary:
         self.crop_box_override_calls = []
 
     async def async_get_bin_for_send(
-        self, image_id, spec, pack_method=None, codec_id=None, crop_box_override=None
+        self, image_id, spec, pack_method=None, codec_id=None, crop_box_override=None, entry=None
     ):
         if image_id == "missing-image":
             raise FileNotFoundError(f"no such image: {image_id}")

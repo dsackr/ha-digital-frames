@@ -663,6 +663,64 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # DataUpdateCoordinator protocol
     # ------------------------------------------------------------------
 
+    async def _async_poll_accelerometer(self, session: aiohttp.ClientSession) -> str | None:
+        """Opportunistically read physical orientation from accelerometer."""
+        from .const import CONF_WIDTH, CONF_HEIGHT  # noqa: PLC0415
+        host = self.host
+        # 1. Start sensor
+        try:
+            async with session.post(
+                f"http://{host}/test?action=accel_start",
+                timeout=aiohttp.ClientTimeout(total=2),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                res = await resp.json()
+                if res.get("status") != "ok":
+                    return None
+        except Exception:
+            return None
+
+        x, y = None, None
+        try:
+            # 2. Read sensor
+            async with session.get(
+                f"http://{host}/test?action=accel",
+                timeout=aiohttp.ClientTimeout(total=2),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                res = await resp.json()
+                if "error" not in res:
+                    x = res.get("x")
+                    y = res.get("y")
+        except Exception:
+            pass
+        finally:
+            # 3. Stop sensor
+            try:
+                async with session.post(
+                    f"http://{host}/test?action=accel_stop",
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ):
+                    pass
+            except Exception:
+                pass
+
+        if x is None or y is None:
+            return None
+
+        # Compare gravity axes to determine landscape / portrait.
+        # Screen default orientation has Y vertical (abs(y) >= abs(x)).
+        native_w = self.config_entry.data.get(CONF_WIDTH, 1200)
+        native_h = self.config_entry.data.get(CONF_HEIGHT, 1600)
+        native_is_landscape = native_w > native_h
+
+        if abs(y) >= abs(x):
+            return "landscape" if native_is_landscape else "portrait"
+        else:
+            return "portrait" if native_is_landscape else "landscape"
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch latest data from the frame's /api/info endpoint."""
         session = async_get_clientsession(self.hass)
@@ -673,6 +731,26 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) as response:
                 response.raise_for_status()
                 data: dict[str, Any] = await response.json()
+
+            # Opportunistic accelerometer poll
+            device_orientation = await self._async_poll_accelerometer(session)
+            data["device_orientation"] = device_orientation
+
+            # If follow device or auto is enabled, update config options
+            from .const import CONF_ORIENTATION, CONF_ORIENTATION_FOLLOW_DEVICE, ORIENTATION_AUTO, ORIENTATION_PORTRAIT, ORIENTATION_LANDSCAPE  # noqa: PLC0415
+            follow = self.config_entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
+            if self.config_entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO) == ORIENTATION_AUTO:
+                follow = True
+
+            if follow and device_orientation in (ORIENTATION_PORTRAIT, ORIENTATION_LANDSCAPE) and self.config_entry.options.get(CONF_ORIENTATION) != device_orientation:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    options={
+                        **self.config_entry.options,
+                        CONF_ORIENTATION: device_orientation,
+                        CONF_ORIENTATION_FOLLOW_DEVICE: True,
+                    },
+                )
 
             # Successful poll — reset failure counter and migrate fingerprint.
             self._consecutive_failures = 0

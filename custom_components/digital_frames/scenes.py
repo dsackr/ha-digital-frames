@@ -395,6 +395,7 @@ class SceneManager:
                     render_spec_for_hass_entry(hass, entry),
                     codec_id=codec_id,
                     crop_box_override=crop_box_override,
+                    entry=entry,
                 )
             except Exception as err:  # noqa: BLE001
                 return {"entry_id": entry_id, "success": False, "message": str(err)}

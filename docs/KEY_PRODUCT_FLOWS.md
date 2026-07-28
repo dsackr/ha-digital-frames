@@ -581,24 +581,22 @@ schedule to "broken" instead of erroring at fire time.
   schedule, `next_fire_at` math including monthly day-of-month clamping).
 
 ## 21. HA entities: sensors + Orientation select + Camera display
-Read-only device telemetry (battery/wifi/charging/firmware/IP/queued), a per-frame Orientation control that persists into config entry options, and a Camera entity representing the frame's dynamic canvas (active photo display).
+Read-only device telemetry (battery/wifi/charging/firmware/IP/queued), a per-frame Orientation control that persists into config entry options (supporting lock/unlock and follow-device settings), and a Camera entity representing the frame's dynamic canvas (active photo display).
 - **Entry points**: `sensor.py` (all `Fraimic*Sensor` classes), `select.py`
-  (`DigitalFramesOrientationSelect`), `camera.py` (`DigitalFramesCamera`).
-- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, or the camera entity fails to load or serve the active frame image.
-- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`.
+  (`DigitalFramesOrientationSelect`, `MeuralOrientationSelect`), `camera.py` (`DigitalFramesCamera`).
+- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, or the camera entity fails to load or serve the active frame image.
+- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`. **Panel-tested** — `tests/panel/frame-manage.spec.js` (info overlay lock/unlock/discover orientation controls).
 
 ## 22. Render spec resolution (orientation lock + rotation + hanging edge)
 Central "how should this image be composed for this frame" resolution —
-combines native dimensions, orientation lock, 180° flips, and hang-edge
-into one `RenderSpec` every send path consults.
-- **Entry points**: `helpers.py` (`render_spec_for_entry`,
-  `RenderSpec.variant`).
+combines native dimensions, orientation lock, 180° flips, hang-edge, live gsensor/accelerometer reporting, and image natural orientation (surface area crop comparison or aspect ratio fallback) into one `RenderSpec` every send path consults.
+- **Entry points**: `helpers.py` (`render_spec_for_entry`, `orientation_for_entry`, `RenderSpec.variant`), `library.py` (`_determine_natural_orientation`).
 - **If it silently breaks**: this is the single riskiest piece of logic in
   the whole integration — a wrong rotation means every image sent from
   every path lands sideways or upside-down on the physical frame, and it's
   invisible until someone looks at hardware.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_helpers_render_spec.py`.
+  `tests/python/unit/test_helpers_render_spec.py`, `tests/python/library/test_crop_aspect_ratio_and_lock.py` (`test_unlocked_frame_natural_orientation_selection`), and `tests/python/coordinator/test_coordinator_polling.py` (`test_accelerometer_polling_success`).
 
 ## 23. Frame-type registry, PanelCodec ids & byte-layout dispatch
 Declares every supported physical panel (resolution, **codec_id** /

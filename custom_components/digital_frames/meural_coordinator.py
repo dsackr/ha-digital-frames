@@ -294,7 +294,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         except ValueError:
                             codec_id = "jpeg_q90"
                         wire = await library.async_get_bin_for_send(
-                            image_id, spec, codec_id=codec_id
+                            image_id, spec, codec_id=codec_id, entry=entry
                         )
                         await self.async_send_image(wire)
                         await self.async_set_last_image(

@@ -3202,9 +3202,19 @@
               <label>IP Address</label>
               <span id="frame-info-ip" style="color:var(--secondary-text-color)"></span>
             </div>
-            <div class="modal-row">
+            <div class="modal-row" style="align-items:center">
               <label>Orientation</label>
-              <span id="frame-info-orientation" style="color:var(--secondary-text-color)"></span>
+              <div style="display:flex;align-items:center;gap:12px">
+                <span id="frame-info-orientation" style="color:var(--secondary-text-color)"></span>
+                <div class="orientation-toggle" id="frame-info-orientation-btns" style="display:none">
+                  <button class="orientation-icon-btn" id="frame-info-portrait" title="Lock Portrait">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>
+                  </button>
+                  <button class="orientation-icon-btn" id="frame-info-landscape" title="Lock Landscape">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="modal-row">
               <label>Battery</label>
@@ -3563,6 +3573,8 @@
             frame.driver   = match.driver;
             frame.meuralCloudLinked = !!match.meural_cloud_linked;
             frame.orientation  = match.orientation;
+            frame.orientationLocked = !!match.orientation_locked;
+            frame.deviceOrientation = match.device_orientation;
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
           }
@@ -3586,6 +3598,8 @@
             driver: f.driver,
             meuralCloudLinked: !!f.meural_cloud_linked,
             orientation: f.orientation,
+            orientationLocked: !!f.orientation_locked,
+            deviceOrientation: f.device_orientation,
             lastImageId: f.last_image_id,
             hasThumbnail: f.has_thumbnail,
           });
@@ -4299,6 +4313,49 @@
             e.target.disabled = false;
           }
         });
+
+      this.shadowRoot.getElementById('frame-info-portrait')
+        .addEventListener('click', () => this._setFrameSettingsOrientation('portrait'));
+      this.shadowRoot.getElementById('frame-info-landscape')
+        .addEventListener('click', () => this._setFrameSettingsOrientation('landscape'));
+    }
+
+    async _setFrameSettingsOrientation(targetOrient) {
+      const frame = this._frameSettingsTarget;
+      if (!frame || !frame.orientationEntityId) return;
+
+      const isCurrentActive = (frame.orientationLocked && frame.orientation === targetOrient);
+      let option;
+      if (isCurrentActive) {
+        option = frame.driver === 'meural' ? 'Follow device (gsensor)' : 'Auto (any picture, Fraimic default)';
+      } else {
+        option = targetOrient === 'portrait' ? 'Portrait' : 'Landscape';
+      }
+
+      const renameBtn = this.shadowRoot.getElementById('frame-settings-rename');
+      const fb = this.shadowRoot.getElementById('frame-settings-fb');
+      renameBtn.disabled = true;
+      try {
+        await this._hass.callService('select', 'select_option', {
+          entity_id: frame.orientationEntityId,
+          option: option,
+        });
+
+        await this._discoverFrames();
+        const updatedFrame = this._frames.find(f => f.entryId === frame.entryId);
+        if (updatedFrame) {
+          this._frameSettingsTarget = updatedFrame;
+          this._openFrameSettingsMenu(updatedFrame);
+        }
+        this._renderWallCanvas();
+      } catch (err) {
+        console.error('[fraimic-panel] failed to set orientation:', err);
+        fb.className = 'feedback err';
+        fb.textContent = `Failed to set orientation: ${err.message || err}`;
+        fb.style.display = 'block';
+      } finally {
+        renameBtn.disabled = false;
+      }
     }
 
     _openLibraryModal() {
@@ -4572,8 +4629,29 @@
 
       this.shadowRoot.getElementById('frame-info-ip').textContent = frame.host || 'Unknown';
 
-      const orient = frame.orientation ? (frame.orientation.charAt(0).toUpperCase() + frame.orientation.slice(1)) : 'Auto';
-      this.shadowRoot.getElementById('frame-info-orientation').textContent = orient;
+      const orientEl = this.shadowRoot.getElementById('frame-info-orientation');
+      const orientBtns = this.shadowRoot.getElementById('frame-info-orientation-btns');
+      const portraitBtn = this.shadowRoot.getElementById('frame-info-portrait');
+      const landscapeBtn = this.shadowRoot.getElementById('frame-info-landscape');
+
+      if (frame.orientationLocked) {
+        const displayVal = frame.orientation ? (frame.orientation.charAt(0).toUpperCase() + frame.orientation.slice(1)) : 'Auto';
+        orientEl.textContent = `${displayVal} (Locked)`;
+        portraitBtn.classList.toggle('active', frame.orientation === 'portrait');
+        landscapeBtn.classList.toggle('active', frame.orientation === 'landscape');
+      } else {
+        if (frame.deviceOrientation) {
+          const displayVal = frame.deviceOrientation.charAt(0).toUpperCase() + frame.deviceOrientation.slice(1);
+          orientEl.textContent = `${displayVal} (Discovered)`;
+        } else {
+          orientEl.textContent = 'Auto';
+        }
+        portraitBtn.classList.remove('active');
+        landscapeBtn.classList.remove('active');
+      }
+
+      const hasBtns = !!frame.orientationEntityId;
+      orientBtns.style.display = hasBtns ? 'flex' : 'none';
 
        const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
        let batteryHtml = 'N/A';

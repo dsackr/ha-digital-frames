@@ -409,7 +409,7 @@ class DigitalFramesLibrarySendView(HomeAssistantView):
             except ValueError:
                 codec_id = None
             bin_bytes = await manager.async_get_bin_for_send(
-                image_id, spec, pack_method=packer, codec_id=codec_id
+                image_id, spec, pack_method=packer, codec_id=codec_id, entry=entry
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("Library send conversion failed: %s", err)
@@ -669,6 +669,9 @@ class DigitalFramesFramesView(HomeAssistantView):
             DRIVER_SAMSUNG,
             MEURAL_SIZE_LABEL,
             SAMSUNG_SIZE_LABEL,
+            CONF_ORIENTATION,
+            CONF_ORIENTATION_FOLLOW_DEVICE,
+            ORIENTATION_AUTO,
         )
 
         for entry in hass.config_entries.async_entries(DOMAIN):
@@ -718,7 +721,11 @@ class DigitalFramesFramesView(HomeAssistantView):
                         "native_width": width,
                         "native_height": height,
                         "orientation": orientation_for_hass_entry(hass, entry),
-                        # Live gsensor hang (Meural); None for Fraimic.
+                        "orientation_locked": not (
+                            entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
+                            or entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO) == ORIENTATION_AUTO
+                        ),
+                        # Live gsensor/accelerometer hang.
                         "device_orientation": (
                             (coordinator.data or {}).get("device_orientation")
                             if coordinator is not None
@@ -1177,7 +1184,7 @@ class DigitalFramesMeuralPushAlbumView(HomeAssistantView):
         for image_id in album_ids:
             try:
                 wire = await manager.async_get_bin_for_send(
-                    image_id, spec, codec_id=codec_id
+                    image_id, spec, codec_id=codec_id, entry=entry
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error(

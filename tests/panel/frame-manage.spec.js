@@ -9,7 +9,7 @@ const { createMockServer } = require('./fixtures/mock-server');
 const { gotoPanel, clickPanelButton, clickWallTileQuadrant } = require('./fixtures/panel-page');
 
 const FRAMES = [
-  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10' },
+  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10', orientation_entity_id: 'select.entry_1_orientation', orientation_locked: false, device_orientation: 'portrait' },
   { entry_id: 'entry_2', title: 'Office Frame', width: 800, height: 480, orientation: 'landscape', host: '192.168.1.20' },
 ];
 
@@ -77,7 +77,7 @@ test.describe('Frame management and discovery banner', () => {
       };
     });
     expect(details.ip).toBe('192.168.1.10');
-    expect(details.orientation).toBe('Portrait');
+    expect(details.orientation).toBe('Portrait (Discovered)');
     expect(details.battery).toBe('90%');
 
     await page.evaluate(() => {
@@ -94,6 +94,100 @@ test.describe('Frame management and discovery banner', () => {
       { type: 'config_entries/update', entry_id: 'entry_1', title: 'Kitchen Frame' },
       { type: 'config/device_registry/update', device_id: 'entry_1', name_by_user: 'Kitchen Frame' },
     ]);
+  });
+
+  test('info overlay → lock/unlock/discover orientation controls', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+
+    await openInfoFor(page, 'entry_1');
+
+    // 1. Initial State: Unlocked, device orientation portrait discovered
+    let state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
+        landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
+      };
+    });
+    expect(state.text).toBe('Portrait (Discovered)');
+    expect(state.portraitActive).toBe(false);
+    expect(state.landscapeActive).toBe(false);
+
+    // Prepare mock frames data mutation in Node.js BEFORE the click triggers discovery
+    FRAMES[0].orientation_locked = true;
+    FRAMES[0].orientation = 'landscape';
+
+    // 2. Click Landscape to lock it
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.getElementById('frame-info-landscape').click();
+    });
+
+    // Expect callService was triggered to lock to Landscape
+    await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+      {
+        domain: 'select',
+        service: 'select_option',
+        data: {
+          entity_id: 'select.entry_1_orientation',
+          option: 'Landscape',
+        },
+      },
+    ]);
+
+    // Check that the UI correctly re-rendered to Landscape (Locked)
+    await expect.poll(() => page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
+        landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
+      };
+    })).toEqual({
+      text: 'Landscape (Locked)',
+      portraitActive: false,
+      landscapeActive: true,
+    });
+
+    // Reset service calls
+    await page.evaluate(() => { window.__serviceCalls = []; });
+
+    // Mutate mock frames data to simulate backend unlock before we click to unlock
+    FRAMES[0].orientation_locked = false;
+    FRAMES[0].orientation = 'portrait'; // defaults back to discovered portrait
+
+    // Click Landscape button to deselect/unlock
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.getElementById('frame-info-landscape').click();
+    });
+
+    // Expect callService was triggered to unlock
+    await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
+      {
+        domain: 'select',
+        service: 'select_option',
+        data: {
+          entity_id: 'select.entry_1_orientation',
+          option: 'Auto (any picture, Fraimic default)',
+        },
+      },
+    ]);
+
+    // Check that the UI correctly re-rendered to Portrait (Discovered)
+    await expect.poll(() => page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
+        landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
+      };
+    })).toEqual({
+      text: 'Portrait (Discovered)',
+      portraitActive: false,
+      landscapeActive: false,
+    });
   });
 
   test('configure options flow modal → advanced settings collapsible toggle works', async ({ page }) => {

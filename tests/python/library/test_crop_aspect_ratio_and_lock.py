@@ -78,3 +78,35 @@ async def test_orientation_lock_blocks_incompatible_sends(library_manager, sampl
     # 3. Auto frame (locked = False) is always compatible
     spec_auto = RenderSpec(width=1600, height=1200, rotation=0, locked=False)
     await library_manager.async_get_bin_for_send(image_id, spec_auto)  # should pass
+
+
+async def test_unlocked_frame_natural_orientation_selection(hass, library_manager, sample_image_bytes):
+    # 1. Image has crops for both orientations, landscape has larger area
+    # Landscape crop: area = (0.9-0.1)*(0.9-0.1) = 0.64
+    # Portrait crop: area = (0.5-0.1)*(0.5-0.1) = 0.16
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    image_id = record["image_id"]
+    await library_manager.async_set_crop(image_id, 1600, 1200, [0.1, 0.1, 0.9, 0.9]) # landscape
+    await library_manager.async_set_crop(image_id, 1200, 1600, [0.1, 0.1, 0.5, 0.5]) # portrait
+
+    # Send to unlocked frame with native portrait resolution (1200x1600)
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+    # The image is naturally landscape (due to larger crop area).
+    # Since frame is portrait, it should swap dimensions and rotate (90 deg) to match landscape natural orientation!
+    bin_bytes = await library_manager.async_get_bin_for_send(image_id, spec)
+    # Let's verify the bin was cached under the swapped resolution 1600x1200 (since natural orientation is landscape)
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    cached = await library_manager._backend.async_get_bin(
+        image_id, 1600, 1200, "_r90_c", CODEC_SPECTRA6_SPLIT_HALF
+    )
+    assert cached is not None
+
+    # 2. Image has no crops: native dimensions width 2000 > height 1000 (landscape)
+    record2 = await library_manager.async_upload("landscape.jpg", sample_image_bytes(2000, 1000))
+    image_id2 = record2["image_id"]
+    # Send to unlocked portrait frame
+    bin_bytes2 = await library_manager.async_get_bin_for_send(image_id2, spec)
+    cached2 = await library_manager._backend.async_get_bin(
+        image_id2, 1600, 1200, "_r90_c", CODEC_SPECTRA6_SPLIT_HALF
+    )
+    assert cached2 is not None

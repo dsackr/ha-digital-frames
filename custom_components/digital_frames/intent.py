@@ -309,7 +309,7 @@ class DigitalFramesShowImageIntent(intent.IntentHandler):
             except ValueError:
                 codec_id = None
             bin_bytes = await library_manager.async_get_bin_for_send(
-                matched_image["image_id"], spec, codec_id=codec_id
+                matched_image["image_id"], spec, codec_id=codec_id, entry=entry
             )
             await coordinator.async_send_image_or_queue(
                 bin_bytes, image_id=matched_image["image_id"]

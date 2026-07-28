@@ -116,18 +116,26 @@ class DigitalFramesOrientationSelect(CoordinatorEntity, SelectEntity):
 
     @property
     def current_option(self) -> str:
+        follow = self._entry.options.get(CONF_ORIENTATION_FOLLOW_DEVICE, True)
         value = self._entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
+        if follow or value == ORIENTATION_AUTO:
+            return _OPTION_LABELS[ORIENTATION_AUTO]
         return _OPTION_LABELS.get(value, _OPTION_LABELS[ORIENTATION_AUTO])
 
     async def async_select_option(self, option: str) -> None:
         value = _LABEL_TO_VALUE.get(option, ORIENTATION_AUTO)
+        follow = (value == ORIENTATION_AUTO)
         # Persisting to entry.options triggers the entry's update listener
         # (a reload) -- desired, so every send path immediately resolves the
         # new lock via render_spec_for_entry. Takes effect on the next image
         # sent; the frame's current picture is left alone.
         self.hass.config_entries.async_update_entry(
             self._entry,
-            options={**self._entry.options, CONF_ORIENTATION: value},
+            options={
+                **self._entry.options,
+                CONF_ORIENTATION: value,
+                CONF_ORIENTATION_FOLLOW_DEVICE: follow,
+            },
         )
         self.async_write_ha_state()
 
