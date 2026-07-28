@@ -82,33 +82,72 @@ frame).
   `tests/python/coordinator/test_coordinator_polling.py`,
   `test_coordinator_concurrency.py`.
 
-## 4. Send image now (queue-if-asleep) — the core send primitive
+## 4. Send image now (pull-first + optional push) — the core send primitive
 Every "send to frame" path (service, raw upload, library send, scene send,
-schedule fire) funnels through one send-or-queue mechanism so a sleeping
-frame gets the image on wake instead of losing it or double-sending. Image
-upload timeout comes from the panel profile
-(`FrameType.send_timeout_s` / `send_timeout_for_entry`) — default 240s so
-slow ESP32 sequential panels (7.3") finish their e-ink redraw before the
-connection is aborted, preventing spurious delivery failure reports and
-double-refreshes.
+schedule fire) funnels through one delivery mechanism so a **battery /
+deep-sleeping** Fraimic-family frame still gets the image without HA having
+to "catch" it awake.
+
+**Primary delivery (clone / battery, Fraimic-cloud-style pull):**
+1. HA **stages** the packed Spectra `.bin` under
+   `config/digital_frames_cache/pull/<entry_id>.bin`.
+2. HA exposes it unauthenticated at
+   `GET /api/digital_frames/pull/{pull_token}/image.bin`
+   (token is stable per config entry; security is unguessability, same idea
+   as Samsung's staged content URL).
+3. When the frame wakes (timer), it **GETs** that URL and paints, then deep
+   sleeps again (unless always-on).
+4. On setup / send / options save, HA best-effort **provisions** the frame
+   with `POST /pullurl` and `POST /sleepconfig`
+   (`minutes`, `active_sec`, `always_on`).
+
+**Secondary (immediate update if the frame is already online):**
+HA still `POST /api/image` after staging so an awake panel updates without
+waiting for the next sleep cycle. If push fails because the frame is
+asleep, the staged pull payload is enough — success is reported as
+`delivery: pull` / `queued: true` rather than "lost send".
+
+Image upload timeout for the push path still comes from the panel profile
+(`FrameType.send_timeout_s` / `send_timeout_for_entry`) — default 240s for
+slow ESP32 sequential panels (7.3").
+
 - **Entry points**: `coordinator.py` (`async_send_image_or_queue`,
-  `async_send_image`, `_async_flush_pending_send`, `_set_pending`,
-  `_clear_pending_if_current`), `frame_types.send_timeout_for_entry`.
-- **If it silently breaks**: images sent to a sleeping frame vanish, or a
-  wake causes a duplicate redraw. A real bug fixed in the July 2026 code
-  review: the frame answering with a rejecting HTTP status (a malformed
-  upload, an on-device error) raised `aiohttp.ClientResponseError`, which
-  the except clause here didn't catch (only connection errors/timeouts
-  were) — `pending_send` stayed stuck forever pinning the fast-poll
-  interval, and the raw exception propagated uncaught out of the
-  `send_image`/`generate_ai_image` services. Now caught and converted to a
-  clean `HomeAssistantError`, and the stuck pending entry is cleared
-  (retrying an identically-rejected payload would only fail again).
+  `async_stage_pull_bin`, `async_provision_frame_pull`, `async_send_image`,
+  `_async_flush_pending_send`), `http_api.DigitalFramesFramePullBinView`,
+  `frame_types.send_timeout_for_entry`; clone firmware
+  (`fraimic-clone-7.3in`) `POST /pullurl`, `POST /sleepconfig`, pull-on-wake.
+- **If it silently breaks**: sleeping frames never update; pull URL not
+  provisioned; always-on ignored; HA "send" claims success but nothing is
+  staged under `digital_frames_cache/pull/`.
 - **Test status**: **Backend-tested** —
-  `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (including
-  a rejected/non-2xx response raising cleanly and clearing pending state
-  instead of leaving it stuck). The single highest-value target in this
-  catalog per the initial gap analysis.
+  `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (online
+  push+pull, offline stage-for-pull, provision always_on flag, token URL
+  shape, pull-only pending flush).
+
+## 4b. Frame power options (sleep interval + always-on)
+User-facing controls on the frame's **Configure / options** form and the
+Digital Frames panel frame-settings flow (standard fields, not Advanced):
+
+| Option key | UI label (en) | Meaning |
+|---|---|---|
+| `frame_always_on` | Always on (keep-awake, like official Fraimic) | Frame stays on Wi‑Fi; no deep sleep. High battery cost. |
+| `frame_sleep_minutes` | Minutes between image checks | Battery: deep-sleep period. Always-on: pull re-check period. |
+
+Defaults: always-on **off**, sleep **15** minutes. Saving options (or a
+successful send/setup while the frame is online) POSTs them to the frame
+via `/sleepconfig`. If the frame is asleep at save time, the next
+successful online provision applies them.
+
+- **Entry points**: `config_flow.DigitalFramesOptionsFlow`,
+  `const.CONF_FRAME_ALWAYS_ON` / `CONF_FRAME_SLEEP_MINUTES`,
+  `coordinator.async_provision_frame_pull`,
+  `digital-frames-panel.js` (standard field order),
+  `strings.json` / `translations/en.json`.
+- **If it silently breaks**: users cannot set sleep cadence; always-on
+  never reaches the device; panel hides the field under Advanced only.
+- **Test status**: **Backend-tested** —
+  `tests/python/config_flow/test_config_flow_options.py` (schema exposes
+  both keys, defaults, save round-trip, validation).
 
 ## 5. HA services (send_image, send_scene, restart, sleep, refresh, generate_ai_image)
 Lets automations/scripts drive a frame: send an arbitrary media item, send
@@ -1104,7 +1143,7 @@ never happens.
 |---|---|---|
 | 0 | Backend pytest infrastructure | Done |
 | 1 | Image conversion, render spec, frame-type registry (KPFs 7, 22, 23) | Done |
-| 2 | Coordinator: polling, IP healing, queue-on-sleep, concurrency (KPFs 3, 4) | Done |
+| 2 | Coordinator: polling, IP healing, pull-first send / provision, concurrency (KPFs 3, 4, 4b) | Done |
 | 3 | Config flow, setup lifecycle, services, intent, entities, onboarding backend (KPFs 1, 2, 5, 6, 21, 24, 25) | Done |
 | 4 | Scenes, scene packs, walls, schedules, skills managers (KPFs 16, 17, 19, 20, 28) | Done (KPF 18's widget scheduling/subprocess execution still a gap) |
 | 5 | Library: local backend, crop, albums, backfill (KPFs 8, 11, 12, 13) | Done |

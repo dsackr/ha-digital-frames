@@ -3929,9 +3929,29 @@
           }
         });
 
-        for (const field of (result.data_schema || [])) {
+        // Primary battery-frame control first; bury HA poll / hang orientation
+        // under Advanced. frame_sleep_minutes must stay in standard fields so
+        // users can set deep-sleep between pull cycles without digging.
+        const standardOrder = [
+          'frame_always_on',
+          'frame_sleep_minutes',
+          'resolution',
+          'rotate_portrait_180',
+          'rotate_landscape_180',
+        ];
+        const advancedNames = new Set(['scan_interval', 'rotation_edge']);
+        const fields = [...(result.data_schema || [])];
+        fields.sort((a, b) => {
+          const ai = standardOrder.indexOf(a.name);
+          const bi = standardOrder.indexOf(b.name);
+          if (ai === -1 && bi === -1) return 0;
+          if (ai === -1) return 1;
+          if (bi === -1) return -1;
+          return ai - bi;
+        });
+        for (const field of fields) {
           const fieldEl = this._buildFlowField(field, stepKey, errors[field.name]);
-          if (field.name === 'scan_interval' || field.name === 'rotation_edge') {
+          if (advancedNames.has(field.name)) {
             advancedContainer.appendChild(fieldEl);
           } else {
             standardContainer.appendChild(fieldEl);

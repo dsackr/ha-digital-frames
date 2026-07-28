@@ -49,11 +49,15 @@ async def test_n_frames_poll_concurrently_without_cross_talk(
 async def test_n_concurrent_sends_to_distinct_frames_stay_isolated(
     hass, make_coordinator, make_frame_entry, aioclient_mock
 ):
+    hass.config.internal_url = "http://homeassistant.local:8123"
     coordinators = [
         make_coordinator(make_frame_entry(host=f"192.168.1.{70 + i}", entry_id=f"send-entry-{i}"))
         for i in range(6)
     ]
     for coord in coordinators:
+        # Pull-first path provisions then optional push.
+        aioclient_mock.post(f"http://{coord.host}/pullurl", status=200, text="ok")
+        aioclient_mock.post(f"http://{coord.host}/sleepconfig", status=200, text="ok")
         aioclient_mock.post(f"http://{coord.host}/api/image", status=200)
 
     results = await asyncio.gather(
@@ -63,7 +67,8 @@ async def test_n_concurrent_sends_to_distinct_frames_stay_isolated(
         )
     )
 
-    assert all(r == {"success": True, "queued": False} for r in results)
+    assert all(r["success"] is True and r["queued"] is False for r in results)
     for i, coord in enumerate(coordinators):
         assert coord.last_image_id == f"img-{i}"
         assert coord.pending_send is None
+        assert coord.get_pull_bin(coord.pull_token) == f"payload-{i}".encode()

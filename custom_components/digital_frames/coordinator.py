@@ -4,26 +4,40 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
+import secrets
 import time
 import uuid
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 import aiohttp
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.network import get_url
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    API_FRAME_PULL_BIN,
     API_IMAGE,
     API_INFO,
+    CACHE_DIRNAME,
     CONF_DEVICE_KEY,
+    CONF_FRAME_ALWAYS_ON,
+    CONF_FRAME_SLEEP_MINUTES,
     CONF_HOST,
     CONF_MAC,
+    CONF_PULL_TOKEN,
+    DEFAULT_FRAME_ALWAYS_ON,
+    DEFAULT_FRAME_SLEEP_MINUTES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    FRAME_API_PULLURL,
+    FRAME_API_SLEEPCONFIG,
     CONF_WIDTH,
     CONF_HEIGHT,
 )
@@ -125,6 +139,14 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass, _PREVIEW_STORE_VERSION, f"{DOMAIN}_last_image_{config_entry.entry_id}"
         )
 
+        # Stable pull-token for HA-hosted Spectra .bin (frame GETs this on wake).
+        # Created once and stored on the config entry; see ensure_pull_token().
+        self.pull_token: str = str(config_entry.data.get(CONF_PULL_TOKEN) or "")
+        self._staged_bin: bytes | None = None
+        self._pull_bin_path = Path(
+            hass.config.path(CACHE_DIRNAME, "pull", f"{config_entry.entry_id}.bin")
+        )
+
         # The newest image this frame hasn't confirmed receiving yet -- set
         # by async_send_image_or_queue when a send hits an unreachable
         # (sleeping) frame, and flushed by the poll loop once the frame
@@ -183,6 +205,194 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     # ------------------------------------------------------------------
+    # Pull delivery (frame wakes and GETs packed .bin from HA)
+    # ------------------------------------------------------------------
+
+    async def async_ensure_pull_token(self) -> str:
+        """Ensure this entry has a stable pull token; persist if new."""
+        if self.pull_token:
+            return self.pull_token
+        token = secrets.token_urlsafe(18)
+        self.pull_token = token
+        new_data = {**self.config_entry.data, CONF_PULL_TOKEN: token}
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+        return token
+
+    def pull_bin_url(self) -> str:
+        """Absolute URL the frame should GET for its current Spectra image."""
+        token = self.pull_token
+        if not token:
+            raise HomeAssistantError("pull token not provisioned")
+        try:
+            base = get_url(
+                self.hass,
+                prefer_external=False,
+                allow_cloud=False,
+                allow_external=True,
+            ).rstrip("/")
+        except Exception:  # noqa: BLE001
+            # Tests / misconfigured HA: fall back so staging never hard-fails.
+            base = (
+                str(getattr(self.hass.config, "internal_url", None) or "")
+                or str(getattr(self.hass.config, "external_url", None) or "")
+                or "http://homeassistant.local:8123"
+            ).rstrip("/")
+        path = API_FRAME_PULL_BIN.format(token=token)
+        return f"{base}{path}"
+
+    def get_pull_bin(self, token: str) -> bytes | None:
+        """Return staged .bin for *token*, or None."""
+        if not token or token != self.pull_token:
+            return None
+        if self._staged_bin is not None:
+            return self._staged_bin
+        # Cold path: disk (after restart, before first stage this session)
+        try:
+            if self._pull_bin_path.is_file():
+                data = self._pull_bin_path.read_bytes()
+                if data:
+                    self._staged_bin = data
+                    return data
+        except OSError as err:
+            _LOGGER.warning("Failed reading pull bin for %s: %s", self.host, err)
+        return None
+
+    async def async_load_pull_bin(self) -> None:
+        """Hydrate in-memory staged bin from disk (if any)."""
+        def _read() -> bytes | None:
+            try:
+                if self._pull_bin_path.is_file():
+                    data = self._pull_bin_path.read_bytes()
+                    return data or None
+            except OSError:
+                return None
+            return None
+
+        self._staged_bin = await self.hass.async_add_executor_job(_read)
+
+    async def async_stage_pull_bin(self, image_bytes: bytes) -> str:
+        """Persist *image_bytes* as the frame's current pull payload.
+
+        Returns the absolute pull URL the frame should use.
+        """
+        await self.async_ensure_pull_token()
+        self._staged_bin = image_bytes
+
+        def _write() -> None:
+            self._pull_bin_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._pull_bin_path.with_suffix(".tmp")
+            tmp.write_bytes(image_bytes)
+            os.replace(tmp, self._pull_bin_path)
+
+        await self.hass.async_add_executor_job(_write)
+        url = self.pull_bin_url()
+        _LOGGER.info(
+            "Staged %d-byte pull image for %s at %s",
+            len(image_bytes),
+            self.host,
+            url,
+        )
+        return url
+
+    def frame_sleep_minutes(self) -> int:
+        """Deep-sleep / pull-check period (minutes) from entry options."""
+        raw = self.config_entry.options.get(
+            CONF_FRAME_SLEEP_MINUTES, DEFAULT_FRAME_SLEEP_MINUTES
+        )
+        try:
+            mins = int(raw)
+        except (TypeError, ValueError):
+            mins = DEFAULT_FRAME_SLEEP_MINUTES
+        return max(1, min(mins, 24 * 60))
+
+    def frame_always_on(self) -> bool:
+        """True when keep-awake / always-on is enabled in options."""
+        return bool(
+            self.config_entry.options.get(
+                CONF_FRAME_ALWAYS_ON, DEFAULT_FRAME_ALWAYS_ON
+            )
+        )
+
+    async def async_provision_frame_pull(
+        self,
+        *,
+        sleep_minutes: int | None = None,
+        active_sec: int = 8,
+        always_on: bool | None = None,
+    ) -> bool:
+        """Tell the frame its HA pull URL and power mode.
+
+        Best-effort: fails quietly if the frame is asleep / unreachable.
+        Returns True if the pull URL POST succeeded.
+        """
+        if sleep_minutes is None:
+            sleep_minutes = self.frame_sleep_minutes()
+        if always_on is None:
+            always_on = self.frame_always_on()
+
+        try:
+            url = self.pull_bin_url()
+        except HomeAssistantError:
+            await self.async_ensure_pull_token()
+            url = self.pull_bin_url()
+
+        session = async_get_clientsession(self.hass)
+        ok = False
+        try:
+            async with session.post(
+                self._base_url(FRAME_API_PULLURL),
+                data=urlencode({"url": url}),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=_REQUEST_TIMEOUT,
+            ) as resp:
+                ok = resp.status < 400
+                if not ok:
+                    body = await resp.text()
+                    _LOGGER.warning(
+                        "Frame %s rejected pull URL provision (%s): %s",
+                        self.host,
+                        resp.status,
+                        body[:200],
+                    )
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.debug(
+                "Could not provision pull URL on %s (likely asleep): %s",
+                self.host,
+                err,
+            )
+            return False
+
+        try:
+            async with session.post(
+                self._base_url(FRAME_API_SLEEPCONFIG),
+                data=urlencode(
+                    {
+                        "minutes": str(sleep_minutes),
+                        "active_sec": str(active_sec),
+                        "always_on": "1" if always_on else "0",
+                    }
+                ),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=_REQUEST_TIMEOUT,
+            ) as resp:
+                if resp.status >= 400:
+                    _LOGGER.debug(
+                        "Frame %s sleepconfig returned %s", self.host, resp.status
+                    )
+        except (aiohttp.ClientError, TimeoutError):
+            pass
+
+        if ok:
+            _LOGGER.info(
+                "Provisioned frame %s: pull=%s sleep=%smin always_on=%s",
+                self.host,
+                url,
+                sleep_minutes,
+                always_on,
+            )
+        return ok
+
+    # ------------------------------------------------------------------
     # Queued sends -- delivered once a sleeping frame answers again
     # ------------------------------------------------------------------
 
@@ -235,117 +445,140 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         image_id: str | None = None,
         thumbnail: bytes | None = None,
     ) -> dict[str, Any]:
-        """Send *image_bytes* to the frame, or queue it for delivery once the
-        frame wakes if it's genuinely unreachable.
+        """Stage *image_bytes* for frame pull, optionally push if online.
 
-        This is the entry point every send path (the send_image service, the
-        raw-upload view, the library send view, and scene sends) should call
-        instead of async_send_image directly, so queueing behaviour is
-        applied uniformly regardless of where the image came from.
+        Primary delivery for battery / clone frames is **pull**: HA stages a
+        packed Spectra ``.bin`` at a stable token URL; the frame GETs it on
+        each timer wake (same idea as official Fraimic cloud pull, and as
+        Samsung's staged content-download URL).
 
-        A send that times out is verified with a follow-up /api/info poll
-        before queuing -- a frame that answers that poll is awake, so the
-        timeout almost certainly means it already received the image (see
-        the comment in the except block below). Returns
-        {"success": True, "queued": False, "unconfirmed": True} for that
-        case, distinct from a normal confirmed success, so callers/logs can
-        tell the two apart if it matters later.
+        Secondary: if the frame is reachable, we still POST ``/api/image``
+        so an already-awake panel updates immediately without waiting for
+        the next sleep cycle. If push fails because the frame is asleep,
+        the staged pull payload is enough — no duplicate push-queue required.
+
+        Returns a dict with ``success``, ``queued`` (True when only staged
+        for later pull), and optional ``delivery`` (``push`` / ``pull`` /
+        ``push+pull``).
         """
+        # 1) Always stage for pull first (survives HA restart + frame sleep).
+        await self.async_stage_pull_bin(image_bytes)
+        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+
+        # 2) If the frame happens to be online, refresh its pull URL config
+        #    and try an immediate push.
+        provisioned = await self.async_provision_frame_pull()
+
         token = uuid.uuid4().hex
-        payload: dict[str, Any] = {
-            "schema": _PENDING_SCHEMA,
-            "token": token,
-            "bin_b64": base64.b64encode(image_bytes).decode("ascii"),
-            "image_id": image_id,
-            "thumbnail_b64": (
-                base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
-            ),
-            "queued_at": time.time(),
-        }
-        # Recorded before the network call, not after: if Home Assistant
-        # restarts mid-send, the queue must already know about this attempt
-        # so it isn't lost.
-        await self._set_pending(payload)
+        # Keep a lightweight pending record only for UI "queued" sensor when
+        # we couldn't push — delivery is pull, not a re-POST of bin_b64.
+        if not provisioned:
+            # Frame likely asleep: staged bin is the delivery mechanism.
+            payload: dict[str, Any] = {
+                "schema": _PENDING_SCHEMA,
+                "token": token,
+                "bin_b64": "",  # pull path; do not re-store multi-MB payload
+                "pull_only": True,
+                "image_id": image_id,
+                "thumbnail_b64": (
+                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+                ),
+                "queued_at": time.time(),
+            }
+            await self._set_pending(payload)
+            return {
+                "success": True,
+                "queued": True,
+                "delivery": "pull",
+                "message": "Image staged for frame pull on next wake",
+            }
 
         self._flushing = True
         try:
             await self.async_send_image(image_bytes)
-            await self._clear_pending_if_current(token)
+            if self.pending_send is not None:
+                await self._clear_pending_if_current(self.pending_send["token"])
+            return {"success": True, "queued": False, "delivery": "push+pull"}
         except (aiohttp.ClientConnectionError, TimeoutError):
-            # A client-side timeout on some clone firmwares does NOT mean the
-            # frame never got the image -- see async_send_image's docstring:
-            # it writes the body to flash and blocks its HTTP response on the
-            # ~30s e-ink redraw before answering, so our 120s budget can still
-            # expire after the frame already displayed it. Blindly queuing
-            # here would guarantee a real duplicate redraw once the next poll
-            # flushes it -- so poll /api/info right now instead: if the frame
-            # answers, it's awake, and the timed-out send almost certainly
-            # already landed. Leaving _flushing True across this poll stops
-            # _async_update_data's own "something's queued" check from also
-            # scheduling a flush task while we're still resolving this one.
             await self.async_refresh()
             if self.last_update_success:
                 _LOGGER.info(
-                    "Send to %s timed out but the frame answered a poll "
-                    "immediately after -- treating as already delivered "
-                    "instead of queuing a guaranteed duplicate redraw",
+                    "Push to %s timed out but frame is online — image staged "
+                    "for pull; treating push as unconfirmed",
                     self.host,
                 )
-                await self._clear_pending_if_current(token)
-                await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
-                return {"success": True, "queued": False, "unconfirmed": True}
-            # Genuinely unreachable -- leave it queued, the poll loop will
-            # deliver it once the frame answers again.
-            return {"success": False, "queued": True}
+                return {
+                    "success": True,
+                    "queued": False,
+                    "unconfirmed": True,
+                    "delivery": "pull",
+                }
+            # Asleep mid-call: staged pull is authoritative.
+            payload = {
+                "schema": _PENDING_SCHEMA,
+                "token": token,
+                "bin_b64": "",
+                "pull_only": True,
+                "image_id": image_id,
+                "thumbnail_b64": (
+                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+                ),
+                "queued_at": time.time(),
+            }
+            await self._set_pending(payload)
+            return {
+                "success": True,
+                "queued": True,
+                "delivery": "pull",
+                "message": "Image staged for frame pull on next wake",
+            }
         except aiohttp.ClientError as err:
-            # The frame was reached and definitively rejected the request
-            # (e.g. a malformed upload or an on-device error) -- unlike a
-            # connection drop or timeout, retrying the identical payload
-            # from the queue would only fail again identically, so clear it
-            # rather than leaving it stuck forever pinning the fast-poll
-            # interval. Convert to a clean HomeAssistantError -- otherwise
-            # this raw aiohttp exception propagates uncaught out of every
-            # caller of this method, including the send_image and
-            # generate_ai_image service handlers, as a scary traceback
-            # instead of a clean service-call error.
-            await self._clear_pending_if_current(token)
-            raise HomeAssistantError(
-                f"Failed to send image to {self.host}: {err}"
-            ) from err
+            # Frame rejected push, but pull stage still valid.
+            _LOGGER.warning(
+                "Push to %s failed (%s); image remains staged for pull",
+                self.host,
+                err,
+            )
+            return {
+                "success": True,
+                "queued": True,
+                "delivery": "pull",
+                "message": f"Push failed ({err}); staged for pull",
+            }
         finally:
             self._flushing = False
 
-        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
-        return {"success": True, "queued": False}
-
     async def _async_flush_pending_send(self) -> None:
-        """Deliver the queued send now that a poll has succeeded. Guarded by
-        _flushing so overlapping successful polls can't fire this twice.
+        """When a poll succeeds, re-provision pull URL (and optional push).
 
-        Exactly one delivery attempt: whether it succeeds or fails, the
-        pending entry is dropped afterwards. We deliberately don't retry a
-        failed flush -- on some clone firmwares the frame accepts the upload
-        and blocks its HTTP response on the ~30s e-ink redraw until we time
-        out, so a "failed" attempt may have actually displayed the image.
-        Retrying that case would redraw the panel again with the same image,
-        which is exactly the double-send this design avoids. A frame that is
-        still genuinely offline gets another chance next time a *new* image
-        is queued for it, not by re-attempting this one.
+        Pull-only pending entries need no re-POST of image bytes — the frame
+        fetches the staged .bin itself. We re-POST /pullurl so a newly awake
+        frame that never received provision while asleep still has the URL.
+        Legacy pending payloads with bin_b64 still get one push attempt.
         """
         if self._flushing or self.pending_send is None:
             return
         self._flushing = True
         try:
             pending = self.pending_send
+            # Always re-point the frame at HA's pull URL while it's online.
+            await self.async_provision_frame_pull()
+
+            if pending.get("pull_only") or not pending.get("bin_b64"):
+                await self._clear_pending_if_current(pending["token"])
+                _LOGGER.info(
+                    "Frame %s is online; pull URL provisioned (pull delivery)",
+                    self.host,
+                )
+                return
+
             image_bytes = base64.b64decode(pending["bin_b64"])
             try:
                 await self.async_send_image(image_bytes)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error(
                     "Failed to deliver queued image to %s (%s) -- dropping it "
-                    "rather than retrying, since a retry risks redrawing the "
-                    "panel with an image it may have already received. "
-                    "Re-send manually if it didn't arrive.",
+                    "rather than retrying (image remains staged for pull).",
                     self.host,
                     err,
                 )
@@ -521,7 +754,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,  # noqa: ARG002
         entry: ConfigEntry,
     ) -> None:
-        """Pick up a new host without restarting the integration."""
+        """Pick up host / options changes without a full integration reload."""
+        self.config_entry = entry
         new_host = entry.data.get(CONF_HOST, self.host)
         if new_host != self.host:
             _LOGGER.info(
@@ -530,6 +764,18 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.host = new_host
             self._consecutive_failures = 0
             await self.async_request_refresh()
+
+        # Scan interval (HA poll while online)
+        scan_seconds: int = entry.options.get(
+            "scan_interval", DEFAULT_SCAN_INTERVAL
+        )
+        self._normal_update_interval = timedelta(seconds=scan_seconds)
+        if self.pending_send is None:
+            self.update_interval = self._normal_update_interval
+
+        # Push new sleep period + pull URL to the frame if it happens to be up.
+        # If asleep, the next successful poll/flush will re-provision.
+        self.hass.async_create_task(self.async_provision_frame_pull())
 
     # ------------------------------------------------------------------
     # Command helpers called from services / buttons

@@ -16,12 +16,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_DEVICE_KEY,
     CONF_DRIVER,
+    CONF_FRAME_ALWAYS_ON,
+    CONF_FRAME_SLEEP_MINUTES,
     CONF_HEIGHT,
     CONF_HOST,
     CONF_MAC,
     CONF_NAME,
     CONF_SIZE,
     CONF_WIDTH,
+    DEFAULT_FRAME_ALWAYS_ON,
+    DEFAULT_FRAME_SLEEP_MINUTES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     DRIVER_FRAIMIC,
@@ -631,8 +635,7 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DigitalFramesOptionsFlow(OptionsFlow):
-    """Allow changing the frame name, scan interval, and (for entries set up
-    before physical size was tracked) backfilling the size after setup."""
+    """Allow changing scan interval, battery-frame sleep period, size, rotation."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -663,6 +666,16 @@ class DigitalFramesOptionsFlow(OptionsFlow):
 
         current_interval: int = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        current_sleep_min: int = int(
+            self.config_entry.options.get(
+                CONF_FRAME_SLEEP_MINUTES, DEFAULT_FRAME_SLEEP_MINUTES
+            )
+        )
+        current_always_on: bool = bool(
+            self.config_entry.options.get(
+                CONF_FRAME_ALWAYS_ON, DEFAULT_FRAME_ALWAYS_ON
+            )
         )
         current_size: str | None = self.config_entry.data.get(CONF_SIZE)
         current_edge: str = self.config_entry.options.get(
@@ -697,8 +710,17 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         # No name field here: renaming goes through config_entries/update
         # (entry.title), driven by the panel's frame-settings menu. The old
         # CONF_NAME option was written but never read (CODE_REVIEW #14).
+        # frame_sleep_minutes: battery clones deep-sleep between pull checks;
+        # HA provisions this onto the frame when it is next online.
         schema = vol.Schema(
             {
+                # Battery / keep-awake controls first (main UI fields).
+                vol.Optional(
+                    CONF_FRAME_ALWAYS_ON, default=current_always_on
+                ): bool,
+                vol.Optional(
+                    CONF_FRAME_SLEEP_MINUTES, default=current_sleep_min
+                ): vol.All(int, vol.Range(min=1, max=24 * 60)),
                 vol.Optional(
                     CONF_SCAN_INTERVAL, default=current_interval
                 ): vol.All(int, vol.Range(min=30)),

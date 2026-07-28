@@ -24,6 +24,14 @@ LEGACY_DOMAIN = "fraimic"
 # Polling interval in seconds (5 minutes default)
 DEFAULT_SCAN_INTERVAL = 300
 
+# Battery frame deep-sleep between pull cycles (minutes). Written to the
+# frame via POST /sleepconfig when provisioned; also an options-flow field.
+CONF_FRAME_SLEEP_MINUTES = "frame_sleep_minutes"
+DEFAULT_FRAME_SLEEP_MINUTES = 15
+# Fraimic-style keep-awake: frame stays on Wi‑Fi (high battery cost).
+CONF_FRAME_ALWAYS_ON = "frame_always_on"
+DEFAULT_FRAME_ALWAYS_ON = False
+
 DEFAULT_PORT = 80
 
 # API endpoints
@@ -32,6 +40,12 @@ API_RESTART = "/api/restart"
 API_SLEEP = "/api/sleep"
 API_REFRESH = "/api/refresh"
 API_IMAGE = "/api/image"
+# Clone / battery frames: frame GETs packed Spectra .bin from HA on each wake
+# (Fraimic-cloud-style pull). Path is unauthenticated; security is the token.
+API_FRAME_PULL_BIN = "/api/digital_frames/pull/{token}/image.bin"
+# Endpoints on the frame firmware (ESP-IDF Fraimic clone)
+FRAME_API_PULLURL = "/pullurl"
+FRAME_API_SLEEPCONFIG = "/sleepconfig"
 
 # Config entry keys
 CONF_HOST = "host"
@@ -43,6 +57,7 @@ CONF_MAC = "mac_address"         # WiFi MAC (normalised, no colons)
 CONF_MODE = "mode"
 CONF_SIZE = "size"                # diagonal panel size label, e.g. "13.3"
 CONF_DRIVER = "driver"            # FramePort driver id (see DRIVER_*)
+CONF_PULL_TOKEN = "pull_token"    # unguessable token for HA-hosted pull URL
 
 # FramePort driver ids (entry.data[CONF_DRIVER]). Default/absent = Fraimic
 # local Spectra HTTP family (official + API-compatible clones).

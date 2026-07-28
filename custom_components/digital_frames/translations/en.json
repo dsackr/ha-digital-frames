@@ -118,13 +118,18 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Update Interval (seconds)",
+          "scan_interval": "HA status poll interval (seconds)",
+          "frame_always_on": "Always on (keep-awake, like official Fraimic)",
+          "frame_sleep_minutes": "Minutes between image checks (sleep interval, or pull interval when always on)",
           "resolution": "Frame Type",
           "rotation_edge": "Rotated hanging (which edge is up)",
           "rotate_portrait_180": "Flip Portrait Image",
           "rotate_landscape_180": "Flip Landscape Image"
         },
         "data_description": {
+          "scan_interval": "How often Home Assistant polls the frame while it is online. Does not wake a sleeping battery frame.",
+          "frame_always_on": "When on, the frame stays on Wi‑Fi and never deep-sleeps (high battery use — best when powered). When off, it wakes, checks for an image, then deep-sleeps.",
+          "frame_sleep_minutes": "Battery mode: deep-sleep between wake→pull cycles. Always-on mode: how often to re-check the pull URL for a new image (default 15).",
           "resolution": "The physical print size of your frame. Leave unset if you don't need to change it.",
           "rotation_edge": "Only matters when the frame's Orientation is locked to its non-native orientation (e.g. a portrait frame hung landscape). Official Fraimic frames hang left-edge-up; if images on a rotated clone come out upside down, switch this."
         }

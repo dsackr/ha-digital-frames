@@ -46,6 +46,41 @@ class DigitalFramesSamsungContentView(HomeAssistantView):
                 )
         return web.Response(status=404, text="Not found")
 
+
+class DigitalFramesFramePullBinView(HomeAssistantView):
+    """Unauthenticated token URL for Fraimic/clone frame pull-on-wake.
+
+    Battery frames deep-sleep and cannot rely on HA to catch them online and
+    POST /api/image. Instead HA stages the packed Spectra .bin and the frame
+    GETs this URL each wake (same delivery direction as Fraimic cloud, and
+    the same unauthenticated-token pattern as Samsung content-download).
+    """
+
+    url = "/api/digital_frames/pull/{token}/image.bin"
+    name = "api:digital_frames:pull:bin"
+    requires_auth = False
+
+    async def get(self, request: web.Request, token: str) -> web.Response:
+        hass = request.app["hass"]
+        domain_data = hass.data.get(DOMAIN, {})
+        for key, coord in domain_data.items():
+            if str(key).startswith("_"):
+                continue
+            getter = getattr(coord, "get_pull_bin", None)
+            if not callable(getter):
+                continue
+            body = getter(token)
+            if body is not None:
+                return web.Response(
+                    body=body,
+                    content_type="application/octet-stream",
+                    headers={
+                        "Cache-Control": "no-store",
+                        "Content-Length": str(len(body)),
+                    },
+                )
+        return web.Response(status=404, text="No image staged for this token")
+
 _ONBOARDING_STORE_KEY = f"{DOMAIN}_onboarding"
 _ONBOARDING_STORE_VERSION = 1
 

@@ -130,6 +130,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # Register the image-upload HTTP endpoint and the first-run wizard's
     # server-side completion flag.
     from .http_api import (  # noqa: PLC0415
+        DigitalFramesFramePullBinView,
         DigitalFramesFrameStatusView,
         DigitalFramesOnboardingView,
         DigitalFramesSamsungContentView,
@@ -139,6 +140,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesOnboardingView())
     hass.http.register_view(DigitalFramesFrameStatusView())
     hass.http.register_view(DigitalFramesSamsungContentView())
+    hass.http.register_view(DigitalFramesFramePullBinView())
 
     from .update_http import async_register_update_views  # noqa: PLC0415
 
@@ -465,6 +467,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     # drops it. (MeuralCoordinator no-ops this.)
     await coordinator.async_load_pending_send()
 
+    # Fraimic family: stable pull-token + staged .bin for wake-and-pull delivery
+    # (battery clones). Meural/Samsung use other transports.
+    if isinstance(coordinator, DigitalFramesCoordinator):
+        await coordinator.async_ensure_pull_token()
+        await coordinator.async_load_pull_bin()
+
     # Register the coordinator *before* first_refresh / platforms so send
     # resolution never races an empty hass.data slot, and so a soft options
     # update can find it without a full reload.
@@ -489,6 +497,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
             domain_data.pop(entry.entry_id, None)
             domain_data.pop(f"_options_snapshot_{entry.entry_id}", None)
             raise
+
+    # If the frame is already awake at setup, point it at HA's pull URL and
+    # a short sleep cycle so it can pull on every subsequent wake.
+    if isinstance(coordinator, DigitalFramesCoordinator):
+        hass.async_create_task(coordinator.async_provision_frame_pull())
 
     # Every configured frame is guaranteed a spot on the default wall --
     # this hook covers embedded adds, discovery adds, and plain restarts.

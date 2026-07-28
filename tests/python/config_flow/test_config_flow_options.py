@@ -1,8 +1,7 @@
-"""Options flow: scan interval, size backfill, orientation edge, 180-degree
-flip (KPF 2).
+"""Options flow: sleep/always-on, scan interval, size, orientation (KPF 2 / 4b).
 
-If this silently breaks: settings don't stick, or the orientation lock
-gets reset when saving unrelated fields.
+If this silently breaks: battery-frame sleep settings don't stick, always-on
+missing from UI schema, or orientation lock resets when saving unrelated fields.
 """
 
 from __future__ import annotations
@@ -11,6 +10,8 @@ import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.digital_frames.const import (
+    CONF_FRAME_ALWAYS_ON,
+    CONF_FRAME_SLEEP_MINUTES,
     CONF_ORIENTATION,
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATION_EDGE,
@@ -21,7 +22,14 @@ from custom_components.digital_frames.const import (
 
 
 async def test_default_form_reflects_current_options(hass, make_frame_entry):
-    entry = make_frame_entry(size="13.3", options={"scan_interval": 120})
+    entry = make_frame_entry(
+        size="13.3",
+        options={
+            "scan_interval": 120,
+            CONF_FRAME_SLEEP_MINUTES: 45,
+            CONF_FRAME_ALWAYS_ON: True,
+        },
+    )
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -34,6 +42,12 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     }
     assert defaults["scan_interval"] == 120
     assert defaults["resolution"] == "13.3"
+    assert defaults[CONF_FRAME_SLEEP_MINUTES] == 45
+    assert defaults[CONF_FRAME_ALWAYS_ON] is True
+    # Schema must expose both power controls for the UI / panel.
+    field_names = {str(k) for k in schema}
+    assert CONF_FRAME_SLEEP_MINUTES in field_names
+    assert CONF_FRAME_ALWAYS_ON in field_names
 
 
 async def test_size_unset_leaves_unset_option_available(hass, make_frame_entry):
@@ -55,6 +69,8 @@ async def test_save_backfills_size_into_entry_data(hass, make_frame_entry):
         result["flow_id"],
         {
             "scan_interval": 300,
+            CONF_FRAME_SLEEP_MINUTES: 15,
+            CONF_FRAME_ALWAYS_ON: False,
             "resolution": "13.3",
             CONF_ROTATION_EDGE: "left",
             "rotate_portrait_180": False,
@@ -64,6 +80,8 @@ async def test_save_backfills_size_into_entry_data(hass, make_frame_entry):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_SIZE] == "13.3"
+    assert result["data"][CONF_FRAME_SLEEP_MINUTES] == 15
+    assert result["data"][CONF_FRAME_ALWAYS_ON] is False
 
 
 async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_entry):
@@ -75,6 +93,8 @@ async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_
         result["flow_id"],
         {
             "scan_interval": 600,
+            CONF_FRAME_SLEEP_MINUTES: 20,
+            CONF_FRAME_ALWAYS_ON: True,
             "resolution": "13.3",
             CONF_ROTATION_EDGE: EDGE_RIGHT,
             "rotate_portrait_180": False,
@@ -86,6 +106,8 @@ async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_
     assert result["data"][CONF_ORIENTATION] == ORIENTATION_PORTRAIT
     assert result["data"][CONF_ROTATION_EDGE] == EDGE_RIGHT
     assert result["data"][CONF_ROTATE_LANDSCAPE_180] is True
+    assert result["data"][CONF_FRAME_ALWAYS_ON] is True
+    assert result["data"][CONF_FRAME_SLEEP_MINUTES] == 20
 
 
 async def test_scan_interval_below_minimum_rejected(hass, make_frame_entry):
@@ -99,3 +121,16 @@ async def test_scan_interval_below_minimum_rejected(hass, make_frame_entry):
 
     with pytest.raises(vol.Invalid):
         schema({"scan_interval": 10})
+
+
+async def test_frame_sleep_minutes_below_minimum_rejected(hass, make_frame_entry):
+    entry = make_frame_entry()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"]
+
+    import pytest
+
+    with pytest.raises(vol.Invalid):
+        schema({CONF_FRAME_SLEEP_MINUTES: 0})
