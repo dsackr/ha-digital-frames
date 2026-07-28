@@ -100,3 +100,4 @@ Notes on reading it:
 | 2026-07-27 | 60f6213 | backend-pytest | success | 475 passed in 82.47s (0:01:22) | 66% | CI |
 | 2026-07-28 | 19f86b4 | panel-playwright | failure | 2 failed 156 passed | — | CI |
 | 2026-07-28 | 19f86b4 | backend-pytest | success | 475 passed in 85.21s (0:01:25) | 66% | CI |
+| 2026-07-28 | a00f183 | backend-pytest | failure | 476 passed, 29 errors in 85.44s (0:01:25) | 66% | CI |
