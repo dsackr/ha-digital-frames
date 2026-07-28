@@ -3204,15 +3204,20 @@
             </div>
             <div class="modal-row" style="align-items:center">
               <label>Orientation</label>
-              <div style="display:flex;align-items:center;gap:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between">
                 <span id="frame-info-orientation" style="color:var(--secondary-text-color)"></span>
-                <div class="orientation-toggle" id="frame-info-orientation-btns" style="display:none">
-                  <button class="orientation-icon-btn" id="frame-info-portrait" title="Lock Portrait">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>
+                <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+                  <button class="orientation-icon-btn" id="frame-info-poll" title="Rediscover orientation now">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
                   </button>
-                  <button class="orientation-icon-btn" id="frame-info-landscape" title="Lock Landscape">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
-                  </button>
+                  <div class="orientation-toggle" id="frame-info-orientation-btns" style="display:none">
+                    <button class="orientation-icon-btn" id="frame-info-portrait" title="Lock Portrait">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/></svg>
+                    </button>
+                    <button class="orientation-icon-btn" id="frame-info-landscape" title="Lock Landscape">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3222,7 +3227,7 @@
             </div>
             <div class="feedback" id="frame-settings-fb"></div>
             <div class="modal-actions" style="flex-wrap:wrap">
-              <button class="btn-primary" id="frame-settings-rename">Save Name</button>
+              <button class="btn-primary" id="frame-settings-save">Save Changes</button>
               <button class="btn-ghost" id="frame-settings-close">Close</button>
             </div>
           </div>
@@ -4273,88 +4278,151 @@
 
       const close = () => {
         this._frameSettingsTarget = null;
+        this._stagedOrientation = null;
         overlay.style.display = 'none';
       };
       this.shadowRoot.getElementById('frame-settings-close')
         .addEventListener('click', close);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-      this.shadowRoot.getElementById('frame-settings-rename')
+      this.shadowRoot.getElementById('frame-settings-save')
         .addEventListener('click', async (e) => {
+          // Capture the button synchronously: this is a composed (bubbles
+          // out of the shadow root) click event, and once the handler
+          // suspends at the first await below, dispatch keeps retargeting
+          // e.target for every listener further up the (still-unwinding)
+          // composed path -- reading e.target again after an await sees
+          // whatever that later retargeting left behind (the panel host
+          // element), not the button, so `.disabled = false` in `finally`
+          // would silently hit the wrong element and leave the real button
+          // disabled forever.
+          const saveBtn = e.currentTarget;
           const frame = this._frameSettingsTarget;
           if (!frame) return;
           const name = this.shadowRoot.getElementById('frame-settings-name').value.trim();
-          if (!name || name === frame.title) { close(); return; }
-          e.target.disabled = true;
+          const nameChanged = !!name && name !== frame.title;
+          const committedOrientation = frame.orientationLocked ? frame.orientation : 'auto';
+          const orientationChanged = this._stagedOrientation !== null
+            && this._stagedOrientation !== committedOrientation;
+
+          if (!nameChanged && !orientationChanged) { close(); return; }
+
+          saveBtn.disabled = true;
           try {
-            // Two registries to update: the config entry's title (panel
-            // cards, Settings → Integrations) AND the device registry's
-            // user-facing name (device page, entity names) -- entry title
-            // alone leaves the device showing its creation-time name.
-            await this._hass.callWS({
-              type: 'config_entries/update',
-              entry_id: frame.entryId,
-              title: name,
-            });
-            if (frame.deviceId) {
+            if (nameChanged) {
+              // Two registries to update: the config entry's title (panel
+              // cards, Settings → Integrations) AND the device registry's
+              // user-facing name (device page, entity names) -- entry title
+              // alone leaves the device showing its creation-time name.
               await this._hass.callWS({
-                type: 'config/device_registry/update',
-                device_id: frame.deviceId,
-                name_by_user: name,
+                type: 'config_entries/update',
+                entry_id: frame.entryId,
+                title: name,
               });
+              if (frame.deviceId) {
+                await this._hass.callWS({
+                  type: 'config/device_registry/update',
+                  device_id: frame.deviceId,
+                  name_by_user: name,
+                });
+              }
+            }
+            if (orientationChanged && frame.orientationEntityId) {
+              const target = this._stagedOrientation;
+              const option = target === 'auto'
+                ? (frame.driver === 'meural' ? 'Follow device (gsensor)' : 'Auto (any picture, Fraimic default)')
+                : (target === 'portrait' ? 'Portrait' : 'Landscape');
+              await this._hass.callService('select', 'select_option', {
+                entity_id: frame.orientationEntityId,
+                option: option,
+              });
+              this._renderWallCanvas();
             }
             close();
             await this._refreshAfterEntryChange();
           } catch (err) {
             fb.className = 'feedback err';
-            fb.textContent = `Rename failed: ${err.message || err.code || err}`;
+            fb.textContent = `Save failed: ${err.message || err.code || err}`;
             fb.style.display = 'block';
           } finally {
-            e.target.disabled = false;
+            saveBtn.disabled = false;
           }
         });
 
       this.shadowRoot.getElementById('frame-info-portrait')
-        .addEventListener('click', () => this._setFrameSettingsOrientation('portrait'));
+        .addEventListener('click', () => this._stageFrameOrientation('portrait'));
       this.shadowRoot.getElementById('frame-info-landscape')
-        .addEventListener('click', () => this._setFrameSettingsOrientation('landscape'));
+        .addEventListener('click', () => this._stageFrameOrientation('landscape'));
+      this.shadowRoot.getElementById('frame-info-poll')
+        .addEventListener('click', () => this._pollFrameOrientation());
     }
 
-    async _setFrameSettingsOrientation(targetOrient) {
+    // Orientation lock changes are staged locally (icon highlight only) and
+    // only actually applied when Save Changes is clicked -- matches the name
+    // field, which has never auto-saved either. The one exception is the
+    // Rediscover button (_pollFrameOrientation): a fresh device read is not
+    // a user edit, so it always takes effect immediately.
+    _stageFrameOrientation(target) {
       const frame = this._frameSettingsTarget;
       if (!frame || !frame.orientationEntityId) return;
+      const committed = frame.orientationLocked ? frame.orientation : 'auto';
+      const current = this._stagedOrientation !== null ? this._stagedOrientation : committed;
+      this._stagedOrientation = (current === target) ? 'auto' : target;
+      this._renderFrameOrientationDisplay();
+    }
 
-      const isCurrentActive = (frame.orientationLocked && frame.orientation === targetOrient);
-      let option;
-      if (isCurrentActive) {
-        option = frame.driver === 'meural' ? 'Follow device (gsensor)' : 'Auto (any picture, Fraimic default)';
-      } else {
-        option = targetOrient === 'portrait' ? 'Portrait' : 'Landscape';
-      }
-
-      const renameBtn = this.shadowRoot.getElementById('frame-settings-rename');
+    async _pollFrameOrientation() {
+      const frame = this._frameSettingsTarget;
+      if (!frame || !frame.entryId) return;
+      const pollBtn = this.shadowRoot.getElementById('frame-info-poll');
       const fb = this.shadowRoot.getElementById('frame-settings-fb');
-      renameBtn.disabled = true;
+      pollBtn.disabled = true;
       try {
-        await this._hass.callService('select', 'select_option', {
-          entity_id: frame.orientationEntityId,
-          option: option,
+        await this._apiUpdate('/api/digital_frames/frame/poll_orientation', {
+          method: 'POST',
+          body: { entry_id: frame.entryId },
         });
-
         await this._discoverFrames();
         const updatedFrame = this._frames.find(f => f.entryId === frame.entryId);
         if (updatedFrame) {
-          this._frameSettingsTarget = updatedFrame;
           this._openFrameSettingsMenu(updatedFrame);
         }
-        this._renderWallCanvas();
       } catch (err) {
-        console.error('[fraimic-panel] failed to set orientation:', err);
         fb.className = 'feedback err';
-        fb.textContent = `Failed to set orientation: ${err.message || err}`;
+        fb.textContent = `Rediscover failed: ${err.message || err}`;
         fb.style.display = 'block';
       } finally {
-        renameBtn.disabled = false;
+        pollBtn.disabled = false;
+      }
+    }
+
+    // Renders the orientation text + active icon state from the staged
+    // selection if one is pending, falling back to the committed
+    // (server-confirmed) lock otherwise.
+    _renderFrameOrientationDisplay() {
+      const frame = this._frameSettingsTarget;
+      if (!frame) return;
+      const orientEl = this.shadowRoot.getElementById('frame-info-orientation');
+      const portraitBtn = this.shadowRoot.getElementById('frame-info-portrait');
+      const landscapeBtn = this.shadowRoot.getElementById('frame-info-landscape');
+
+      const committed = frame.orientationLocked ? frame.orientation : 'auto';
+      const effective = this._stagedOrientation !== null ? this._stagedOrientation : committed;
+
+      if (effective === 'portrait' || effective === 'landscape') {
+        const displayVal = effective.charAt(0).toUpperCase() + effective.slice(1);
+        orientEl.textContent = `${displayVal} (Locked)`;
+        portraitBtn.classList.toggle('active', effective === 'portrait');
+        landscapeBtn.classList.toggle('active', effective === 'landscape');
+      } else {
+        if (frame.deviceOrientation) {
+          const displayVal = frame.deviceOrientation.charAt(0).toUpperCase() + frame.deviceOrientation.slice(1);
+          orientEl.textContent = `${displayVal} (Discovered)`;
+        } else {
+          orientEl.textContent = 'Auto';
+        }
+        portraitBtn.classList.remove('active');
+        landscapeBtn.classList.remove('active');
       }
     }
 
@@ -4624,34 +4692,23 @@
 
     _openFrameSettingsMenu(frame) {
       this._frameSettingsTarget = frame;
+      this._stagedOrientation = null;
       this.shadowRoot.getElementById('frame-settings-title').textContent = 'Frame Information';
       this.shadowRoot.getElementById('frame-settings-name').value = frame.title;
 
       this.shadowRoot.getElementById('frame-info-ip').textContent = frame.host || 'Unknown';
 
-      const orientEl = this.shadowRoot.getElementById('frame-info-orientation');
       const orientBtns = this.shadowRoot.getElementById('frame-info-orientation-btns');
-      const portraitBtn = this.shadowRoot.getElementById('frame-info-portrait');
-      const landscapeBtn = this.shadowRoot.getElementById('frame-info-landscape');
-
-      if (frame.orientationLocked) {
-        const displayVal = frame.orientation ? (frame.orientation.charAt(0).toUpperCase() + frame.orientation.slice(1)) : 'Auto';
-        orientEl.textContent = `${displayVal} (Locked)`;
-        portraitBtn.classList.toggle('active', frame.orientation === 'portrait');
-        landscapeBtn.classList.toggle('active', frame.orientation === 'landscape');
-      } else {
-        if (frame.deviceOrientation) {
-          const displayVal = frame.deviceOrientation.charAt(0).toUpperCase() + frame.deviceOrientation.slice(1);
-          orientEl.textContent = `${displayVal} (Discovered)`;
-        } else {
-          orientEl.textContent = 'Auto';
-        }
-        portraitBtn.classList.remove('active');
-        landscapeBtn.classList.remove('active');
-      }
+      this._renderFrameOrientationDisplay();
 
       const hasBtns = !!frame.orientationEntityId;
       orientBtns.style.display = hasBtns ? 'flex' : 'none';
+
+      // Samsung frames have no accelerometer/gsensor -- device_orientation
+      // is always null for that driver (see samsung_coordinator.py), so
+      // Rediscover would never do anything but spin and reset to "Auto".
+      const pollBtn = this.shadowRoot.getElementById('frame-info-poll');
+      pollBtn.style.display = frame.driver === 'samsung' ? 'none' : 'flex';
 
        const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
        let batteryHtml = 'N/A';

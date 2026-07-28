@@ -96,8 +96,17 @@ orientation.
 
 ## Open questions to confirm on hardware later
 
-1. Exact sign→label mapping for the four rotations (rotate a real frame and
-   record).
+1. ~~Exact sign→label mapping for the four rotations~~ **Resolved (2026-07-28)
+   from field reports:** every native-orientation frame was showing up as
+   "landscape (Discovered)" in the panel regardless of actually being
+   mounted portrait. `coordinator._async_poll_accelerometer` had the axis
+   backwards -- it treated Y as the native-vertical axis, but the reading
+   above (`x ≈ -0.99, y ≈ 0.00`, taken with the frame sitting normally) shows
+   X is the dominant/native-vertical axis. The check now compares
+   `abs(x) >= abs(y)` for "native orientation" instead of `abs(y) >= abs(x)`.
+   Still not physically rotation-tested against all four positions -- if a
+   frame ever reports backwards again after being rotated 90° from native,
+   revisit this.
 2. Does the firmware debounce/settle the reading, or should the caller average
    a few samples (the values jittered in the third decimal: x -0.988 →
    -0.993 → -0.992)?

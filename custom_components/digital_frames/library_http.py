@@ -22,6 +22,9 @@ Endpoints:
     GET  /api/digital_frames/frame/{entry_id}/thumbnail          last-sent-image preview for sends with no
                                                             Library image_id (send_image service / raw
                                                             upload) -- see DigitalFramesCoordinator.last_thumbnail
+    POST /api/digital_frames/frame/poll_orientation               force an immediate accelerometer/gsensor
+                                                            re-read for one frame (Frame Information
+                                                            modal's Rediscover control)
     GET  /api/digital_frames/library/settings                    current backend name
     POST /api/digital_frames/library/settings                    change backend (validates first;
                                                             used directly by Local + Dropbox)
@@ -1096,6 +1099,43 @@ class DigitalFramesFrameReloadView(HomeAssistantView):
 
         result = await hass.config_entries.async_reload(entry_id)
         return self.json({"success": result})
+
+
+class DigitalFramesFramePollOrientationView(HomeAssistantView):
+    """Force an immediate accelerometer/gsensor re-read for one frame.
+
+    Used by the Frame Information modal's "Rediscover" control so a user
+    doesn't have to wait for the next scheduled coordinator poll (up to
+    scan_interval, default 300s) to see a fresh "Discovered" orientation
+    after physically rotating a frame.
+    """
+
+    url = "/api/digital_frames/frame/poll_orientation"
+    name = "api:digital_frames:frame:poll_orientation"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            data = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON: {err}", status_code=400)
+
+        entry_id = data.get("entry_id")
+        if not entry_id:
+            return self.json_message("entry_id is required", status_code=400)
+
+        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+        if coordinator is None:
+            return self.json_message("Frame not found", status_code=404)
+
+        await coordinator.async_request_refresh()
+        device_orientation = (
+            (coordinator.data or {}).get("device_orientation")
+            if isinstance(getattr(coordinator, "data", None), dict)
+            else None
+        )
+        return self.json({"success": True, "device_orientation": device_orientation})
 
 
 class DigitalFramesMeuralPushAlbumView(HomeAssistantView):

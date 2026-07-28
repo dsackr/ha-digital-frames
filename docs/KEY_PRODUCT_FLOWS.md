@@ -583,21 +583,52 @@ schedule to "broken" instead of erroring at fire time.
 
 ## 21. HA entities: sensors + Orientation select + Camera display
 Read-only device telemetry (battery/wifi/charging/firmware/IP/queued), a per-frame Orientation control that persists into config entry options (supporting lock/unlock and follow-device settings), and a Camera entity representing the frame's dynamic canvas (active photo display).
+
+The panel's Frame Information modal (per-frame gear/info popup) surfaces the
+Orientation control as Portrait/Landscape lock icons plus the live
+"Discovered" (gsensor/accelerometer) reading. Icon position is fixed
+(anchored to the row's right edge) regardless of label text length, so the
+icons don't visibly shift as the label changes between "Auto",
+"Portrait/Landscape (Locked)", and "Portrait/Landscape (Discovered)".
+Clicking a lock icon only stages the change locally (icon highlight +
+preview text); nothing is written until "Save Changes" is clicked, matching
+the Name field's existing save-on-click behavior. A "Rediscover" button
+(disabled for Samsung frames, which have no accelerometer) forces an
+immediate coordinator poll via `POST /api/digital_frames/frame/poll_orientation`
+instead of waiting for the next scheduled poll (up to `scan_interval`) --
+since it's a device read rather than a user edit, that one action always
+takes effect immediately, never staged.
 - **Entry points**: `sensor.py` (all `Fraimic*Sensor` classes), `select.py`
-  (`DigitalFramesOrientationSelect`, `MeuralOrientationSelect`), `camera.py` (`DigitalFramesCamera`).
-- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, or the camera entity fails to load or serve the active frame image.
-- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`. **Panel-tested** — `tests/panel/frame-manage.spec.js` (info overlay lock/unlock/discover orientation controls).
+  (`DigitalFramesOrientationSelect`, `MeuralOrientationSelect`), `camera.py` (`DigitalFramesCamera`);
+  `digital-frames-panel.js` (`_openFrameSettingsMenu`, `_renderFrameOrientationDisplay`,
+  `_stageFrameOrientation`, `_pollFrameOrientation`, the `frame-settings-save` click handler);
+  `library_http.py` (`DigitalFramesFramePollOrientationView`).
+- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, the camera entity fails to load or serve the active frame image, orientation icons jump around as the label text changes length, an orientation click auto-applies without a Save Changes step (or Save Changes silently drops a staged orientation change), or Rediscover does nothing / leaves the frame's displayed orientation stale.
+- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`, `tests/python/library/test_library_http_frame_poll_orientation.py` (poll_orientation endpoint forces a refresh, 404s on unknown entry, 400s on missing entry_id). **Panel-tested** — `tests/panel/frame-manage.spec.js` (orientation lock staged locally and only applied on Save Changes; icons stay in a fixed position regardless of label length; Rediscover polls immediately without staging/saving).
 
 ## 22. Render spec resolution (orientation lock + rotation + hanging edge)
 Central "how should this image be composed for this frame" resolution —
 combines native dimensions, orientation lock, 180° flips, hang-edge, live gsensor/accelerometer reporting, and image natural orientation (surface area crop comparison or aspect ratio fallback) into one `RenderSpec` every send path consults.
-- **Entry points**: `helpers.py` (`render_spec_for_entry`, `orientation_for_entry`, `RenderSpec.variant`), `library.py` (`_determine_natural_orientation`).
+
+`coordinator._async_poll_accelerometer` reads the frame's gravity axes
+(`x`, `y`) and picks whichever axis is dominant to decide native-vs-rotated.
+Per the real hardware reading in `ACCELEROMETER_FINDINGS.md` (frame sitting
+in its normal/native position, `x ≈ -0.99, y ≈ 0.00`), X -- not Y -- is the
+dominant axis in the frame's native orientation; a previous version of this
+check had that backwards, which made the panel's "Discovered" orientation
+report the *opposite* of every native-orientation frame's true physical
+orientation (e.g. a portrait-mounted frame always showing "Landscape
+(Discovered)").
+- **Entry points**: `helpers.py` (`render_spec_for_entry`, `orientation_for_entry`, `RenderSpec.variant`), `library.py` (`_determine_natural_orientation`), `coordinator.py` (`_async_poll_accelerometer`).
 - **If it silently breaks**: this is the single riskiest piece of logic in
   the whole integration — a wrong rotation means every image sent from
   every path lands sideways or upside-down on the physical frame, and it's
-  invisible until someone looks at hardware.
+  invisible until someone looks at hardware. A wrong accelerometer axis
+  mapping specifically means the "Discovered" orientation shown in the panel
+  (and anything following it in Auto mode) is backwards for every
+  native-orientation frame.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_helpers_render_spec.py`, `tests/python/library/test_crop_aspect_ratio_and_lock.py` (`test_unlocked_frame_natural_orientation_selection`), and `tests/python/coordinator/test_coordinator_polling.py` (`test_accelerometer_polling_success`).
+  `tests/python/unit/test_helpers_render_spec.py`, `tests/python/library/test_crop_aspect_ratio_and_lock.py` (`test_unlocked_frame_natural_orientation_selection`), and `tests/python/coordinator/test_coordinator_polling.py` (`test_accelerometer_polling_success` -- native/portrait reading; `test_accelerometer_polling_rotated_90_degrees` -- rotated reading).
 
 ## 23. Frame-type registry, PanelCodec ids & byte-layout dispatch
 Declares every supported physical panel (resolution, **codec_id** /

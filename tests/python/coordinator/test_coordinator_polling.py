@@ -169,7 +169,10 @@ async def test_accelerometer_polling_success(hass, coordinator, aioclient_mock):
         f"http://{coordinator.host}/test?action=accel_start",
         json={"status": "ok"},
     )
-    # Mock accel GET: gravity mostly on X, so rotated orientation -> landscape
+    # Mock accel GET: gravity dominant on X, matching the real hardware
+    # reading in ACCELEROMETER_FINDINGS.md taken with the frame sitting in
+    # its normal/native position -- so this is the *native* (not rotated)
+    # orientation, i.e. portrait for a portrait-native panel.
     aioclient_mock.get(
         f"http://{coordinator.host}/test?action=accel",
         json={"x": -0.99, "y": 0.01, "z": 0.18},
@@ -181,10 +184,35 @@ async def test_accelerometer_polling_success(hass, coordinator, aioclient_mock):
     )
 
     data = await coordinator._async_update_data()
-    assert data["device_orientation"] == "landscape"
-    # Follow device is enabled by default, so CONF_ORIENTATION option should be updated to landscape
+    assert data["device_orientation"] == "portrait"
+    # Follow device is enabled by default, so CONF_ORIENTATION option should be updated to portrait
     from custom_components.digital_frames.const import CONF_ORIENTATION
-    assert coordinator.config_entry.options.get(CONF_ORIENTATION) == "landscape"
+    assert coordinator.config_entry.options.get(CONF_ORIENTATION) == "portrait"
+
+
+async def test_accelerometer_polling_rotated_90_degrees(hass, coordinator, aioclient_mock):
+    # Mock /api/info
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 1200, "height": 1600}, # Portrait-native (13.3")
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_start",
+        json={"status": "ok"},
+    )
+    # Gravity dominant on Y -- rotated 90 degrees from native -> landscape
+    # for a portrait-native panel.
+    aioclient_mock.get(
+        f"http://{coordinator.host}/test?action=accel",
+        json={"x": 0.01, "y": -0.99, "z": 0.18},
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_stop",
+        json={"status": "ok"},
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["device_orientation"] == "landscape"
 
 
 async def test_accelerometer_polling_sensor_not_available(hass, coordinator, aioclient_mock):

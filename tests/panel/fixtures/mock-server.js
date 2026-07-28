@@ -117,6 +117,7 @@ function createMockServer({
   const cropSaves = []; // { image_id, width, height, crop_box } per /library/crop POST
   const cropDeletes = []; // { image_id, width, height } per /library/crop DELETE
   const reloadCalls = []; // { entry_id } per /frame/reload POST
+  const pollOrientationCalls = []; // { entry_id } per /frame/poll_orientation POST
   let updateState = {
     installed: '0.12.100',
     running: '0.12.100',
@@ -289,6 +290,12 @@ function createMockServer({
       const body = await readJsonBody(req);
       reloadCalls.push(body || {});
       return json(res, 200, { success: true });
+    }
+    if (p === '/api/digital_frames/frame/poll_orientation' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      pollOrientationCalls.push(body || {});
+      const frame = frames.find((f) => f.entry_id === (body && body.entry_id));
+      return json(res, 200, { success: true, device_orientation: frame ? frame.device_orientation : null });
     }
     if (p === '/api/digital_frames/onboarding') {
       // A broken flag endpoint that still returns JSON -- the panel must
@@ -724,6 +731,7 @@ function createMockServer({
     flowDeletes,
     entryDeletes,
     reloadCalls,
+    pollOrientationCalls,
     get scenes() { return sceneList; },
     get schedules() { return scheduleList; },
     get skills() { return skillList; },

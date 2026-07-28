@@ -192,6 +192,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesLibrarySettingsView,
         DigitalFramesLibraryUploadView,
         DigitalFramesFrameReloadView,
+        DigitalFramesFramePollOrientationView,
     )
 
     hass.http.register_view(DigitalFramesLibraryListView())
@@ -213,6 +214,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesLibraryGoogleOAuthStartView())
     hass.http.register_view(DigitalFramesLibraryGoogleOAuthCallbackView())
     hass.http.register_view(DigitalFramesFrameReloadView())
+    hass.http.register_view(DigitalFramesFramePollOrientationView())
     hass.http.register_view(DigitalFramesMeuralPushAlbumView())
 
     # Scenes: named (frame, image) assignment lists sendable all at once.

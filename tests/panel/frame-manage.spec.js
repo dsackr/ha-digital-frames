@@ -33,6 +33,28 @@ async function openInfoFor(page, entryId) {
   }, entryId);
 }
 
+// Save Changes closes the modal and re-discovers after a fixed delay
+// (_refreshAfterEntryChange's setTimeout) rather than on a signal this test
+// can await -- poll-reopen instead of a single fixed sleep so the assertion
+// isn't a race against wall-clock time on a loaded CI/worker machine. Also
+// wait for the Save Changes button to re-enable: it's disabled for the
+// whole span of the click handler, which doesn't resolve (and re-enable it)
+// until _refreshAfterEntryChange finishes -- the same async chain that
+// updates the text this helper is polling for, so a fast reopen can catch
+// the right text with the button still mid-save-handler and disabled.
+async function reopenUntilOrientationText(page, entryId, expectedText) {
+  await expect.poll(async () => {
+    await openInfoFor(page, entryId);
+    return page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        saveEnabled: !root.getElementById('frame-settings-save').disabled,
+      };
+    });
+  }, { timeout: 10000 }).toEqual({ text: expectedText, saveEnabled: true });
+}
+
 async function openConfigureFor(page, entryId) {
   await page.waitForFunction((id) => {
     const root = document.getElementById('panel').shadowRoot;
@@ -84,7 +106,7 @@ test.describe('Frame management and discovery banner', () => {
       const root = document.getElementById('panel').shadowRoot;
       root.getElementById('frame-settings-name').value = 'Kitchen Frame';
     });
-    await clickPanelButton(page, 'frame-settings-rename');
+    await clickPanelButton(page, 'frame-settings-save');
 
     // Both registries must be updated: entry title alone leaves the device
     // page showing the creation-time name.
@@ -96,7 +118,7 @@ test.describe('Frame management and discovery banner', () => {
     ]);
   });
 
-  test('info overlay → lock/unlock/discover orientation controls', async ({ page }) => {
+  test('info overlay → orientation lock is staged locally and only applied on Save Changes', async ({ page }) => {
     await gotoPanel(page, baseUrl, { frames: FRAMES });
 
     await openInfoFor(page, 'entry_1');
@@ -114,17 +136,35 @@ test.describe('Frame management and discovery banner', () => {
     expect(state.portraitActive).toBe(false);
     expect(state.landscapeActive).toBe(false);
 
-    // Prepare mock frames data mutation in Node.js BEFORE the click triggers discovery
-    FRAMES[0].orientation_locked = true;
-    FRAMES[0].orientation = 'landscape';
-
-    // 2. Click Landscape to lock it
+    // 2. Click Landscape to stage a lock -- no service call should fire yet,
+    // it's a local preview only (matches the Name field, which has never
+    // auto-saved either).
     await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       root.getElementById('frame-info-landscape').click();
     });
 
-    // Expect callService was triggered to lock to Landscape
+    state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
+        landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
+        serviceCalls: window.__serviceCalls,
+      };
+    });
+    expect(state.text).toBe('Landscape (Locked)');
+    expect(state.landscapeActive).toBe(true);
+    expect(state.serviceCalls).toEqual([]);
+
+    // Prepare mock frames data mutation in Node.js BEFORE Save Changes
+    // triggers a post-save re-discovery.
+    FRAMES[0].orientation_locked = true;
+    FRAMES[0].orientation = 'landscape';
+
+    // 3. Click Save Changes -- now the service call fires.
+    await clickPanelButton(page, 'frame-settings-save');
+
     await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
       {
         domain: 'select',
@@ -136,32 +176,33 @@ test.describe('Frame management and discovery banner', () => {
       },
     ]);
 
-    // Check that the UI correctly re-rendered to Landscape (Locked)
-    await expect.poll(() => page.evaluate(() => {
+    // Save Changes closes the modal; reopen (polling past the
+    // _refreshAfterEntryChange delay) to continue the unlock flow.
+    await page.evaluate(() => { window.__serviceCalls = []; });
+    await reopenUntilOrientationText(page, 'entry_1', 'Landscape (Locked)');
+
+    state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       return {
         text: root.getElementById('frame-info-orientation').textContent,
-        portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
         landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
       };
-    })).toEqual({
-      text: 'Landscape (Locked)',
-      portraitActive: false,
-      landscapeActive: true,
     });
+    expect(state.text).toBe('Landscape (Locked)');
+    expect(state.landscapeActive).toBe(true);
 
-    // Reset service calls
-    await page.evaluate(() => { window.__serviceCalls = []; });
-
-    // Mutate mock frames data to simulate backend unlock before we click to unlock
+    // Mutate mock frames data to simulate backend unlock before Save Changes.
     FRAMES[0].orientation_locked = false;
     FRAMES[0].orientation = 'portrait'; // defaults back to discovered portrait
 
-    // Click Landscape button to deselect/unlock
+    // 4. Click the already-active Landscape button to stage an unlock.
     await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       root.getElementById('frame-info-landscape').click();
     });
+    expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+    await clickPanelButton(page, 'frame-settings-save');
 
     // Expect callService was triggered to unlock
     await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
@@ -175,19 +216,86 @@ test.describe('Frame management and discovery banner', () => {
       },
     ]);
 
-    // Check that the UI correctly re-rendered to Portrait (Discovered)
-    await expect.poll(() => page.evaluate(() => {
+    // Reopen and check that the UI correctly re-rendered to Portrait (Discovered)
+    await reopenUntilOrientationText(page, 'entry_1', 'Portrait (Discovered)');
+    state = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       return {
         text: root.getElementById('frame-info-orientation').textContent,
         portraitActive: root.getElementById('frame-info-portrait').classList.contains('active'),
         landscapeActive: root.getElementById('frame-info-landscape').classList.contains('active'),
       };
-    })).toEqual({
+    });
+    expect(state).toEqual({
       text: 'Portrait (Discovered)',
       portraitActive: false,
       landscapeActive: false,
     });
+  });
+
+  test('info overlay → orientation icons stay in a fixed position regardless of label length', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+
+    await openInfoFor(page, 'entry_1');
+
+    // entry_1 starts unlocked with "Portrait (Discovered)" -- a long label.
+    const initial = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        x: root.getElementById('frame-info-portrait').getBoundingClientRect().left,
+      };
+    });
+    expect(initial.text).toBe('Portrait (Discovered)');
+
+    // Staging a landscape lock swaps in a differently-sized label
+    // ("Landscape (Locked)") without any network round-trip.
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.getElementById('frame-info-landscape').click();
+    });
+    const staged = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        text: root.getElementById('frame-info-orientation').textContent,
+        x: root.getElementById('frame-info-portrait').getBoundingClientRect().left,
+      };
+    });
+    expect(staged.text).toBe('Landscape (Locked)');
+
+    // The icon row anchors to the right edge of the modal (justify-content:
+    // space-between) instead of trailing the variable-width label text, so
+    // the icons must not shift position as the label changes length.
+    expect(staged.x).toBe(initial.x);
+  });
+
+  test('info overlay → Rediscover polls the frame immediately without staging/saving', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+
+    await openInfoFor(page, 'entry_1');
+
+    expect(await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.getElementById('frame-info-orientation').textContent;
+    })).toBe('Portrait (Discovered)');
+
+    // Simulate the frame having been physically rotated since the last poll.
+    FRAMES[0].device_orientation = 'landscape';
+
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.getElementById('frame-info-poll').click();
+    });
+
+    await expect.poll(() => mockServer.pollOrientationCalls).toEqual([{ entry_id: 'entry_1' }]);
+
+    // No select.select_option call -- rediscovering is not a lock edit.
+    expect(await page.evaluate(() => window.__serviceCalls)).toEqual([]);
+
+    await expect.poll(() => page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.getElementById('frame-info-orientation').textContent;
+    })).toBe('Landscape (Discovered)');
   });
 
   test('configure options flow modal → advanced settings collapsible toggle works', async ({ page }) => {
