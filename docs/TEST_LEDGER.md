@@ -111,3 +111,4 @@ Notes on reading it:
 | 2026-07-28 | 60c587f | backend-pytest | success | 489 passed in 81.84s (0:01:21) | 65% | CI |
 | 2026-07-28 | a746068 | panel-playwright | failure | 2 failed 156 passed | — | CI |
 | 2026-07-28 | 4ee8d77 | backend-pytest | success | 495 passed in 82.80s (0:01:22) | 66% | CI |
+| 2026-07-28 | 8f6ac18 | panel-playwright | failure | 2 failed 157 passed | — | CI |
