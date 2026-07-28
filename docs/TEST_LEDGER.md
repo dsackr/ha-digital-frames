@@ -109,3 +109,4 @@ Notes on reading it:
 | 2026-07-28 | d4b4c46 | backend-pytest | success | 488 passed in 85.62s (0:01:25) | 64% | CI |
 | 2026-07-28 | 917e26b | panel-playwright | failure | 2 failed 156 passed | — | CI |
 | 2026-07-28 | 60c587f | backend-pytest | success | 489 passed in 81.84s (0:01:21) | 65% | CI |
+| 2026-07-28 | a746068 | panel-playwright | failure | 2 failed 156 passed | — | CI |
