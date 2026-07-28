@@ -464,6 +464,21 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._pending_store.async_save(None)
         self.async_update_listeners()
 
+    async def async_clear_pull_bin(self) -> None:
+        """Clear staged bin and pending send queue once successfully delivered."""
+        self._staged_bin = None
+        try:
+            if self._pull_bin_path.is_file():
+                await self.hass.async_add_executor_job(self._pull_bin_path.unlink)
+        except OSError as err:
+            _LOGGER.warning("Failed deleting pull bin for %s: %s", self.host, err)
+
+        if self.pending_send is not None:
+            self.pending_send = None
+            self.update_interval = self._normal_update_interval
+            await self._pending_store.async_save(None)
+            self.async_update_listeners()
+
     async def async_send_image_or_queue(
         self,
         image_bytes: bytes,
@@ -522,8 +537,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._flushing = True
         try:
             await self.async_send_image(image_bytes)
-            if self.pending_send is not None:
-                await self._clear_pending_if_current(self.pending_send["token"])
+            await self.async_clear_pull_bin()
             return {"success": True, "queued": False, "delivery": "push+pull"}
         except (aiohttp.ClientConnectionError, TimeoutError):
             await self.async_refresh()
@@ -610,7 +624,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 await self._clear_pending_if_current(pending["token"])
                 return
-            await self._clear_pending_if_current(pending["token"])
+            await self.async_clear_pull_bin()
             thumb_b64 = pending.get("thumbnail_b64")
             await self.async_set_last_image(
                 image_id=pending.get("image_id"),

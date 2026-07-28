@@ -65,7 +65,7 @@ async def test_online_frame_push_and_stage_pull(coordinator, aioclient_mock):
     assert result["queued"] is False
     assert result.get("delivery") == "push+pull"
     assert coordinator.pending_send is None
-    assert coordinator.get_pull_bin(coordinator.pull_token) == b"binary-image-data"
+    assert coordinator.get_pull_bin(coordinator.pull_token) is None
 
 
 async def test_offline_frame_stages_pull_and_reports_queued(coordinator, aioclient_mock):
@@ -263,3 +263,33 @@ async def test_provision_sleepconfig_runs_even_if_pullurl_fails(
     with patch.object(coordinator, "frame_always_on", return_value=True):
         ok = await coordinator.async_provision_frame_pull()
     assert ok is True
+
+
+async def test_pull_bin_view_clears_bin_on_get(coordinator, hass):
+    from custom_components.digital_frames.http_api import DigitalFramesFramePullBinView
+    from custom_components.digital_frames.const import DOMAIN
+    from unittest.mock import MagicMock
+
+    # 1. Stage the bin
+    hass.data.setdefault(DOMAIN, {})[coordinator.config_entry.entry_id] = coordinator
+    await coordinator.async_stage_pull_bin(b"binary-image-data")
+    token = coordinator.pull_token
+    assert coordinator.get_pull_bin(token) == b"binary-image-data"
+
+    # 2. Build mock request
+    mock_app = {"hass": hass}
+    mock_request = MagicMock()
+    mock_request.app = mock_app
+
+    # 3. Call the GET view
+    view = DigitalFramesFramePullBinView()
+    response = await view.get(mock_request, token)
+
+    assert response.status == 200
+    assert response.body == b"binary-image-data"
+
+    # 4. Wait for background task to complete clearing
+    await hass.async_block_till_done()
+
+    # 5. Verify it is now cleared
+    assert coordinator.get_pull_bin(token) is None

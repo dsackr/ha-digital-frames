@@ -102,6 +102,7 @@ to "catch" it awake.
    then `POST /pullurl`. Sleep/always-on is applied even if pullurl fails.
    Requires clone firmware that understands `always_on` (pre-always-on
    builds ignore the field and keep battery sleep).
+5. Once successfully retrieved by the frame (GET pull bin) or successfully pushed (POST /api/image), HA deletes the staged `.bin` from disk and clears the pending send queue metadata.
 
 **Secondary (immediate update if the frame is already online):**
 HA still `POST /api/image` after staging so an awake panel updates without
@@ -115,16 +116,16 @@ slow ESP32 sequential panels (7.3").
 
 - **Entry points**: `coordinator.py` (`async_send_image_or_queue`,
   `async_stage_pull_bin`, `async_provision_frame_pull`, `async_send_image`,
-  `_async_flush_pending_send`), `http_api.DigitalFramesFramePullBinView`,
+  `_async_flush_pending_send`, `async_clear_pull_bin`), `http_api.DigitalFramesFramePullBinView`,
   `frame_types.send_timeout_for_entry`; clone firmware
   (`fraimic-clone-7.3in`) `POST /pullurl`, `POST /sleepconfig`, pull-on-wake.
 - **If it silently breaks**: sleeping frames never update; pull URL not
   provisioned; always-on ignored; HA "send" claims success but nothing is
-  staged under `digital_frames_cache/pull/`.
+  staged under `digital_frames_cache/pull/`; or the staged bin is never cleared, causing the frame to repeatedly download and redraw the same image on every wake.
 - **Test status**: **Backend-tested** —
   `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (online
   push+pull, offline stage-for-pull, provision always_on flag, token URL
-  shape, pull-only pending flush).
+  shape, pull-only pending flush, pull view cleanup on get).
 
 ## 4b. Frame power options (sleep interval + always-on)
 User-facing controls on the frame's **Configure / options** form and the

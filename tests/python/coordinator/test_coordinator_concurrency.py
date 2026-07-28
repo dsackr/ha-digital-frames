@@ -71,4 +71,4 @@ async def test_n_concurrent_sends_to_distinct_frames_stay_isolated(
     for i, coord in enumerate(coordinators):
         assert coord.last_image_id == f"img-{i}"
         assert coord.pending_send is None
-        assert coord.get_pull_bin(coord.pull_token) == f"payload-{i}".encode()
+        assert coord.get_pull_bin(coord.pull_token) is None
