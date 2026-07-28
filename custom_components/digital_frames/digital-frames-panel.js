@@ -10207,12 +10207,15 @@
           body: JSON.stringify({ entry_id: entryId }),
         });
         const result = await resp.json().catch(() => ({}));
-        if (!resp.ok || !result.success) {
-          const errMsg = (result.results && result.results[0] && result.results[0].message) || result.message || resp.statusText;
+        const single = (result.results && result.results[0]) || {};
+        if (!single.queued && (!resp.ok || !result.success)) {
+          const errMsg = single.message || result.message || resp.statusText;
           throw new Error(errMsg || `HTTP ${resp.status}`);
         }
         fb.className = 'feedback ok';
-        fb.textContent = 'Sent!';
+        fb.textContent = single.queued
+          ? '⏳ Frame is asleep — queued, will send when it wakes.'
+          : 'Sent!';
         fb.style.display = 'block';
         setTimeout(() => { fb.style.display = 'none'; }, 3000);
       } catch (err) {
@@ -10345,12 +10348,19 @@
             }),
           });
           const result = await resp.json().catch(() => ({}));
-          if (!resp.ok || !result.success) {
-            const errMsg = (result.results && result.results[0] && result.results[0].message) || result.message || resp.statusText;
+          const results = result.results || [];
+          const failed = results.filter((r) => !r.success && !r.queued);
+          const queued = results.filter((r) => r.queued);
+          if (!resp.ok || (!result.success && failed.length)) {
+            const errMsg = (failed[0] && failed[0].message) || result.message || resp.statusText;
             throw new Error(errMsg || `HTTP ${resp.status}`);
           }
           fb.className = 'feedback ok';
-          fb.textContent = result.saved_image_id ? 'Sent and saved to library!' : 'Sent!';
+          fb.textContent = result.saved_image_id
+            ? 'Sent and saved to library!'
+            : queued.length
+              ? '⏳ Some frames are asleep — queued, will send when they wake.'
+              : 'Sent!';
           fb.style.display = 'block';
           setTimeout(() => { overlay.style.display = 'none'; }, 1200);
         } catch (err) {
