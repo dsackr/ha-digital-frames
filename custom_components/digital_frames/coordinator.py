@@ -597,50 +597,63 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._flushing = False
 
     async def _async_flush_pending_send(self) -> None:
-        """When a poll succeeds, re-provision pull URL (and optional push).
+        """When a poll succeeds, push any staged image to the frame.
 
-        Pull-only pending entries need no re-POST of image bytes — the frame
-        fetches the staged .bin itself. We re-POST /pullurl so a newly awake
-        frame that never received provision while asleep still has the URL.
-        Legacy pending payloads with bin_b64 still get one push attempt.
+        All queued entries are stored as pull_only (no bin_b64) — the image
+        bytes live on disk at _pull_bin_path. On wake we always try a direct
+        push from the staged bin so push-only frames (official Fraimic) get
+        their image. For clone frames that support /pullurl, we also re-POST
+        the pull URL first so the clone can pull autonomously if the push fails.
         """
         if self._flushing or self.pending_send is None:
             return
         self._flushing = True
         try:
             pending = self.pending_send
-            # Always re-point the frame at HA's pull URL while it's online.
+
+            # Best-effort: re-point clone frames at the pull URL so they can
+            # fetch autonomously even if the push below fails.
             await self.async_provision_frame_pull()
 
-            if pending.get("pull_only") or not pending.get("bin_b64"):
-                await self._clear_pending_if_current(pending["token"])
-                _LOGGER.info(
-                    "Frame %s is online; pull URL provisioned (pull delivery)",
-                    self.host,
-                )
-                return
+            # Load staged bin from memory or disk.
+            bin_bytes: bytes | None = self._staged_bin
+            if bin_bytes is None and self._pull_bin_path.is_file():
+                try:
+                    bin_bytes = await self.hass.async_add_executor_job(
+                        self._pull_bin_path.read_bytes
+                    )
+                except OSError as err:
+                    _LOGGER.warning(
+                        "Could not read staged bin for %s: %s", self.host, err
+                    )
 
-            image_bytes = base64.b64decode(pending["bin_b64"])
-            try:
-                await self.async_send_image(image_bytes)
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.error(
-                    "Failed to deliver queued image to %s (%s) -- dropping it "
-                    "rather than retrying (image remains staged for pull).",
+            if bin_bytes is not None:
+                try:
+                    await self.async_send_image(bin_bytes)
+                    await self.async_clear_pull_bin(delay=15)
+                    thumb_b64 = pending.get("thumbnail_b64")
+                    await self.async_set_last_image(
+                        image_id=pending.get("image_id"),
+                        thumbnail=base64.b64decode(thumb_b64) if thumb_b64 else None,
+                    )
+                    _LOGGER.info("Pushed staged image to frame %s on wake", self.host)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Failed to push staged image to %s on wake: %s — "
+                        "image remains staged for clone pull.",
+                        self.host,
+                        err,
+                    )
+            else:
+                _LOGGER.debug(
+                    "Frame %s is online but no staged bin found; clearing pending.",
                     self.host,
-                    err,
                 )
-                await self._clear_pending_if_current(pending["token"])
-                return
-            await self.async_clear_pull_bin()
-            thumb_b64 = pending.get("thumbnail_b64")
-            await self.async_set_last_image(
-                image_id=pending.get("image_id"),
-                thumbnail=base64.b64decode(thumb_b64) if thumb_b64 else None,
-            )
-            _LOGGER.info("Delivered queued image to frame %s", self.host)
+
+            await self._clear_pending_if_current(pending["token"])
         finally:
             self._flushing = False
+
 
     # ------------------------------------------------------------------
     # Internal helpers
