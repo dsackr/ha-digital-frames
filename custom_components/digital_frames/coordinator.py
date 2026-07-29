@@ -517,8 +517,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         token = uuid.uuid4().hex
         # Keep a lightweight pending record only for UI "queued" sensor when
         # we couldn't push — delivery is pull, not a re-POST of bin_b64.
-        if not provisioned:
-            # Frame likely asleep: staged bin is the delivery mechanism.
+        if not provisioned and not self.last_update_success:
+            # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
             payload: dict[str, Any] = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
@@ -537,6 +537,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "delivery": "pull",
                 "message": "Image staged for frame pull on next wake",
             }
+
+        # Either provisioned or frame is known-online (e.g. official Fraimic
+        # which rejects /sleepconfig but still accepts /api/image push).
+        # Fall through to the push attempt.
 
         self._flushing = True
         try:
