@@ -112,7 +112,7 @@ async def test_default_wall_scenes_hub_entry_excluded(hass, wall_manager, make_s
     assert hub.entry_id not in default_wall.placements
 
 
-async def test_tombstone_excluded_frame_survives_resync(
+async def test_tombstone_excluded_frame_is_cleared_and_placed(
     hass, wall_manager, make_frame_entry
 ):
     entry = make_frame_entry(entry_id="entry-1")
@@ -123,13 +123,39 @@ async def test_tombstone_excluded_frame_survives_resync(
     del default_wall.placements[entry.entry_id]
     default_wall.excluded.append(entry.entry_id)
 
-    # A resync (e.g. HA restart, another frame added) must not resurrect a
-    # deliberately-excluded frame.
+    # All frames must be on the default wall. Exclusions must be cleared and placed.
     await wall_manager.async_ensure_default_wall()
 
     default_wall = await wall_manager.async_get_wall(DEFAULT_WALL_ID)
-    assert entry.entry_id not in default_wall.placements
-    assert entry.entry_id in default_wall.excluded
+    assert entry.entry_id in default_wall.placements
+    assert not default_wall.excluded
+
+
+async def test_default_wall_save_ignores_removal_and_excluded(
+    hass, wall_manager, make_frame_entry
+):
+    entry1 = make_frame_entry(entry_id="entry-1")
+    entry2 = make_frame_entry(entry_id="entry-2")
+    entry1.add_to_hass(hass)
+    entry2.add_to_hass(hass)
+    await wall_manager.async_ensure_default_wall()
+
+    # Save default wall with entry-1 coordinate updated, entry-2 omitted (pulled off),
+    # and entry-2 in the excluded list.
+    await wall_manager.async_save_wall(
+        DEFAULT_WALL_NAME,
+        {"entry-1": {"x": 100, "y": 200}},
+        wall_id=DEFAULT_WALL_ID,
+        excluded=["entry-2"]
+    )
+
+    default_wall = await wall_manager.async_get_wall(DEFAULT_WALL_ID)
+    # entry-1 coordinate should be updated
+    assert default_wall.placements["entry-1"] == {"x": 100.0, "y": 200.0}
+    # entry-2 should STILL be placed on the wall (removal ignored)
+    assert "entry-2" in default_wall.placements
+    # excluded list must be empty
+    assert not default_wall.excluded
 
 
 async def test_removed_and_readded_frame_gets_fresh_placement(

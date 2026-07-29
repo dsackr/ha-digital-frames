@@ -201,15 +201,11 @@ class WallManager:
         for stale_id in [eid for eid in wall.placements if eid not in entry_ids]:
             del wall.placements[stale_id]
             changed = True
-        stale_excluded = [eid for eid in wall.excluded if eid not in entry_ids]
-        if stale_excluded:
-            wall.excluded = [eid for eid in wall.excluded if eid in entry_ids]
+        if wall.excluded:
+            wall.excluded = []
             changed = True
         for entry in entries:
-            if (
-                entry.entry_id not in wall.placements
-                and entry.entry_id not in wall.excluded
-            ):
+            if entry.entry_id not in wall.placements:
                 self._append_placement(wall, entry)
                 changed = True
 
@@ -228,9 +224,11 @@ class WallManager:
             # this is belt-and-braces for a reload racing that.
             await self.async_ensure_default_wall()
             return
-        if entry.entry_id in wall.placements or entry.entry_id in wall.excluded:
+        if entry.entry_id in wall.placements:
             return
         self._append_placement(wall, entry)
+        if wall.excluded:
+            wall.excluded = []
         await self._async_persist()
         async_dispatcher_send(self.hass, SIGNAL_WALLS_UPDATED)
 
@@ -298,16 +296,29 @@ class WallManager:
             wall = self._walls[wall_id]
             if wall.kind == KIND_DEFAULT:
                 # The default wall accepts layout changes but keeps its
-                # identity -- a rename would break the panel's "this is
-                # every frame" anchor.
-                wall.placements = placements
+                # identity. We must keep all configured frames on the wall.
+                # If a frame was omitted (e.g. pulled off in UI), we preserve its last known placement.
+                updated_placements = {}
+                entries = self._frame_entries()
+                for entry in entries:
+                    eid = entry.entry_id
+                    if eid in placements:
+                        updated_placements[eid] = placements[eid]
+                    elif eid in wall.placements:
+                        updated_placements[eid] = wall.placements[eid]
+                wall.placements = updated_placements
+                # In case any new frames were added and somehow missed placements, let's run append_placement.
+                for entry in entries:
+                    if entry.entry_id not in wall.placements:
+                        self._append_placement(wall, entry)
+                wall.excluded = []
             else:
                 wall.name = name
                 wall.placements = placements
-            if excluded is not None:
-                wall.excluded = [
-                    e for e in excluded if isinstance(e, str) and e
-                ]
+                if excluded is not None:
+                    wall.excluded = [
+                        e for e in excluded if isinstance(e, str) and e
+                    ]
         else:
             wall = Wall(
                 wall_id=uuid.uuid4().hex[:12],

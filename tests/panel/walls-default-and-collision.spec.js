@@ -154,7 +154,7 @@ test.describe('Default wall collision and keyboard nudge', () => {
     expect(selected).toBe(null);
   });
 
-  test('✕ removes a tile from the default wall, tombstoned so auto-sync stays away', async ({ page }) => {
+  test('✕ removes a tile from the default wall, but it is not saved on the backend and reverts on reopen', async ({ page }) => {
     await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       [...root.querySelectorAll('.wall-tile')]
@@ -169,25 +169,25 @@ test.describe('Default wall collision and keyboard nudge', () => {
         && root.querySelectorAll('.wall-palette-item').length === 1;
     });
 
-    // The auto-save records the tombstone alongside the placements.
+    // The removal is NOT saved on the backend.
     await page.waitForTimeout(1200);
     const saved = mockServer.walls.find((w) => w.wall_id === 'default');
-    expect(Object.keys(saved.placements)).toEqual(['entry_2']);
-    expect(saved.excluded).toEqual(['entry_1']);
+    expect(Object.keys(saved.placements).sort()).toEqual(['entry_1', 'entry_2']);
+    expect(saved.excluded).toEqual([]);
 
-    // Dragging it back on lifts the tombstone.
-    const canvasBox = await page.evaluate(() => {
-      const r = document.getElementById('panel').shadowRoot.getElementById('wall-canvas').getBoundingClientRect();
-      return { x: r.x, y: r.y };
+    // Reopening the wall restores it
+    await page.evaluate(() => {
+      document.getElementById('panel')._openWall('default');
     });
-    await dragFirstPaletteItemTo(page, canvasBox.x + 60, canvasBox.y + 240);
-    await page.waitForTimeout(1200);
-    const resaved = mockServer.walls.find((w) => w.wall_id === 'default');
-    expect(Object.keys(resaved.placements).sort()).toEqual(['entry_1', 'entry_2']);
-    expect(resaved.excluded).toEqual([]);
+
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.querySelectorAll('.wall-tile').length === 2
+        && root.querySelectorAll('.wall-palette-item').length === 0;
+    });
   });
 
-  test('dragging a tile off the canvas removes it from the wall', async ({ page }) => {
+  test('dragging a tile off the canvas removes it from the wall but does not save on the backend', async ({ page }) => {
     // Drag entry_1 far above the canvas -- well outside its bounds.
     const tileBox = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
@@ -209,8 +209,62 @@ test.describe('Default wall collision and keyboard nudge', () => {
 
     await page.waitForTimeout(1200);
     const saved = mockServer.walls.find((w) => w.wall_id === 'default');
-    expect(Object.keys(saved.placements)).toEqual(['entry_2']);
-    expect(saved.excluded).toEqual(['entry_1']);
+    expect(Object.keys(saved.placements).sort()).toEqual(['entry_1', 'entry_2']);
+    expect(saved.excluded).toEqual([]);
+  });
+
+  test('inline offer banner to save as custom wall is shown when modified and allows saving', async ({ page }) => {
+    // Check banner is hidden initially
+    const bannerVisibleBefore = await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      const banner = panel.shadowRoot.getElementById('wall-offer-banner');
+      return banner && window.getComputedStyle(banner).display !== 'none';
+    });
+    expect(bannerVisibleBefore).toBe(false);
+
+    // Modify default wall layout (nudge entry_1 right)
+    await selectTileWithoutPicker(page, 'entry_1');
+    await page.keyboard.press('ArrowRight');
+
+    // Check banner is now visible
+    const bannerVisibleAfter = await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      const banner = panel.shadowRoot.getElementById('wall-offer-banner');
+      return banner && window.getComputedStyle(banner).display === 'flex';
+    });
+    expect(bannerVisibleAfter).toBe(true);
+
+    // Intercept prompt and mock response
+    page.on('dialog', async (dialog) => {
+      expect(dialog.message()).toContain('Name this custom wall');
+      await dialog.accept('New Office Canvas');
+    });
+
+    // Click "Save as Custom Wall" button
+    await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      panel.shadowRoot.getElementById('wall-offer-save-btn').click();
+    });
+
+    // Wait for the new wall to load and select
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('panel');
+      return panel._activeWallId !== 'default';
+    });
+
+    // Custom wall should be active, banner hidden
+    const activeWall = await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      return panel._activeWall();
+    });
+    expect(activeWall.name).toBe('New Office Canvas');
+
+    const bannerVisibleEnd = await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      const banner = panel.shadowRoot.getElementById('wall-offer-banner');
+      return banner && window.getComputedStyle(banner).display !== 'none';
+    });
+    expect(bannerVisibleEnd).toBe(false);
   });
 
   test('Escape clears the selection so arrows stop nudging', async ({ page }) => {

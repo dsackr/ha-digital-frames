@@ -693,10 +693,25 @@ function createMockServer({
         const parsed = await readJsonBody(req);
         const wall = wallList.find((w) => w.wall_id === wallId);
         if (!wall) return json(res, 400, { message: 'not found' });
-        wall.name = parsed.name;
-        wall.placements = parsed.placements || {};
-        // Mirrors WallManager.async_save_wall: absent = keep stored.
-        if (Array.isArray(parsed.excluded)) wall.excluded = parsed.excluded;
+        if (wall.kind === 'default') {
+          const updatedPlacements = {};
+          frames.forEach((f) => {
+            const eid = f.entry_id;
+            if (parsed.placements && parsed.placements[eid]) {
+              updatedPlacements[eid] = parsed.placements[eid];
+            } else if (wall.placements && wall.placements[eid]) {
+              updatedPlacements[eid] = wall.placements[eid];
+            } else {
+              updatedPlacements[eid] = { x: 0, y: 0 };
+            }
+          });
+          wall.placements = updatedPlacements;
+          wall.excluded = [];
+        } else {
+          wall.name = parsed.name;
+          wall.placements = parsed.placements || {};
+          if (Array.isArray(parsed.excluded)) wall.excluded = parsed.excluded;
+        }
         return json(res, 200, { success: true, wall });
       }
       if (req.method === 'DELETE') {

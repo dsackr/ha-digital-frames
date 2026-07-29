@@ -332,6 +332,26 @@
       color: var(--error-color, #b91c1c);
     }
 
+    /* ---- wall offer banner ---- */
+    .wall-offer-banner {
+      display: none;
+      margin-top: 12px;
+      margin-bottom: 12px;
+      padding: 10px 14px;
+      background: rgba(59, 130, 246, 0.08); /* light blue accent */
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 8px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      animation: wallOfferFadeIn .3s ease;
+      font-size: 13px;
+    }
+    @keyframes wallOfferFadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     /* ---- empty state ---- */
     .empty {
       text-align: center;
@@ -2403,6 +2423,11 @@
         this._activeWallId = initial.wall_id;
         this._wallPlacements = JSON.parse(JSON.stringify(initial.placements || {}));
         this._wallExcluded = [...(initial.excluded || [])];
+        if (initial.kind === 'default') {
+          this._defaultWallOriginalPlacements = JSON.parse(JSON.stringify(initial.placements || {}));
+        } else {
+          this._defaultWallOriginalPlacements = null;
+        }
       }
       this._renderDashboard();
       // Deep links target wall tiles, so this must wait for the walls
@@ -2557,6 +2582,10 @@
       this.shadowRoot.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => this._setTab(btn.dataset.tab));
       });
+      const offerSaveBtn = this.shadowRoot.getElementById('wall-offer-save-btn');
+      if (offerSaveBtn) {
+        offerSaveBtn.addEventListener('click', () => this._saveAsCustomWall());
+      }
       const addBtn = this.shadowRoot.getElementById('frame-add-btn');
       if (addBtn) {
         addBtn.addEventListener('click', () => this._openAddFrameFlow());
@@ -2640,6 +2669,12 @@
       if (name === 'widgets') {
         this._loadXotdInstances().then(() => this._renderXotdInstances());
       }
+      if (name === 'walls') {
+        const active = this._activeWall();
+        if (active && active.kind === 'default') {
+          this._openWall(this._activeWallId);
+        }
+      }
     }
 
     _buildShell() {
@@ -2670,6 +2705,10 @@
           </div>
         </div>
         <div class="feedback" id="wall-fb"></div>
+        <div class="wall-offer-banner" id="wall-offer-banner" style="display:none">
+          <span style="flex: 1 1 auto; line-height: 1.4;">You've modified the All Frames wall. Save your layout as a custom wall to keep it.</span>
+          <button class="btn-primary" id="wall-offer-save-btn" style="flex: 0 0 auto; padding: 6px 12px; font-size: 12px;">Save as Custom Wall</button>
+        </div>
 
         <div id="wall-editor">
           <h3 style="margin:16px 0 6px;font-size:14px">Layout</h3>
@@ -4269,7 +4308,11 @@
       await this._discoverFrames();
       this._renderFrames();
       await this._loadWalls();
-      this._renderWallsSubview();
+      if (this._activeWallId === 'default') {
+        this._openWall('default');
+      } else {
+        this._renderWallsSubview();
+      }
     }
 
     _wireFrameSettingsMenu() {
@@ -7942,7 +7985,13 @@
       this._wallPendingMappings = {};
       this._wallPendingPickAlbum = {};
       this._wallSelection = new Set();
+      if (wall && wall.kind === 'default') {
+        this._defaultWallOriginalPlacements = JSON.parse(JSON.stringify(wall.placements || {}));
+      } else {
+        this._defaultWallOriginalPlacements = null;
+      }
       this._renderWallsSubview();
+      this._updateWallOfferBanner();
     }
 
     async _createWall() {
@@ -8907,6 +8956,7 @@
         this._wallSaveTimer = null;
         this._persistWallLayout(wallId, name, snapshot, excluded);
       }, 800);
+      this._updateWallOfferBanner();
     }
 
     async _persistWallLayout(wallId, name, placements, excluded) {
@@ -8931,6 +8981,66 @@
       } catch (err) {
         fb.className = 'feedback err';
         fb.textContent = `Couldn't save layout: ${err.message}`;
+        fb.style.display = 'block';
+      }
+    }
+
+    _checkDefaultWallModified() {
+      const active = this._activeWall();
+      if (!active || active.kind !== 'default') return false;
+      if (!this._defaultWallOriginalPlacements) return false;
+
+      const saved = this._defaultWallOriginalPlacements;
+      const current = this._wallPlacements || {};
+
+      const savedKeys = Object.keys(saved);
+      const currentKeys = Object.keys(current);
+
+      if (savedKeys.length !== currentKeys.length) return true;
+
+      for (const key of savedKeys) {
+        if (!current[key]) return true;
+        if (Math.abs(current[key].x - saved[key].x) > 0.1 || Math.abs(current[key].y - saved[key].y) > 0.1) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    _updateWallOfferBanner() {
+      const banner = this.shadowRoot.getElementById('wall-offer-banner');
+      if (!banner) return;
+      if (this._checkDefaultWallModified()) {
+        banner.style.display = 'flex';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    async _saveAsCustomWall() {
+      const name = window.prompt('Name this custom wall (e.g. "My Custom Wall"):');
+      if (!name || !name.trim()) return;
+
+      const fb = this.shadowRoot.getElementById('wall-fb');
+      try {
+        const resp = await fetch('/api/digital_frames/walls', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            placements: this._wallPlacements
+          }),
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+        fb.style.display = 'none';
+        await this._loadWalls();
+        this._openWall(result.wall.wall_id);
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Couldn't save custom wall: ${err.message}`;
         fb.style.display = 'block';
       }
     }

@@ -504,16 +504,21 @@ still rmtree's leftover addon dirs.
 User arranges a subset of frames on a free-form canvas mirroring how
 they're physically hung; custom walls and a default "All Frames" wall are
 selected via visual picker tiles, and the default wall self-syncs with
-configured frames. Hovering over a frame tile displays a translucent overlay
+configured frames (guaranteeing all frames stay placed on the default wall;
+exclusions/tombstones are ignored). Hovering over a frame tile displays a translucent overlay
 with four corner quadrants for quick actions: selecting an image, removing the tile
 from the wall, viewing frame info (name, IP, orientation, battery percentage), or configuring the
-frame. An "Align Wall to Grid" option allows users to snap all
+frame. Pulling a frame off the default wall removes it from the canvas locally but does not save
+that removal to the backend (reverting to showing all frames when switching screens or refreshing).
+Save requests for the default wall preserve any omitted frame placements at their last known positions.
+When the default wall is modified (moving frames or pulling them off), an inline banner offers to save the configuration as a new custom wall.
+An "Align Wall to Grid" option allows users to snap all
 placed frames on a wall to a clean structured layout. When aligning selected
 frames, if they would overlap each other, they are automatically spaced out
 along the other axis rather than producing a collision error.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
-  `async_ensure_default_wall`, `async_prune_entry`), `walls_http.py`,
-  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`).
+  `async_ensure_default_wall`, `async_ensure_placement`, `async_prune_entry`), `walls_http.py`,
+  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`).
 - **If it silently breaks**: removed/re-added frames haunt old layouts,
   the default wall stops tracking newly-added frames, or alignment features
   produce layout overlaps or throw unexpected error banners. A real bug
@@ -553,7 +558,9 @@ along the other axis rather than producing a collision error.
   2026 code-review test-coverage gap (issue #13) where only the drag half
   of this fix had a regression test — a second marquee-select start before
   the first ends no longer leaking a `.wall-marquee` box either,
-  `walls-default-and-collision.spec.js`,
+  `walls-default-and-collision.spec.js` (including temporary frame removal
+  without backend save, default wall layout reversion on reopen, and the
+  "Save as Custom Wall" inline offer banner),
   `walls-multiselect.spec.js` — including
   alignment auto-spacing and Align Wall to Grid logic,
   `walls-flow.spec.js`, `walls-scenes-merge.spec.js`,
@@ -561,9 +568,9 @@ along the other axis rather than producing a collision error.
   `walls-addon-album-lock.spec.js`) — but these exercise the frontend
   canvas/DOM logic against a mock server, not `WallManager` itself.
   **Backend-tested** — `tests/python/managers/test_walls.py` (custom wall
-  CRUD, default-wall auto-sync, tombstone survival across resync, entry
-  removal pruning, auto-layout collision math, no placement overlap after
-  removing and re-adding a frame around a full row boundary).
+  CRUD, default-wall auto-sync, clearing/ignoring exclusions, default-wall save
+  preserving omitted placements, entry removal pruning, auto-layout collision math,
+  no placement overlap after removing and re-adding a frame around a full row boundary).
 
 ## 20. Schedules: send a scene or image at a future/recurring time
 User schedules a one-shot or daily/weekly/monthly recurring send; missed
