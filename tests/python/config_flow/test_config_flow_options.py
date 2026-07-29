@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.digital_frames.const import (
+    CONF_FAST_POLL_WHEN_QUEUED,
     CONF_FRAME_ALWAYS_ON,
     CONF_FRAME_SLEEP_MINUTES,
     CONF_ORIENTATION,
@@ -44,10 +45,12 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     assert defaults["resolution"] == "13.3"
     assert defaults[CONF_FRAME_SLEEP_MINUTES] == 45
     assert defaults[CONF_FRAME_ALWAYS_ON] is True
+    assert defaults[CONF_FAST_POLL_WHEN_QUEUED] is False
     # Schema must expose both power controls for the UI / panel.
     field_names = {str(k) for k in schema}
     assert CONF_FRAME_SLEEP_MINUTES in field_names
     assert CONF_FRAME_ALWAYS_ON in field_names
+    assert CONF_FAST_POLL_WHEN_QUEUED in field_names
 
 
 async def test_size_unset_leaves_unset_option_available(hass, make_frame_entry):
@@ -69,6 +72,7 @@ async def test_save_backfills_size_into_entry_data(hass, make_frame_entry):
         result["flow_id"],
         {
             "scan_interval": 300,
+            CONF_FAST_POLL_WHEN_QUEUED: False,
             CONF_FRAME_SLEEP_MINUTES: 15,
             CONF_FRAME_ALWAYS_ON: False,
             "resolution": "13.3",
@@ -82,6 +86,7 @@ async def test_save_backfills_size_into_entry_data(hass, make_frame_entry):
     assert entry.data[CONF_SIZE] == "13.3"
     assert result["data"][CONF_FRAME_SLEEP_MINUTES] == 15
     assert result["data"][CONF_FRAME_ALWAYS_ON] is False
+    assert result["data"][CONF_FAST_POLL_WHEN_QUEUED] is False
 
 
 async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_entry):
@@ -93,6 +98,7 @@ async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_
         result["flow_id"],
         {
             "scan_interval": 600,
+            CONF_FAST_POLL_WHEN_QUEUED: True,
             CONF_FRAME_SLEEP_MINUTES: 20,
             CONF_FRAME_ALWAYS_ON: True,
             "resolution": "13.3",
@@ -108,6 +114,7 @@ async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_
     assert result["data"][CONF_ROTATE_LANDSCAPE_180] is True
     assert result["data"][CONF_FRAME_ALWAYS_ON] is True
     assert result["data"][CONF_FRAME_SLEEP_MINUTES] == 20
+    assert result["data"][CONF_FAST_POLL_WHEN_QUEUED] is True
 
 
 async def test_scan_interval_below_minimum_rejected(hass, make_frame_entry):

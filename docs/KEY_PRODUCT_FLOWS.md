@@ -110,22 +110,46 @@ waiting for the next sleep cycle. If push fails because the frame is
 asleep, the staged pull payload is enough — success is reported as
 `delivery: pull` / `queued: true` rather than "lost send".
 
+**Wake / flush triggers (after a send was queued while the frame slept):**
+1. **Network presence (default path for push-on-wake):** the coordinator
+   finds a matching `device_tracker.*` by frame IP or MAC (UniFi Network,
+   Omada, ASUSWRT, or any other HA network-presence integration — not
+   UniFi-specific) and, on `not_home` → `home`, calls
+   `_async_flush_pending_send`. No accelerated probing of the frame.
+2. **Successful normal status poll** at the user's `scan_interval` (default
+   5 minutes) while something is still pending — opportunistic only, not a
+   wake hunt.
+3. **Advanced option `fast_poll_when_queued` (default off):** while a send
+   is queued, poll the frame every 30s until it answers. Intended for
+   installs with no network device tracker. Exposed under Advanced Settings
+   in the frame options UI.
+
 Image upload timeout for the push path still comes from the panel profile
 (`FrameType.send_timeout_s` / `send_timeout_for_entry`) — default 240s for
 slow ESP32 sequential panels (7.3").
 
 - **Entry points**: `coordinator.py` (`async_send_image_or_queue`,
   `async_stage_pull_bin`, `async_provision_frame_pull`, `async_send_image`,
-  `_async_flush_pending_send`, `async_clear_pull_bin`), `http_api.DigitalFramesFramePullBinView`,
-  `frame_types.send_timeout_for_entry`; clone firmware
+  `_async_flush_pending_send`, `async_clear_pull_bin`,
+  `async_setup_tracker_watch`, `async_teardown_tracker_watch`,
+  `_async_tracker_state_changed`), `http_api.DigitalFramesFramePullBinView`,
+  `frame_types.send_timeout_for_entry`, options
+  `const.CONF_FAST_POLL_WHEN_QUEUED`; clone firmware
   (`fraimic-clone-7.3in`) `POST /pullurl`, `POST /sleepconfig`, pull-on-wake.
 - **If it silently breaks**: sleeping frames never update; pull URL not
   provisioned; always-on ignored; HA "send" claims success but nothing is
-  staged under `digital_frames_cache/pull/`; or the staged bin is never cleared, causing the frame to repeatedly download and redraw the same image on every wake.
+  staged under `digital_frames_cache/pull/`; the staged bin is never cleared,
+  causing the frame to repeatedly download and redraw the same image on every
+  wake; or push-on-wake never fires because no `device_tracker` matches and
+  fast poll is off (clone pull still works; push-only frames wait for a
+  successful normal poll or manual wake).
 - **Test status**: **Backend-tested** —
   `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (online
-  push+pull, offline stage-for-pull, provision always_on flag, token URL
-  shape, pull-only pending flush, pull view cleanup on get).
+  push+pull, offline stage-for-pull, default no fast poll, optional fast
+  poll, provision always_on flag, token URL shape, pull-only pending flush,
+  pull view cleanup on get),
+  `tests/python/coordinator/test_coordinator_device_tracker.py` (IP/MAC
+  match, home transition flushes, teardown).
 
 ## 4b. Frame power options (sleep interval + always-on)
 User-facing controls on the frame's **Configure / options** form and the

@@ -32,6 +32,12 @@ DEFAULT_FRAME_SLEEP_MINUTES = 15
 CONF_FRAME_ALWAYS_ON = "frame_always_on"
 DEFAULT_FRAME_ALWAYS_ON = False
 
+# Advanced: while a send is queued, poll the frame every 30s until it
+# answers (wake hunt). Off by default — prefer network device_tracker
+# (UniFi / Omada / ASUSWRT / etc.) coming home to flush the queue.
+CONF_FAST_POLL_WHEN_QUEUED = "fast_poll_when_queued"
+DEFAULT_FAST_POLL_WHEN_QUEUED = False
+
 DEFAULT_PORT = 80
 
 # API endpoints

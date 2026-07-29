@@ -15,8 +15,11 @@ from urllib.parse import urlencode
 
 import aiohttp
 
+from homeassistant.const import STATE_HOME
+from homeassistant.core import Event, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -27,11 +30,13 @@ from .const import (
     API_INFO,
     CACHE_DIRNAME,
     CONF_DEVICE_KEY,
+    CONF_FAST_POLL_WHEN_QUEUED,
     CONF_FRAME_ALWAYS_ON,
     CONF_FRAME_SLEEP_MINUTES,
     CONF_HOST,
     CONF_MAC,
     CONF_PULL_TOKEN,
+    DEFAULT_FAST_POLL_WHEN_QUEUED,
     DEFAULT_FRAME_ALWAYS_ON,
     DEFAULT_FRAME_SLEEP_MINUTES,
     DEFAULT_SCAN_INTERVAL,
@@ -79,14 +84,18 @@ _PENDING_STORE_VERSION = 1
 # it forever.
 _PENDING_SCHEMA = 2
 
-# While a send is queued, poll much more often than the user's configured
-# scan_interval so a frame that wakes gets its image promptly instead of
-# waiting up to the full (default 5 minute) interval. Fraimic frames have no
-# documented wake-schedule/next-wake-time API to plan around instead -- the
-# official REST API guide says a sleeping frame is "completely unreachable"
-# until physically tapped -- so opportunistic polling is the only mechanism
-# available.
+# Optional "wake hunt" while a send is queued (advanced option
+# CONF_FAST_POLL_WHEN_QUEUED). Default path is network device_tracker
+# presence (UniFi / other router integrations) plus normal scan_interval —
+# not accelerated frame probing.
 _FAST_POLL_INTERVAL = timedelta(seconds=30)
+
+
+def _normalize_mac(mac: str | None) -> str:
+    """Return lowercase MAC with separators stripped, or empty if unusable."""
+    if not mac:
+        return ""
+    return "".join(c for c in str(mac).lower() if c.isalnum())
 
 
 class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -162,6 +171,136 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass, _PENDING_STORE_VERSION, f"{DOMAIN}_pending_send_{config_entry.entry_id}"
         )
         self._flushing: bool = False
+
+        # Network presence (any device_tracker that matches this frame's IP
+        # or MAC — UniFi, Omada, ASUSWRT, etc.). Coming home flushes a
+        # queued send without accelerated frame polling.
+        self._tracker_entity_id: str | None = None
+        self._unsub_tracker = None
+
+    def fast_poll_when_queued(self) -> bool:
+        """True when the advanced wake-hunt poll is enabled in options."""
+        return bool(
+            self.config_entry.options.get(
+                CONF_FAST_POLL_WHEN_QUEUED, DEFAULT_FAST_POLL_WHEN_QUEUED
+            )
+        )
+
+    def _apply_pending_poll_interval(self) -> None:
+        """Set coordinator interval for current pending + options state.
+
+        Default: never accelerate. Advanced option only: 30s while queued.
+        """
+        if self.pending_send is not None and self.fast_poll_when_queued():
+            self.update_interval = _FAST_POLL_INTERVAL
+        else:
+            self.update_interval = self._normal_update_interval
+
+    # ------------------------------------------------------------------
+    # Network device_tracker wake signal (vendor-agnostic)
+    # ------------------------------------------------------------------
+
+    def _find_matching_device_tracker(self) -> str | None:
+        """Return entity_id of a device_tracker matching this frame's IP/MAC.
+
+        Prefer IP (host) match; fall back to normalised MAC. Returns None
+        when no network-presence integration tracks this client.
+        """
+        host = (self.host or "").strip()
+        entry_mac = _normalize_mac(self.config_entry.data.get(CONF_MAC))
+
+        for state in self.hass.states.async_all("device_tracker"):
+            attrs = state.attributes or {}
+            ip = (
+                attrs.get("ip")
+                or attrs.get("ip_address")
+                or attrs.get("host")
+                or ""
+            )
+            if host and str(ip).strip() == host:
+                return state.entity_id
+
+            mac = _normalize_mac(attrs.get("mac") or attrs.get("mac_address"))
+            # Some integrations only expose the MAC in the entity object_id
+            # (e.g. device_tracker.aa_bb_cc_dd_ee_ff).
+            if not mac:
+                mac = _normalize_mac(
+                    state.entity_id.removeprefix("device_tracker.").replace("_", "")
+                )
+            if entry_mac and mac and mac == entry_mac:
+                return state.entity_id
+        return None
+
+    def async_setup_tracker_watch(self) -> None:
+        """Subscribe to a matching device_tracker coming home.
+
+        Safe to call repeatedly: re-resolves the entity if IP/MAC changed or
+        the tracker appeared after startup (UniFi loading late).
+        """
+        entity_id = self._find_matching_device_tracker()
+        if entity_id == self._tracker_entity_id and self._unsub_tracker is not None:
+            return
+
+        if self._unsub_tracker is not None:
+            self._unsub_tracker()
+            self._unsub_tracker = None
+            self._tracker_entity_id = None
+
+        if not entity_id:
+            _LOGGER.debug(
+                "No device_tracker match for frame %s (host=%s mac=%s); "
+                "wake push relies on pull delivery, normal status poll, or "
+                "advanced fast_poll_when_queued",
+                self.config_entry.entry_id,
+                self.host,
+                self.config_entry.data.get(CONF_MAC) or "",
+            )
+            return
+
+        self._tracker_entity_id = entity_id
+        self._unsub_tracker = async_track_state_change_event(
+            self.hass, [entity_id], self._async_tracker_state_changed
+        )
+        _LOGGER.info(
+            "Watching %s for frame %s wake (flush pending send on home)",
+            entity_id,
+            self.host,
+        )
+
+        # Already home with a queue (restart, late bind): flush now.
+        state = self.hass.states.get(entity_id)
+        if (
+            state is not None
+            and state.state == STATE_HOME
+            and self.pending_send is not None
+            and not self._flushing
+        ):
+            self.hass.async_create_task(self._async_flush_pending_send())
+
+    def async_teardown_tracker_watch(self) -> None:
+        """Cancel device_tracker subscription."""
+        if self._unsub_tracker is not None:
+            self._unsub_tracker()
+            self._unsub_tracker = None
+        self._tracker_entity_id = None
+
+    @callback
+    def _async_tracker_state_changed(self, event: Event) -> None:
+        """On not_home → home, push any staged image."""
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if new_state is None or new_state.state != STATE_HOME:
+            return
+        if old_state is not None and old_state.state == STATE_HOME:
+            return
+        if self.pending_send is None or self._flushing:
+            return
+        _LOGGER.info(
+            "Frame %s network presence home (%s); flushing pending send",
+            self.host,
+            self._tracker_entity_id,
+        )
+        self.hass.async_create_task(self._async_flush_pending_send())
 
     async def async_load_last_image(self) -> None:
         """Hydrate last_image_id/last_thumbnail from disk. Call this once
@@ -445,11 +584,15 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._pending_store.async_save(None)
             return
         self.pending_send = data
-        self.update_interval = _FAST_POLL_INTERVAL
+        self._apply_pending_poll_interval()
+        # Late-bound trackers (UniFi after HA start): re-resolve on hydrate.
+        self.async_setup_tracker_watch()
 
     async def _set_pending(self, payload: dict[str, Any]) -> None:
         self.pending_send = payload
-        self.update_interval = _FAST_POLL_INTERVAL
+        self._apply_pending_poll_interval()
+        # Tracker may have appeared since setup (or host/MAC changed).
+        self.async_setup_tracker_watch()
         await self._pending_store.async_save(payload)
         self.async_update_listeners()
 
@@ -460,7 +603,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.pending_send is None or self.pending_send.get("token") != token:
             return
         self.pending_send = None
-        self.update_interval = self._normal_update_interval
+        self._apply_pending_poll_interval()
         await self._pending_store.async_save(None)
         self.async_update_listeners()
 
@@ -479,7 +622,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self.pending_send is not None:
             self.pending_send = None
-            self.update_interval = self._normal_update_interval
+            self._apply_pending_poll_interval()
             await self._pending_store.async_save(None)
             self.async_update_listeners()
 
@@ -941,13 +1084,15 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._consecutive_failures = 0
             await self.async_request_refresh()
 
-        # Scan interval (HA poll while online)
+        # Scan interval (HA poll while online) + optional fast-poll-when-queued.
         scan_seconds: int = entry.options.get(
             "scan_interval", DEFAULT_SCAN_INTERVAL
         )
         self._normal_update_interval = timedelta(seconds=scan_seconds)
-        if self.pending_send is None:
-            self.update_interval = self._normal_update_interval
+        self._apply_pending_poll_interval()
+
+        # Host/MAC may have changed (DHCP); rebind network presence watch.
+        self.async_setup_tracker_watch()
 
         # Push new sleep period + pull URL to the frame if it happens to be up.
         # If asleep, the next successful poll/flush will re-provision.

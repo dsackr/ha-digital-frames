@@ -16,6 +16,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_DEVICE_KEY,
     CONF_DRIVER,
+    CONF_FAST_POLL_WHEN_QUEUED,
     CONF_FRAME_ALWAYS_ON,
     CONF_FRAME_SLEEP_MINUTES,
     CONF_HEIGHT,
@@ -27,6 +28,7 @@ from .const import (
     CONF_NAME,
     CONF_SIZE,
     CONF_WIDTH,
+    DEFAULT_FAST_POLL_WHEN_QUEUED,
     DEFAULT_FRAME_ALWAYS_ON,
     DEFAULT_FRAME_SLEEP_MINUTES,
     DEFAULT_SCAN_INTERVAL,
@@ -730,6 +732,11 @@ class DigitalFramesOptionsFlow(OptionsFlow):
                 CONF_FRAME_ALWAYS_ON, DEFAULT_FRAME_ALWAYS_ON
             )
         )
+        current_fast_poll: bool = bool(
+            self.config_entry.options.get(
+                CONF_FAST_POLL_WHEN_QUEUED, DEFAULT_FAST_POLL_WHEN_QUEUED
+            )
+        )
         current_size: str | None = self.config_entry.data.get(CONF_SIZE)
         current_edge: str = self.config_entry.options.get(
             CONF_ROTATION_EDGE, EDGE_LEFT
@@ -793,6 +800,11 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         ] = vol.All(int, vol.Range(min=30))
 
         if not is_meural:
+            # Advanced: 30s wake-hunt while a send is queued. Default off —
+            # prefer network device_tracker (UniFi etc.) for push-on-wake.
+            schema_dict[
+                vol.Optional(CONF_FAST_POLL_WHEN_QUEUED, default=current_fast_poll)
+            ] = bool
             schema_dict[
                 vol.Optional(CONF_RESOLUTION, default=current_size or "")
             ] = vol.In(size_options)

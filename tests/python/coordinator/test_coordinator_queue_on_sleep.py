@@ -87,6 +87,25 @@ async def test_offline_frame_stages_pull_and_reports_queued(coordinator, aioclie
     assert coordinator.get_pull_bin(coordinator.pull_token) == b"binary-image-data"
     from custom_components.digital_frames.coordinator import _FAST_POLL_INTERVAL
 
+    # Default: no accelerated frame poll while queued.
+    assert coordinator.update_interval == coordinator._normal_update_interval
+    assert coordinator.update_interval != _FAST_POLL_INTERVAL
+
+
+async def test_offline_frame_fast_poll_when_option_enabled(
+    hass, make_coordinator, make_frame_entry, aioclient_mock
+):
+    """Advanced option: 30s wake-hunt only when user enables it."""
+    from custom_components.digital_frames.const import CONF_FAST_POLL_WHEN_QUEUED
+    from custom_components.digital_frames.coordinator import _FAST_POLL_INTERVAL
+
+    entry = make_frame_entry(options={CONF_FAST_POLL_WHEN_QUEUED: True})
+    coordinator = make_coordinator(entry)
+    _mock_offline_frame(aioclient_mock, coordinator.host)
+
+    result = await coordinator.async_send_image_or_queue(b"data", image_id="img1")
+
+    assert result["queued"] is True
     assert coordinator.update_interval == _FAST_POLL_INTERVAL
 
 
@@ -122,8 +141,9 @@ async def test_timeout_but_frame_answers_probe_is_not_requeued(
     assert coordinator.last_image_id == "img1"
     from custom_components.digital_frames.coordinator import _FAST_POLL_INTERVAL
 
-    # No stuck fast-poll for a completed (unconfirmed) delivery.
-    assert coordinator.pending_send is None or coordinator.update_interval != _FAST_POLL_INTERVAL
+    # Completed (unconfirmed) delivery must not enable wake-hunt interval.
+    assert coordinator.pending_send is None
+    assert coordinator.update_interval != _FAST_POLL_INTERVAL
 
 
 async def test_rejected_push_still_succeeds_via_staged_pull(
@@ -188,7 +208,9 @@ async def test_restart_mid_queue_is_hydrated_from_store(
     assert coordinator.pending_send["image_id"] == "img-restart"
     from custom_components.digital_frames.coordinator import _FAST_POLL_INTERVAL
 
-    assert coordinator.update_interval == _FAST_POLL_INTERVAL
+    # Default: queued send does not accelerate frame polling.
+    assert coordinator.update_interval == coordinator._normal_update_interval
+    assert coordinator.update_interval != _FAST_POLL_INTERVAL
 
 
 async def test_stale_schema_payload_is_discarded_on_load(

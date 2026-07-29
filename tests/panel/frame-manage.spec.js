@@ -316,13 +316,20 @@ test.describe('Frame management and discovery banner', () => {
     });
     expect(isResolutionVisible).toBe(true);
 
-    // Assert scan_interval and rotation_edge are hidden initially
-    const isScanIntervalVisibleBefore = await page.evaluate(() => {
+    // Assert advanced fields (scan_interval, fast_poll_when_queued) hidden initially
+    const advancedHiddenBefore = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const el = root.getElementById('flow-field-scan_interval');
-      return el && el.offsetParent !== null;
+      const scan = root.getElementById('flow-field-scan_interval');
+      const fast = root.getElementById('flow-field-fast_poll_when_queued');
+      return {
+        scan: !!(scan && scan.offsetParent !== null),
+        fast: !!(fast && fast.offsetParent !== null),
+        fastExists: !!fast,
+      };
     });
-    expect(isScanIntervalVisibleBefore).toBe(false);
+    expect(advancedHiddenBefore.scan).toBe(false);
+    expect(advancedHiddenBefore.fast).toBe(false);
+    expect(advancedHiddenBefore.fastExists).toBe(true);
 
     // Click the Advanced Settings link to expand it
     await page.evaluate(() => {
@@ -331,13 +338,18 @@ test.describe('Frame management and discovery banner', () => {
       toggle.click();
     });
 
-    // Assert scan_interval and rotation_edge are visible after clicking toggle
-    const isScanIntervalVisibleAfter = await page.evaluate(() => {
+    // Assert advanced wake-hunt + poll fields are visible after clicking toggle
+    const advancedVisibleAfter = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const el = root.getElementById('flow-field-scan_interval');
-      return el && el.offsetParent !== null;
+      const scan = root.getElementById('flow-field-scan_interval');
+      const fast = root.getElementById('flow-field-fast_poll_when_queued');
+      return {
+        scan: !!(scan && scan.offsetParent !== null),
+        fast: !!(fast && fast.offsetParent !== null),
+      };
     });
-    expect(isScanIntervalVisibleAfter).toBe(true);
+    expect(advancedVisibleAfter.scan).toBe(true);
+    expect(advancedVisibleAfter.fast).toBe(true);
   });
 
   test('configure options flow modal → reconnect and remove actions inside advanced options work', async ({ page }) => {

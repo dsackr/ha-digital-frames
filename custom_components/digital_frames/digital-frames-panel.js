@@ -4109,7 +4109,11 @@
           'rotate_portrait_180',
           'rotate_landscape_180',
         ];
-        const advancedNames = new Set(['scan_interval', 'rotation_edge']);
+        const advancedNames = new Set([
+          'scan_interval',
+          'fast_poll_when_queued',
+          'rotation_edge',
+        ]);
         const fields = [...(result.data_schema || [])];
         fields.sort((a, b) => {
           const ai = standardOrder.indexOf(a.name);

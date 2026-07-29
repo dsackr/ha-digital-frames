@@ -198,6 +198,7 @@ test.describe('Embedded flow renderer', () => {
       expect.objectContaining({ name: 'rotate_portrait_180', type: 'boolean', inputType: 'checkbox', value: false }),
       expect.objectContaining({ name: 'rotate_landscape_180', type: 'boolean', value: false }),
       expect.objectContaining({ name: 'scan_interval', type: 'integer', inputType: 'number', value: '300', min: '30' }),
+      expect.objectContaining({ name: 'fast_poll_when_queued', type: 'boolean', value: false }),
       expect.objectContaining({ name: 'rotation_edge', type: 'select', value: 'left' }),
     ]);
 
@@ -213,6 +214,7 @@ test.describe('Embedded flow renderer', () => {
       frame_sleep_minutes: 15,
       resolution: '13.3',
       scan_interval: 120,
+      fast_poll_when_queued: false,
       rotation_edge: 'right',
       rotate_portrait_180: true,
       rotate_landscape_180: false,

@@ -516,6 +516,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     if isinstance(coordinator, DigitalFramesCoordinator):
         hass.async_create_task(coordinator.async_provision_frame_pull())
 
+        # Network device_tracker wake → flush pending push (UniFi et al.).
+        # Defer until HA is fully started so router integrations have created
+        # their entities; also re-run immediately if already running.
+        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED  # noqa: PLC0415
+
+        def _bind_tracker(_event=None) -> None:
+            coordinator.async_setup_tracker_watch()
+
+        if hass.is_running:
+            _bind_tracker()
+        else:
+            entry.async_on_unload(
+                hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _bind_tracker)
+            )
+        entry.async_on_unload(coordinator.async_teardown_tracker_watch)
+
     # Every configured frame is guaranteed a spot on the default wall --
     # this hook covers embedded adds, discovery adds, and plain restarts.
     wall_manager = hass.data[DOMAIN].get("_walls")

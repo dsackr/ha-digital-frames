@@ -199,6 +199,7 @@ function createMockServer({
       data_schema: [
         { name: 'resolution', type: 'select', optional: true, default: '13.3', options: [['13.3', '13.3 inch e-ink'], ['7.3', '7.3 inch e-ink']] },
         { name: 'scan_interval', type: 'integer', valueMin: 30, optional: true, default: 300 },
+        { name: 'fast_poll_when_queued', type: 'boolean', optional: true, default: false },
         { name: 'rotation_edge', type: 'select', optional: true, default: 'left', options: [['left', 'Left edge up (Fraimic default)'], ['right', 'Right edge up']] },
         { name: 'rotate_portrait_180', type: 'boolean', optional: true, default: false },
         { name: 'rotate_landscape_180', type: 'boolean', optional: true, default: false },
