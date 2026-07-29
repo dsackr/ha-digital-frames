@@ -72,7 +72,7 @@ class DigitalFramesFramePullBinView(HomeAssistantView):
             body = getter(token)
             if body is not None:
                 if hasattr(coord, "async_clear_pull_bin"):
-                    hass.async_create_task(coord.async_clear_pull_bin())
+                    hass.async_create_task(coord.async_clear_pull_bin(delay=15))
                 return web.Response(
                     body=body,
                     content_type="application/octet-stream",

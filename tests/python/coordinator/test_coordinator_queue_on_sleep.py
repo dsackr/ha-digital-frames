@@ -281,15 +281,17 @@ async def test_pull_bin_view_clears_bin_on_get(coordinator, hass):
     mock_request = MagicMock()
     mock_request.app = mock_app
 
+    from unittest.mock import AsyncMock, patch
+
     # 3. Call the GET view
     view = DigitalFramesFramePullBinView()
-    response = await view.get(mock_request, token)
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        response = await view.get(mock_request, token)
+        # 4. Wait for background task to complete clearing
+        await hass.async_block_till_done()
 
     assert response.status == 200
     assert response.body == b"binary-image-data"
-
-    # 4. Wait for background task to complete clearing
-    await hass.async_block_till_done()
 
     # 5. Verify it is now cleared
     assert coordinator.get_pull_bin(token) is None

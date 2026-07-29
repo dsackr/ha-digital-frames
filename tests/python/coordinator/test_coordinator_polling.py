@@ -233,3 +233,43 @@ async def test_accelerometer_polling_sensor_not_available(hass, coordinator, aio
 
 async def _noop(*args, **kwargs):
     return None
+
+
+async def test_successful_poll_parses_info_page_settings(hass, coordinator, aioclient_mock):
+    # Mock /api/info
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 1200, "height": 1600},
+    )
+    # Mock /info HTML
+    aioclient_mock.get(
+        f"http://{coordinator.host}/info",
+        text=(
+            "<html><body>"
+            "<span class='info-label'>Device Type</span><span class='info-value'>13.3\" E-Ink</span>"
+            "<span class='info-label'>Keep Awake</span><span class='info-value'>Yes</span>"
+            "<span class='info-label'>Sleep Minutes</span><span class='info-value'>25</span>"
+            "</body></html>"
+        ),
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["keep_awake_actual"] is True
+    assert data["sleep_minutes_actual"] == 25
+
+
+async def test_successful_poll_handles_info_page_failure(hass, coordinator, aioclient_mock):
+    # Mock /api/info
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 1200, "height": 1600},
+    )
+    # Mock /info HTML failing
+    aioclient_mock.get(
+        f"http://{coordinator.host}/info",
+        status=404,
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["keep_awake_actual"] is None
+    assert data["sleep_minutes_actual"] is None

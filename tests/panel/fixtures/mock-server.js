@@ -202,6 +202,8 @@ function createMockServer({
         { name: 'rotation_edge', type: 'select', optional: true, default: 'left', options: [['left', 'Left edge up (Fraimic default)'], ['right', 'Right edge up']] },
         { name: 'rotate_portrait_180', type: 'boolean', optional: true, default: false },
         { name: 'rotate_landscape_180', type: 'boolean', optional: true, default: false },
+        { name: 'frame_always_on', type: 'boolean', optional: true, default: false },
+        { name: 'frame_sleep_minutes', type: 'integer', valueMin: 1, valueMax: 1440, optional: true, default: 15 },
       ],
       errors: {}, description_placeholders: null, last_step: true,
     }),

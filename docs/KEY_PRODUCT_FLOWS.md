@@ -129,7 +129,13 @@ slow ESP32 sequential panels (7.3").
 
 ## 4b. Frame power options (sleep interval + always-on)
 User-facing controls on the frame's **Configure / options** form and the
-Digital Frames panel frame-settings flow (standard fields, not Advanced):
+Digital Frames panel frame-settings flow (standard fields, not Advanced).
+
+For official Fraimic hardware (which does not honor deep sleep settings),
+these controls are disabled/greyed out. For clones, they are fully editable.
+The actual keep-awake setting currently active on the frame is parsed from
+its HTML `/info` page during successful polls and displayed in the Frame
+Information popup.
 
 | Option key | UI label (en) | Meaning |
 |---|---|---|
@@ -144,13 +150,19 @@ successful online provision applies them.
 - **Entry points**: `config_flow.DigitalFramesOptionsFlow`,
   `const.CONF_FRAME_ALWAYS_ON` / `CONF_FRAME_SLEEP_MINUTES`,
   `coordinator.async_provision_frame_pull`,
-  `digital-frames-panel.js` (standard field order),
+  `helpers.parse_keep_awake_from_html` / `helpers.parse_sleep_minutes_from_html`,
+  `digital-frames-panel.js` (standard field order, field disabling/greying),
   `strings.json` / `translations/en.json`.
 - **If it silently breaks**: users cannot set sleep cadence; always-on
-  never reaches the device; panel hides the field under Advanced only.
+  never reaches the device; panel hides the field under Advanced only; official
+  fraimics let users change options that won't work on the hardware.
 - **Test status**: **Backend-tested** —
   `tests/python/config_flow/test_config_flow_options.py` (schema exposes
-  both keys, defaults, save round-trip, validation).
+  both keys, defaults, save round-trip, validation),
+  `tests/python/unit/test_helpers_info.py` (HTML parsers for keep-awake),
+  `tests/python/coordinator/test_coordinator_polling.py` (coordinator parses and updates settings).
+  **Frontend-tested** —
+  `tests/panel/frame-manage.spec.js` (greying out options for official Fraimic, displaying actual status in settings popup).
 
 ## 4c. Spectra 6 color test pattern (built-in library asset)
 On integration load, Digital Frames seeds a **six-box Spectra E6 color test**
@@ -605,13 +617,17 @@ immediate coordinator poll via `POST /api/digital_frames/frame/poll_orientation`
 instead of waiting for the next scheduled poll (up to `scan_interval`) --
 since it's a device read rather than a user edit, that one action always
 takes effect immediately, never staged.
+The IP address display includes an external link icon opening the frame's UI
+(`http://[ip]/portal` for Fraimics/clones, `http://[ip]/remote` for Meurals).
+The actual keep-awake status parsed from the frame's HTML `/info` page is
+displayed if available.
 - **Entry points**: `sensor.py` (all `Fraimic*Sensor` classes), `select.py`
   (`DigitalFramesOrientationSelect`, `MeuralOrientationSelect`), `camera.py` (`DigitalFramesCamera`);
   `digital-frames-panel.js` (`_openFrameSettingsMenu`, `_renderFrameOrientationDisplay`,
   `_stageFrameOrientation`, `_pollFrameOrientation`, the `frame-settings-save` click handler);
   `library_http.py` (`DigitalFramesFramePollOrientationView`).
-- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, the camera entity fails to load or serve the active frame image, orientation icons jump around as the label text changes length, an orientation click auto-applies without a Save Changes step (or Save Changes silently drops a staged orientation change), or Rediscover does nothing / leaves the frame's displayed orientation stale.
-- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`, `tests/python/library/test_library_http_frame_poll_orientation.py` (poll_orientation endpoint forces a refresh, 404s on unknown entry, 400s on missing entry_id). **Panel-tested** — `tests/panel/frame-manage.spec.js` (orientation lock staged locally and only applied on Save Changes; icons stay in a fixed position regardless of label length; Rediscover polls immediately without staging/saving).
+- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, the camera entity fails to load or serve the active frame image, orientation icons jump around as the label text changes length, an orientation click auto-applies without a Save Changes step (or Save Changes silently drops a staged orientation change), Rediscover does nothing / leaves the frame's displayed orientation stale, or the external link icon or actual keep-awake status is missing or incorrect.
+- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`, `tests/python/library/test_library_http_frame_poll_orientation.py` (poll_orientation endpoint forces a refresh, 404s on unknown entry, 400s on missing entry_id). **Panel-tested** — `tests/panel/frame-manage.spec.js` (orientation lock staged locally and only applied on Save Changes; icons stay in a fixed position regardless of label length; Rediscover polls immediately without staging/saving; UI link icon matches the frame's type and IP; Keep Awake actual status displayed).
 
 ## 22. Render spec resolution (orientation lock + rotation + hanging edge)
 Central "how should this image be composed for this frame" resolution —

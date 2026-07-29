@@ -9,8 +9,8 @@ const { createMockServer } = require('./fixtures/mock-server');
 const { gotoPanel, clickPanelButton, clickWallTileQuadrant } = require('./fixtures/panel-page');
 
 const FRAMES = [
-  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10', orientation_entity_id: 'select.entry_1_orientation', orientation_locked: false, device_orientation: 'portrait' },
-  { entry_id: 'entry_2', title: 'Office Frame', width: 800, height: 480, orientation: 'landscape', host: '192.168.1.20' },
+  { entry_id: 'entry_1', title: 'Living Room Frame', width: 1200, height: 1600, orientation: 'portrait', host: '192.168.1.10', orientation_entity_id: 'select.entry_1_orientation', orientation_locked: false, device_orientation: 'portrait', driver: 'fraimic', origin: 'official', keep_awake_actual: true, sleep_minutes_actual: 25 },
+  { entry_id: 'entry_2', title: 'Office Frame', width: 800, height: 480, orientation: 'landscape', host: '192.168.1.20', driver: 'meural', origin: 'meural' },
 ];
 
 const DISCOVERED_FLOW = {
@@ -557,5 +557,78 @@ test.describe('Frame management: hover overlay quadrants (real mouse input)', ()
     }, 'entry_1');
     expect(state.stillPlaced).toBe(false);
     expect(state.pickerOpen).toBe(false);
+  });
+
+  test('info overlay → shows UI link icon next to IP Address and Keep Awake status', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openInfoFor(page, 'entry_1');
+
+    const infoState = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const uiLink = root.getElementById('frame-ui-link');
+      const keepAwakeRow = root.getElementById('frame-info-keep-awake-row');
+      const keepAwakeVal = root.getElementById('frame-info-keep-awake');
+      return {
+        uiLinkVisible: uiLink.style.display !== 'none',
+        uiLinkHref: uiLink.href,
+        keepAwakeVisible: keepAwakeRow.style.display === 'flex',
+        keepAwakeText: keepAwakeVal.textContent,
+      };
+    });
+
+    expect(infoState.uiLinkVisible).toBe(true);
+    expect(infoState.uiLinkHref).toBe('http://192.168.1.10/portal');
+    expect(infoState.keepAwakeVisible).toBe(true);
+    expect(infoState.keepAwakeText).toBe('Yes (Sleep: 25m)');
+  });
+
+  test('info overlay → shows Meural UI link correctly', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openInfoFor(page, 'entry_2');
+
+    const infoState = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const uiLink = root.getElementById('frame-ui-link');
+      return {
+        uiLinkVisible: uiLink.style.display !== 'none',
+        uiLinkHref: uiLink.href,
+      };
+    });
+
+    expect(infoState.uiLinkVisible).toBe(true);
+    expect(infoState.uiLinkHref).toBe('http://192.168.1.20/remote');
+  });
+
+  test('configure options flow modal → greys out always_on and sleep_minutes for official Fraimic', async ({ page }) => {
+    await gotoPanel(page, baseUrl, { frames: FRAMES });
+    
+    // Open info settings first so _frameSettingsTarget is populated
+    await openInfoFor(page, 'entry_1');
+    
+    // Now trigger configure flow from panel
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      root.getElementById('frame-settings-close').click();
+    });
+    
+    await openConfigureFor(page, 'entry_1');
+
+    // Verify fields are disabled and greyed out
+    const fieldsState = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const alwaysOn = root.getElementById('flow-field-frame_always_on');
+      const sleepMin = root.getElementById('flow-field-frame_sleep_minutes');
+      return {
+        alwaysOnDisabled: alwaysOn.disabled,
+        alwaysOnOpacity: alwaysOn.closest('.modal-row').style.opacity,
+        sleepMinDisabled: sleepMin.disabled,
+        sleepMinOpacity: sleepMin.closest('.modal-row').style.opacity,
+      };
+    });
+
+    expect(fieldsState.alwaysOnDisabled).toBe(true);
+    expect(fieldsState.alwaysOnOpacity).toBe('0.5');
+    expect(fieldsState.sleepMinDisabled).toBe(true);
+    expect(fieldsState.sleepMinOpacity).toBe('0.5');
   });
 });

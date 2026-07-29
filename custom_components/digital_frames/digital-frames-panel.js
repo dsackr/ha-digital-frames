@@ -890,6 +890,24 @@
       background: var(--primary-color, #3b82f6);
       color: #fff;
     }
+    .frame-ui-link-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: var(--secondary-background-color, #f1f5f9);
+      color: var(--secondary-text-color);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .frame-ui-link-btn:hover {
+      background: var(--primary-color, #3b82f6);
+      color: #fff;
+    }
 
     /* ---- scene packs ---- */
     .pack-cover {
@@ -3237,9 +3255,18 @@
               <label>Name</label>
               <input type="text" id="frame-settings-name">
             </div>
-            <div class="modal-row">
+            <div class="modal-row" style="align-items:center">
               <label>IP Address</label>
-              <span id="frame-info-ip" style="color:var(--secondary-text-color)"></span>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span id="frame-info-ip" style="color:var(--secondary-text-color)"></span>
+                <a id="frame-ui-link" class="frame-ui-link-btn" href="#" target="_blank" title="Go to frame UI" style="display:none">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                </a>
+              </div>
             </div>
             <div class="modal-row" style="align-items:center">
               <label>Orientation</label>
@@ -3263,6 +3290,10 @@
             <div class="modal-row">
               <label>Battery</label>
               <span id="frame-info-battery" style="color:var(--secondary-text-color)"></span>
+            </div>
+            <div class="modal-row" id="frame-info-keep-awake-row" style="display:none">
+              <label>Keep Awake (Actual)</label>
+              <span id="frame-info-keep-awake" style="color:var(--secondary-text-color)"></span>
             </div>
             <div class="feedback" id="frame-settings-fb"></div>
             <div class="modal-actions" style="flex-wrap:wrap">
@@ -3621,6 +3652,8 @@
             frame.deviceOrientation = match.device_orientation;
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
+            frame.keepAwakeActual = match.keep_awake_actual;
+            frame.sleepMinutesActual = match.sleep_minutes_actual;
           }
         }
         // Also surface API-only frames WS missed (e.g. device config_entries gap).
@@ -3646,6 +3679,8 @@
             deviceOrientation: f.device_orientation,
             lastImageId: f.last_image_id,
             hasThumbnail: f.has_thumbnail,
+            keepAwakeActual: f.keep_awake_actual,
+            sleepMinutesActual: f.sleep_minutes_actual,
           });
         }
       } catch (err) {
@@ -3934,6 +3969,7 @@
     _closeFlowModal() {
       const modal = this._flowModal;
       this._flowModal = null;
+      this._frameSettingsTarget = null;
       this.shadowRoot.getElementById('flow-modal-overlay').style.display = 'none';
       if (modal && modal.userInitiated && modal.flowId && !modal.finished) {
         // Abandon the half-completed flow server-side, or it lingers in
@@ -4218,6 +4254,15 @@
           this._submitFlowStep();
         }
       });
+      if (this._frameSettingsTarget) {
+        const isOfficialFraimic = (this._frameSettingsTarget.driver === 'fraimic' || !this._frameSettingsTarget.driver)
+          && this._frameSettingsTarget.origin === 'official';
+        if (isOfficialFraimic && (field.name === 'frame_always_on' || field.name === 'frame_sleep_minutes')) {
+          input.disabled = true;
+          row.style.opacity = '0.5';
+          row.title = 'Not supported on official Fraimic hardware';
+        }
+      }
       row.appendChild(input);
 
       const hint = this._flowText(`${stepKey}.data_description.${field.name}`, '');
@@ -4740,6 +4785,33 @@
       this.shadowRoot.getElementById('frame-settings-name').value = frame.title;
 
       this.shadowRoot.getElementById('frame-info-ip').textContent = frame.host || 'Unknown';
+
+      const uiLink = this.shadowRoot.getElementById('frame-ui-link');
+      if (frame.host) {
+        if (frame.driver === 'meural') {
+          uiLink.href = `http://${frame.host}/remote`;
+          uiLink.style.display = 'inline-flex';
+        } else if (frame.driver === 'fraimic' || !frame.driver) {
+          uiLink.href = `http://${frame.host}/portal`;
+          uiLink.style.display = 'inline-flex';
+        } else {
+          uiLink.style.display = 'none';
+        }
+      } else {
+        uiLink.style.display = 'none';
+      }
+
+      const keepAwakeRow = this.shadowRoot.getElementById('frame-info-keep-awake-row');
+      const keepAwakeVal = this.shadowRoot.getElementById('frame-info-keep-awake');
+      if (frame.keepAwakeActual !== null && frame.keepAwakeActual !== undefined) {
+        keepAwakeVal.textContent = frame.keepAwakeActual ? 'Yes' : 'No';
+        if (frame.sleepMinutesActual !== null && frame.sleepMinutesActual !== undefined) {
+          keepAwakeVal.textContent += ` (Sleep: ${frame.sleepMinutesActual}m)`;
+        }
+        keepAwakeRow.style.display = 'flex';
+      } else {
+        keepAwakeRow.style.display = 'none';
+      }
 
       const orientBtns = this.shadowRoot.getElementById('frame-info-orientation-btns');
       this._renderFrameOrientationDisplay();

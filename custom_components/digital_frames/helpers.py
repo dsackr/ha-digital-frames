@@ -246,6 +246,36 @@ def get_local_ip() -> str:
             return s.getsockname()[0]
     except Exception:  # noqa: BLE001
         return "192.168.1.1"
+# Keep awake / always_on regex for /info page scraping
+_KEEP_AWAKE_RE = re.compile(
+    r"(Keep\s*Awake|Always\s*On|always_on)\s*</span>\s*<span[^>]*>\s*([^<]*?)\s*</span>",
+    re.IGNORECASE,
+)
+_SLEEP_MINUTES_RE = re.compile(
+    r"(Sleep\s*Minutes|Sleep\s*Duration|Sleep\s*Interval|Sleep\s*Period|Sleep)\s*</span>\s*<span[^>]*>\s*([^<]*?)\s*</span>",
+    re.IGNORECASE,
+)
+
+
+def parse_keep_awake_from_html(html: str) -> bool | None:
+    """Extract Keep Awake status from /info HTML."""
+    match = _KEEP_AWAKE_RE.search(html)
+    if not match:
+        return None
+    val = match.group(2).strip().lower()
+    return val in ("yes", "1", "true", "enabled", "on")
+
+
+def parse_sleep_minutes_from_html(html: str) -> int | None:
+    """Extract Sleep Minutes from /info HTML."""
+    match = _SLEEP_MINUTES_RE.search(html)
+    if not match:
+        return None
+    val = match.group(2).strip()
+    num_match = re.search(r"(\d+)", val)
+    if num_match:
+        return int(num_match.group(1))
+    return None
 
 
 def device_key_from_info(info: dict[str, Any]) -> str | None:

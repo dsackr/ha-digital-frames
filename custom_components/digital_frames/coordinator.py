@@ -464,8 +464,12 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._pending_store.async_save(None)
         self.async_update_listeners()
 
-    async def async_clear_pull_bin(self) -> None:
+    async def async_clear_pull_bin(self, delay: int = 0) -> None:
         """Clear staged bin and pending send queue once successfully delivered."""
+        if delay > 0:
+            import asyncio  # noqa: PLC0415
+
+            await asyncio.sleep(delay)
         self._staged_bin = None
         try:
             if self._pull_bin_path.is_file():
@@ -755,6 +759,36 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Opportunistic accelerometer poll
             device_orientation = await self._async_poll_accelerometer(session)
             data["device_orientation"] = device_orientation
+
+            # Get driver
+            driver = self.config_entry.data.get("driver") or "fraimic"
+
+            # Fetch /info admin page for fraimic family to reflect keep awake
+            keep_awake_actual = None
+            sleep_minutes_actual = None
+            if driver == "fraimic":
+                try:
+                    async with session.get(
+                        self._base_url("/info"), timeout=_REQUEST_TIMEOUT
+                    ) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            from .helpers import (  # noqa: PLC0415
+                                parse_keep_awake_from_html,
+                                parse_sleep_minutes_from_html,
+                            )
+
+                            keep_awake_actual = parse_keep_awake_from_html(html)
+                            sleep_minutes_actual = parse_sleep_minutes_from_html(html)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Could not fetch /info for actual sleep settings on %s: %s",
+                        self.host,
+                        err,
+                    )
+
+            data["keep_awake_actual"] = keep_awake_actual
+            data["sleep_minutes_actual"] = sleep_minutes_actual
 
             # If follow device or auto is enabled, update config options
             from .const import CONF_ORIENTATION, CONF_ORIENTATION_FOLLOW_DEVICE, ORIENTATION_AUTO, ORIENTATION_PORTRAIT, ORIENTATION_LANDSCAPE  # noqa: PLC0415

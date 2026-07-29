@@ -767,6 +767,22 @@ class DigitalFramesFramesView(HomeAssistantView):
                         "online": bool(
                             getattr(coordinator, "last_update_success", False)
                         ),
+                        "keep_awake_actual": (
+                            (coordinator.data or {}).get("keep_awake_actual")
+                            if coordinator is not None
+                            and isinstance(
+                                getattr(coordinator, "data", None), dict
+                            )
+                            else None
+                        ),
+                        "sleep_minutes_actual": (
+                            (coordinator.data or {}).get("sleep_minutes_actual")
+                            if coordinator is not None
+                            and isinstance(
+                                getattr(coordinator, "data", None), dict
+                            )
+                            else None
+                        ),
                         # Filled below for Meural after the loop if needed.
                         "meural_cloud_linked": False,
                         # Library image_id of the last Library/Scene send to
