@@ -769,7 +769,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if driver == "fraimic":
                 try:
                     async with session.get(
-                        self._base_url("/info"), timeout=_REQUEST_TIMEOUT
+                        self._base_url("/info"),
+                        timeout=aiohttp.ClientTimeout(total=5),
                     ) as resp:
                         if resp.status == 200:
                             html = await resp.text()
@@ -780,7 +781,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                             keep_awake_actual = parse_keep_awake_from_html(html)
                             sleep_minutes_actual = parse_sleep_minutes_from_html(html)
-                except Exception as err:  # noqa: BLE001
+                except (aiohttp.ClientError, TimeoutError, Exception) as err:  # noqa: BLE001
                     _LOGGER.debug(
                         "Could not fetch /info for actual sleep settings on %s: %s",
                         self.host,
