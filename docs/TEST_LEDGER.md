@@ -117,3 +117,4 @@ Notes on reading it:
 | 2026-07-28 | 2ee40b0 | panel-playwright | failure | 2 failed 159 passed | — | CI |
 | 2026-07-28 | 2ee40b0 | backend-pytest | success | 503 passed in 84.36s (0:01:24) | 66% | CI |
 | 2026-07-29 | df139a4 | panel-playwright | failure | 2 failed 160 passed | — | CI |
+| 2026-07-29 | df139a4 | backend-pytest | success | 504 passed in 82.40s (0:01:22) | 66% | CI |
