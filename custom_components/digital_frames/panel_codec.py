@@ -239,11 +239,13 @@ def encode_for_panel(
     pack_method: str = "fast",
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     codec_id: str | None = None,
+    dither: str = "atkinson",
 ) -> bytes:
     """Encode a source image into wire payload for a panel.
 
     *codec_id* selects Spectra vs JPEG. When omitted, resolved from
     resolution via the Fraimic FRAME_TYPES registry (Spectra panels only).
+    *dither* is Spectra-only: ``atkinson`` (default, Fraimic) or ``fs``.
 
     Positional-friendly signature so callers can pass this to
     ``hass.async_add_executor_job`` without kwargs (except trailing
@@ -291,6 +293,7 @@ def encode_for_panel(
             tuple(crop_box),
             rotation,
             pack_method,
+            dither,
         )
     return convert_image_bytes(
         source_bytes,
@@ -299,6 +302,7 @@ def encode_for_panel(
         rotation,
         locked,
         pack_method,
+        dither,
     )
 
 
@@ -310,6 +314,7 @@ def encode_for_panel_with_preview(
     locked: bool = False,
     codec_id: str | None = None,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    dither: str = "atkinson",
 ) -> tuple[bytes, bytes]:
     """Like :func:`encode_for_panel`, plus a small PNG of the composed image.
 
@@ -342,13 +347,13 @@ def encode_for_panel_with_preview(
         )
 
         return convert_image_bytes_cropped_with_preview(
-            source_bytes, width, height, tuple(crop_box), rotation
+            source_bytes, width, height, tuple(crop_box), rotation, "fast", dither
         )
 
     from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415
 
     return convert_image_bytes_with_preview(
-        source_bytes, width, height, rotation, locked
+        source_bytes, width, height, rotation, locked, dither
     )
 
 
@@ -459,10 +464,12 @@ def text_skill_payload_for_codec(
     if rotation:
         rotated_image = _decode_and_rotate()
         if rgb_png:
-            # Full photo/text pipeline (AA grays need match+FS).
-            p_image = _quantize_to_spectra6_p(rotated_image)
+            # Text/skill RGB (may include AA grays): Fraimic enhance + FS.
+            # FS here — skills re-encode on every render; full-panel Atkinson
+            # is reserved for photo/library sends (encode_for_panel default).
+            p_image = _quantize_to_spectra6_p(rotated_image, dither="fs")
         else:
-            # Already Spectra-packed: do not re-run vivid prepass / FS.
+            # Already Spectra-packed: do not re-run enhance / dither.
             p_image = _quantize_exact_real_world_p(rotated_image)
         spectra_bin = _pack_p_image_fast(p_image)
         rotated_image = p_image.convert("RGB")

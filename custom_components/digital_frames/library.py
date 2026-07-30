@@ -499,7 +499,7 @@ class LocalLibraryBackend(LibraryBackend):
         codec_id: str = "",
     ) -> str:
         # Phase 2: bin/<WxH[variant]>/<codec_id>/<COLOR_PIPELINE_ID>/<image_id>.bin
-        # so a color-pipeline upgrade (cp2 vivid quantize) misses old muted bins.
+        # so a color-pipeline upgrade (e.g. cp3 Fraimic-aligned) misses old bins.
         # Legacy (no codec_id): bin/<WxH[variant]>/<image_id>.bin
         image_id = _safe_image_id(image_id)
         res = _bin_res_key(width, height, variant)
@@ -591,7 +591,7 @@ class LocalLibraryBackend(LibraryBackend):
             if os.path.isfile(path):
                 with open(path, "rb") as f:
                     return f.read()
-            # Do not fall back to pre-cp2 / legacy paths for Spectra bins:
+            # Do not fall back to pre-pipeline / legacy paths for Spectra bins:
             # those were encoded with the older muted quantizer.
             return None
         path = self._bin_path(image_id, width, height, variant, "")
@@ -1090,7 +1090,7 @@ class DropboxLibraryBackend(LibraryBackend):
         codec_id: str = "",
     ) -> bytes | None:
         if codec_id:
-            # No fallback to pre-cp2 muted Spectra bins.
+            # No fallback to older COLOR_PIPELINE_ID Spectra bins.
             return await self._dropbox_download_bin(
                 self._bin_path(image_id, width, height, variant, codec_id)
             )

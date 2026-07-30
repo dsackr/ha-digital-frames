@@ -24,11 +24,15 @@ from custom_components.digital_frames.image_converter import (
 OFFICIAL_13_3 = FRAME_TYPES["13.3"].resolution  # (1200, 1600) split_half
 CLONE_7_3 = FRAME_TYPES["7.3"].resolution  # (800, 480) sequential
 
+# Full-panel Atkinson is intentional for production but slow in CI — packing
+# and geometry tests use FS; quality of Atkinson is covered separately.
+_FS = {"dither": "fs"}
+
 
 @pytest.mark.parametrize("width,height", [OFFICIAL_13_3, CLONE_7_3])
 def test_output_length_matches_4bpp_packing(sample_image_bytes, width, height):
     src = sample_image_bytes(400, 300)
-    out = convert_image_bytes(src, width, height)
+    out = convert_image_bytes(src, width, height, **_FS)
     assert len(out) == (width * height) // 2
 
 
@@ -60,7 +64,7 @@ def test_resize_cover_centered_fully_covers_canvas_no_white_edge_gap():
 def test_split_half_layout_is_two_equal_halves_left_then_right(sample_image_bytes, pack_method):
     width, height = OFFICIAL_13_3
     src = sample_image_bytes(width, height)
-    out = convert_image_bytes(src, width, height, pack_method=pack_method)
+    out = convert_image_bytes(src, width, height, pack_method=pack_method, **_FS)
     half_bytes = len(out) // 2
     assert len(out) == half_bytes * 2
     # Split-half packs ALL left-half bytes first, then ALL right-half bytes
@@ -72,17 +76,22 @@ def test_split_half_layout_is_two_equal_halves_left_then_right(sample_image_byte
 def test_fast_and_legacy_packers_are_byte_identical(sample_image_bytes):
     # scripts/verify_packing.py asserts this manually against real photos;
     # this pins the same invariant in CI for every registered resolution.
+    # Use dither=fs so CI stays fast (packing path only, not dither quality).
     for width, height in {ft.resolution for ft in FRAME_TYPES.values()}:
         src = sample_image_bytes(width, height, color=(80, 160, 40))
-        fast = convert_image_bytes(src, width, height, pack_method="fast")
-        legacy = convert_image_bytes(src, width, height, pack_method="legacy")
+        fast = convert_image_bytes(
+            src, width, height, pack_method="fast", dither="fs"
+        )
+        legacy = convert_image_bytes(
+            src, width, height, pack_method="legacy", dither="fs"
+        )
         assert fast == legacy, f"fast/legacy packers diverged at {width}x{height}"
 
 
 def test_sequential_layout_has_no_half_split(sample_image_bytes):
     width, height = CLONE_7_3
     src = sample_image_bytes(width, height)
-    out = convert_image_bytes(src, width, height)
+    out = convert_image_bytes(src, width, height, **_FS)
     assert len(out) == (width * height) // 2
 
 
@@ -95,7 +104,7 @@ def test_each_canvas_rotation_produces_correctly_sized_output(sample_image_bytes
     # count for the panel's native (post-rotation) resolution.
     width, height = OFFICIAL_13_3
     src = sample_image_bytes(400, 300)
-    out = convert_image_bytes(src, width, height, rotation=rotation)
+    out = convert_image_bytes(src, width, height, rotation=rotation, **_FS)
     assert len(out) == (width * height) // 2
 
 
@@ -109,7 +118,8 @@ def test_odd_width_half_is_padded_not_truncated():
 
     width, height = 801, 480
     img = Image.new("RGB", (width, height), (232, 232, 232))  # all-white
-    quantized = _quantize_to_spectra6(img)
+    # FS path: packing-only test (default Atkinson is O(pixels) and slow).
+    quantized = _quantize_to_spectra6(img, dither="fs")
     out = _pack_sequential(quantized)
     # ceil(width / 2) pair-bytes per row, since the odd trailing pixel is
     # padded rather than dropped.
@@ -126,7 +136,7 @@ def test_non_rgb_input_modes_convert_without_error(mode):
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     width, height = OFFICIAL_13_3
-    out = convert_image_bytes(buf.getvalue(), width, height)
+    out = convert_image_bytes(buf.getvalue(), width, height, **_FS)
     assert len(out) == (width * height) // 2
 
 
@@ -136,7 +146,9 @@ def test_manual_crop_box_respected(sample_image_bytes):
     # A tight, off-center crop box -- just confirm it doesn't raise and
     # produces the expected byte length (the pixel-accuracy of *where* the
     # crop lands is exercised on real hardware per CONTRIBUTING.md).
-    out = convert_image_bytes_cropped(src, width, height, (0.25, 0.25, 0.75, 0.6))
+    out = convert_image_bytes_cropped(
+        src, width, height, (0.25, 0.25, 0.75, 0.6), dither="fs"
+    )
     assert len(out) == (width * height) // 2
 
 
@@ -148,8 +160,10 @@ def test_cropped_with_preview_matches_bytes_only_variant(sample_image_bytes):
     src = sample_image_bytes(2000, 2000)
     crop_box = (0.25, 0.25, 0.75, 0.6)
 
-    bytes_only = convert_image_bytes_cropped(src, width, height, crop_box)
-    bin_bytes, preview = convert_image_bytes_cropped_with_preview(src, width, height, crop_box)
+    bytes_only = convert_image_bytes_cropped(src, width, height, crop_box, dither="fs")
+    bin_bytes, preview = convert_image_bytes_cropped_with_preview(
+        src, width, height, crop_box, dither="fs"
+    )
 
     assert bin_bytes == bytes_only
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
@@ -170,22 +184,45 @@ def test_default_cover_crop_box_is_centered_for_wider_source():
     assert (y0, y1) == (0.0, 1.0)
 
 
-def test_prepare_for_spectra6_increases_green_dominance():
-    """Foliage-like olive should get greener before quantize."""
+def test_prepare_for_spectra6_applies_fraimic_enhance_chain():
+    """Fraimic chain changes mid-gray (brightness/contrast/sat)."""
     from PIL import Image
 
     from custom_components.digital_frames.image_converter import _prepare_for_spectra6
 
-    # Olive/brown-green typical of undithered landscape midtones.
-    src = Image.new("RGB", (32, 32), (90, 110, 70))
+    src = Image.new("RGB", (32, 32), (128, 128, 128))
     out = _prepare_for_spectra6(src)
-    r, g, b = out.getpixel((16, 16))
-    assert g > 110
-    assert g - r > (110 - 90)  # gap to red widened (less brown)
+    assert out.mode == "RGB"
+    assert out.getpixel((16, 16)) != (128, 128, 128)
 
 
-def test_green_field_uses_more_green_nibble_than_mud(sample_image_bytes):
-    """After cp2 pipeline, a green field should lean on Spectra green ink."""
+def test_color_pipeline_id_is_cp3():
+    """Library bin cache key must miss older muted/cp2 encodings."""
+    from custom_components.digital_frames.image_converter import (
+        COLOR_PIPELINE_ID,
+        SPECTRA6_PALETTE_RGB,
+    )
+
+    assert COLOR_PIPELINE_ID == "cp3"
+    # Ideal primaries from Fraimic PALETTE_COLORS (not muted measured RGB).
+    assert SPECTRA6_PALETTE_RGB[5] == (0, 255, 0)  # green
+    assert SPECTRA6_PALETTE_RGB[4] == (0, 0, 255)  # blue
+
+
+def test_rgbl_metric_prefers_green_and_blue_inks():
+    """Fraimic RGBL should map pure green/blue to their palette slots."""
+    from custom_components.digital_frames.image_converter import _closest_palette_index
+
+    assert _closest_palette_index(0, 255, 0) == 5  # Green
+    assert _closest_palette_index(0, 0, 255) == 4  # Blue
+    assert _closest_palette_index(255, 0, 0) == 3  # Red
+    assert _closest_palette_index(0, 0, 0) == 0  # Black
+    assert _closest_palette_index(255, 255, 255) == 1  # White
+    assert _closest_palette_index(255, 255, 0) == 2  # Yellow
+
+
+def test_green_field_uses_green_nibble(sample_image_bytes):
+    """Pure green field should mostly map to Spectra green ink (nibble 6)."""
     from PIL import Image
     import io
 
@@ -194,34 +231,56 @@ def test_green_field_uses_more_green_nibble_than_mud(sample_image_bytes):
         convert_image_bytes,
     )
 
-    # Saturated green photo-like solid (not pure Spectra green).
-    img = Image.new("RGB", (200, 150), (40, 160, 50))
+    img = Image.new("RGB", (80, 60), (0, 255, 0))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
+    # Small canvas for speed (Atkinson is O(pixels)); packing uses sequential
+    # only at registered sizes — use full 7.3 with fs for this solid check.
     width, height = CLONE_7_3
-    packed = convert_image_bytes(buf.getvalue(), width, height)
-    # Count high/low nibbles that are green (6).
-    green_n = SPECTRA6_NIBBLE_VALUES[5]  # index 5 → nibble 6
-    green_pixels = 0
-    for byte in packed:
-        if (byte >> 4) == green_n:
-            green_pixels += 1
-        if (byte & 0xF) == green_n:
-            green_pixels += 1
+    packed = convert_image_bytes(buf.getvalue(), width, height, dither="fs")
+    green_n = SPECTRA6_NIBBLE_VALUES[5]
+    green_pixels = sum(
+        ((b >> 4) == green_n) + ((b & 0xF) == green_n) for b in packed
+    )
     total = width * height
-    # Majority of a pure green field should land on green ink (not yellow/black mud).
-    assert green_pixels / total > 0.55, f"only {green_pixels}/{total} green nibbles"
+    assert green_pixels / total > 0.90, f"only {green_pixels}/{total} green nibbles"
+
+
+def test_atkinson_and_fs_produce_valid_length(sample_image_bytes):
+    width, height = 200, 200  # not a panel size — use quantize only via convert
+    # Registered size required for pack; use 7.3 sequential with fs (fast).
+    w, h = CLONE_7_3
+    src = sample_image_bytes(100, 80, color=(40, 160, 50))
+    out_fs = convert_image_bytes(src, w, h, dither="fs")
+    assert len(out_fs) == (w * h) // 2
+    # Atkinson on a small crop via direct API (full 800x480 is slow in CI).
+    from custom_components.digital_frames.image_converter import (
+        _open_as_rgb,
+        _prepare_for_spectra6,
+        _quantize_atkinson_p,
+        _pack_p_image_fast,
+        _resize_cover_centered,
+    )
+    img = _resize_cover_centered(_open_as_rgb(src), 100, 80)
+    p = _quantize_atkinson_p(_prepare_for_spectra6(img))
+    assert p.mode == "P"
+    assert set(p.getdata()).issubset(set(range(6)))
 
 
 def test_quantized_pixels_are_restricted_to_spectra6_palette(sample_image_bytes):
-    from custom_components.digital_frames.image_converter import SPECTRA6_REAL_WORLD_RGB
-    from PIL import Image
-    import io
+    from custom_components.digital_frames.image_converter import (
+        SPECTRA6_PALETTE_RGB,
+        _open_as_rgb,
+        _prepare_for_spectra6,
+        _quantize_to_spectra6_p,
+    )
 
-    img = Image.open(io.BytesIO(sample_image_bytes(64, 64, color=(123, 45, 200))))
-    quantized = _quantize_to_spectra6(img.convert("RGB"))
+    img = _open_as_rgb(sample_image_bytes(64, 64, color=(123, 45, 200)))
+    quantized = _quantize_to_spectra6_p(
+        _prepare_for_spectra6(img), dither="fs"
+    ).convert("RGB")
     pixels = set(quantized.getdata())
-    assert pixels.issubset(set(SPECTRA6_REAL_WORLD_RGB))
+    assert pixels.issubset(set(SPECTRA6_PALETTE_RGB))
 
 
 # ---------------------------------------------------------------------------
@@ -235,10 +294,16 @@ def test_unpack_round_trips_packed_bin(sample_image_bytes, width, height):
     from custom_components.digital_frames.image_converter import (
         _open_as_rgb,
         _pack_to_spectra6_bin,
+        _prepare_for_spectra6,
+        _quantize_to_spectra6_p,
         unpack_spectra6_bin,
     )
 
-    quantized = _quantize_to_spectra6(_open_as_rgb(sample_image_bytes(400, 300)).resize((width, height)))
+    # FS for speed; full-panel Atkinson is the production default.
+    src = _open_as_rgb(sample_image_bytes(400, 300)).resize((width, height))
+    quantized = _quantize_to_spectra6_p(
+        _prepare_for_spectra6(src), dither="fs"
+    ).convert("RGB")
     packed = _pack_to_spectra6_bin(quantized)
     unpacked = unpack_spectra6_bin(packed, width, height)
     assert unpacked.size == (width, height)

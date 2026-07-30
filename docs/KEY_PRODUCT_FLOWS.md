@@ -270,12 +270,12 @@ Converts any Pillow-readable image into the frame's proprietary packed-
 nibble binary format: auto-rotate, cover-crop, manual crop, canvas
 rotation, dithering, and two PanelCodecs (split-half vs. sequential).
 
-**Color (cp2):** before Floyd–Steinberg, a vibrance/contrast pre-pass and
-green-dominant lift (`_prepare_for_spectra6`) reduce muddy olive midtones.
-Quantize matches against `SPECTRA6_MATCH_RGB` (higher chroma centroids),
-then remaps palette slots to measured `SPECTRA6_REAL_WORLD_RGB` for pack
-preview. Library bins are stored under `…/<codec_id>/<COLOR_PIPELINE_ID>/`
-so older muted encodings are not reused after a pipeline bump.
+**Color (cp3 — Fraimic-aligned):** matches
+`Fraimic/fraimic_bin_converter` defaults: enhance (brightness 1.1, contrast
+1.2, saturation 1.2, edge/smooth/sharpen), ideal 6 primaries, **RGBL**
+distance metric, and **Atkinson** dither (FS available as `dither="fs"`).
+Library bins live under `…/<codec_id>/<COLOR_PIPELINE_ID>/` (`cp3`) so older
+encodings are not reused.
 
 Call sites that produce wire payload for a send should use
 `panel_codec.encode_for_panel*` (codec selection by panel geometry);
@@ -305,7 +305,10 @@ renderer — see KPF 28/29).
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_image_converter.py` (including the cover-crop
   resize fully covering its canvas with no unfilled edge gap, reproduced
-  against a known-affected source size and registered resolution),
+  against a known-affected source size and registered resolution;
+  Fraimic-aligned cp3: ideal palette, RGBL pure-ink mapping, enhance
+  chain, Atkinson on a small canvas; packing/geometry tests use
+  `dither="fs"` so CI stays fast),
   `tests/python/unit/test_panel_codec.py`, including pack→unpack
   byte-exact round-trips against both byte layouts. Flagged as the riskiest
   silent-failure surface in the codebase in the initial gap analysis; also
