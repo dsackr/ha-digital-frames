@@ -154,6 +154,20 @@ class DigitalFramesBaseSensor(CoordinatorEntity, SensorEntity):
         """Return device registry information."""
         return frame_device_info(self.hass, self.coordinator, self._entry)
 
+    def _frame_online(self) -> bool:
+        """True when the last poll reached the frame (not retained-stale)."""
+        data = self.coordinator.data
+        if isinstance(data, dict) and "online" in data:
+            return bool(data["online"])
+        return bool(getattr(self.coordinator, "last_update_success", False))
+
+    def _attrs_with_online(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Merge *extra* with ``online`` so UI can show last battery while asleep."""
+        attrs: dict[str, Any] = {"online": self._frame_online()}
+        if extra:
+            attrs.update(extra)
+        return attrs
+
 
 # ---------------------------------------------------------------------------
 # Individual sensors
@@ -195,18 +209,20 @@ class DigitalFramesBatterySensor(DigitalFramesBaseSensor):
             return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, any] | None:
-        """Return the extra state attributes."""
-        if not self.coordinator.data:
-            return None
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Charging flag plus online/stale so panels keep last % while asleep."""
+        extra: dict[str, Any] = {}
         data = self.coordinator.data
-        try:
-            raw = data["battery"]["charging"]
-            if isinstance(raw, bool):
-                return {"charging": raw}
-            return {"charging": str(raw).lower() == "true"}
-        except (KeyError, TypeError):
-            return None
+        if data:
+            try:
+                raw = data["battery"]["charging"]
+                if isinstance(raw, bool):
+                    extra["charging"] = raw
+                else:
+                    extra["charging"] = str(raw).lower() == "true"
+            except (KeyError, TypeError):
+                pass
+        return self._attrs_with_online(extra or None)
 
 
 class DigitalFramesWifiRssiSensor(DigitalFramesBaseSensor):

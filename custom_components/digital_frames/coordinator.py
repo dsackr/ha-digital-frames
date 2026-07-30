@@ -267,15 +267,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.host,
         )
 
-        # Already home with a queue (restart, late bind): flush now.
+        # Already home (restart, late bind): flush queue and refresh status.
         state = self.hass.states.get(entity_id)
-        if (
-            state is not None
-            and state.state == STATE_HOME
-            and self.pending_send is not None
-            and not self._flushing
-        ):
-            self.hass.async_create_task(self._async_flush_pending_send())
+        if state is not None and state.state == STATE_HOME:
+            self._async_on_network_home()
 
     def async_teardown_tracker_watch(self) -> None:
         """Cancel device_tracker subscription."""
@@ -285,22 +280,28 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._tracker_entity_id = None
 
     @callback
+    def _async_on_network_home(self) -> None:
+        """Frame rejoined Wi‑Fi: flush pending push and refresh telemetry."""
+        if self.pending_send is not None and not self._flushing:
+            _LOGGER.info(
+                "Frame %s network presence home (%s); flushing pending send",
+                self.host,
+                self._tracker_entity_id,
+            )
+            self.hass.async_create_task(self._async_flush_pending_send())
+        # Same wake signal as push-on-wake — refresh battery/wifi/etc.
+        self.hass.async_create_task(self.async_request_refresh())
+
+    @callback
     def _async_tracker_state_changed(self, event: Event) -> None:
-        """On not_home → home, push any staged image."""
+        """On not_home → home, push any staged image and refresh status."""
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
         if new_state is None or new_state.state != STATE_HOME:
             return
         if old_state is not None and old_state.state == STATE_HOME:
             return
-        if self.pending_send is None or self._flushing:
-            return
-        _LOGGER.info(
-            "Frame %s network presence home (%s); flushing pending send",
-            self.host,
-            self._tracker_entity_id,
-        )
-        self.hass.async_create_task(self._async_flush_pending_send())
+        self._async_on_network_home()
 
     async def async_load_last_image(self) -> None:
         """Hydrate last_image_id/last_thumbnail from disk. Call this once
@@ -970,6 +971,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Successful poll — reset failure counter and migrate fingerprint.
             self._consecutive_failures = 0
             self._maybe_persist_fingerprint(data)
+            data["online"] = True
 
             # The frame answered -- if something's queued, try to deliver it.
             # Checking "pending_send is not None" here (rather than tracking
@@ -1013,16 +1015,38 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and not self._rescan_in_progress
             ):
                 self.hass.async_create_task(self._async_try_find_new_host())
+            # Prefer last-known telemetry over clearing sensors to "unavailable"
+            # while the frame sleeps (battery still shows last %, panel shows
+            # asleep + last charge instead of a bare red dot).
+            if self.data:
+                stale = dict(self.data)
+                stale["online"] = False
+                _LOGGER.debug(
+                    "Frame %s unreachable; retaining last-known telemetry "
+                    "(failures=%s): %s",
+                    self.host,
+                    self._consecutive_failures,
+                    err,
+                )
+                return stale
             raise UpdateFailed(
                 "Frame is unreachable — it may be sleeping or off-network"
             ) from err
         except aiohttp.ClientResponseError as err:
             self._consecutive_failures += 1
+            if self.data:
+                stale = dict(self.data)
+                stale["online"] = False
+                return stale
             raise UpdateFailed(
                 f"Frame returned unexpected HTTP {err.status}"
             ) from err
         except Exception as err:  # noqa: BLE001
             self._consecutive_failures += 1
+            if self.data:
+                stale = dict(self.data)
+                stale["online"] = False
+                return stale
             raise UpdateFailed(f"Unexpected error fetching frame data: {err}") from err
 
     async def _async_try_find_new_host(self) -> None:

@@ -900,8 +900,11 @@
           st.attributes.unit_of_measurement === '%' ||
           (battEid || '').includes('battery')
         );
+        const online = st.attributes && st.attributes.online !== false;
         const battText = (hasBattery && !isNaN(pct)) ? `${pct >= 20 ? '🔋' : '🪫'} ${pct}% ` : '';
-        html = `${battText}<span class="dot-online">● Online</span>`;
+        html = online
+          ? `${battText}<span class="dot-online">● Online</span>`
+          : `${battText}<span class="dot-offline" title="Last known battery">● Asleep</span>`;
       } else if (!st && this._frame) {
         html = this._frame.online
           ? '<span class="dot-online">● Online</span>'

@@ -53,6 +53,27 @@ def test_battery_missing_data_returns_none(make_frame_entry):
     assert sensor2.native_value is None
 
 
+def test_battery_attrs_include_online_flag(make_frame_entry):
+    entry = make_frame_entry()
+    online = DigitalFramesBatterySensor(
+        _fake_coordinator(
+            {"battery": {"percent": 50, "charging": False}, "online": True}
+        ),
+        entry,
+    )
+    assert online.extra_state_attributes["online"] is True
+    assert online.extra_state_attributes["charging"] is False
+
+    asleep = DigitalFramesBatterySensor(
+        _fake_coordinator(
+            {"battery": {"percent": 50, "charging": False}, "online": False}
+        ),
+        entry,
+    )
+    assert asleep.native_value == 50.0
+    assert asleep.extra_state_attributes["online"] is False
+
+
 # ---------------------------------------------------------------------------
 # WiFi RSSI
 # ---------------------------------------------------------------------------

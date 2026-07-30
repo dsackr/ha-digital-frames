@@ -664,6 +664,14 @@ Read-only device telemetry (battery/wifi/charging/firmware/IP/queued-on-deck), a
 include `image_id` (library id when known) and `queued_at` (unix time) so
 dashboards and automations can see **what** is on deck.
 
+**Last-known battery while asleep:** a failed poll does not wipe prior
+telemetry. The coordinator returns the last successful payload with
+`online: false` so battery (and related sensors) keep their last values
+instead of becoming HA `unavailable` (red-only status). Battery attributes
+include `online` so the panel/card can show e.g. `🔋42% ●` (asleep) vs
+online. The same network `device_tracker` home signal that flushes an on-deck
+image also calls `async_request_refresh` so status updates on wake.
+
 The panel's Frame Information modal (per-frame gear/info popup) surfaces the
 Orientation control as Portrait/Landscape lock icons plus the live
 "Discovered" (gsensor/accelerometer) reading. Icon position is fixed

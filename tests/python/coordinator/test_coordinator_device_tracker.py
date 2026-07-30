@@ -80,9 +80,14 @@ async def test_home_transition_flushes_pending(hass, coordinator):
     coordinator.async_setup_tracker_watch()
     assert coordinator._tracker_entity_id == "device_tracker.frame"
 
-    with patch.object(
-        coordinator, "_async_flush_pending_send", new_callable=AsyncMock
-    ) as flush:
+    with (
+        patch.object(
+            coordinator, "_async_flush_pending_send", new_callable=AsyncMock
+        ) as flush,
+        patch.object(
+            coordinator, "async_request_refresh", new_callable=AsyncMock
+        ) as refresh,
+    ):
         hass.states.async_set(
             "device_tracker.frame",
             STATE_HOME,
@@ -91,9 +96,11 @@ async def test_home_transition_flushes_pending(hass, coordinator):
         await hass.async_block_till_done()
 
         flush.assert_awaited_once()
+        refresh.assert_awaited_once()
 
 
-async def test_home_with_nothing_pending_is_noop(hass, coordinator):
+async def test_home_with_nothing_pending_still_refreshes_status(hass, coordinator):
+    """Wake signal updates battery/wifi even when no image is queued."""
     hass.states.async_set(
         "device_tracker.frame",
         STATE_NOT_HOME,
@@ -102,9 +109,14 @@ async def test_home_with_nothing_pending_is_noop(hass, coordinator):
     coordinator.pending_send = None
     coordinator.async_setup_tracker_watch()
 
-    with patch.object(
-        coordinator, "_async_flush_pending_send", new_callable=AsyncMock
-    ) as flush:
+    with (
+        patch.object(
+            coordinator, "_async_flush_pending_send", new_callable=AsyncMock
+        ) as flush,
+        patch.object(
+            coordinator, "async_request_refresh", new_callable=AsyncMock
+        ) as refresh,
+    ):
         hass.states.async_set(
             "device_tracker.frame",
             STATE_HOME,
@@ -113,6 +125,7 @@ async def test_home_with_nothing_pending_is_noop(hass, coordinator):
         await hass.async_block_till_done()
 
         flush.assert_not_awaited()
+        refresh.assert_awaited_once()
 
 
 async def test_already_home_on_bind_with_pending_flushes(hass, coordinator):
@@ -128,13 +141,19 @@ async def test_already_home_on_bind_with_pending_flushes(hass, coordinator):
         "image_id": "img1",
     }
 
-    with patch.object(
-        coordinator, "_async_flush_pending_send", new_callable=AsyncMock
-    ) as flush:
+    with (
+        patch.object(
+            coordinator, "_async_flush_pending_send", new_callable=AsyncMock
+        ) as flush,
+        patch.object(
+            coordinator, "async_request_refresh", new_callable=AsyncMock
+        ) as refresh,
+    ):
         coordinator.async_setup_tracker_watch()
         await hass.async_block_till_done()
 
         flush.assert_awaited_once()
+        refresh.assert_awaited_once()
 
 
 async def test_teardown_cancels_listener(hass, coordinator):

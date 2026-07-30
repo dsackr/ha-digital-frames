@@ -36,11 +36,33 @@ async def test_successful_poll_updates_data_and_resets_failure_counter(
 async def test_connection_error_raises_update_failed_and_increments_counter(
     hass, coordinator, aioclient_mock
 ):
+    """No prior telemetry — still raise so setup can soft-fail cleanly."""
     aioclient_mock.get(f"http://{coordinator.host}/api/info", exc=TimeoutError())
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
 
+    assert coordinator._consecutive_failures == 1
+
+
+async def test_connection_error_retains_last_known_telemetry(
+    hass, coordinator, aioclient_mock
+):
+    """After a good poll, sleep keeps last battery and marks online=False."""
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"battery": {"percent": 63}, "battery_pct": 63},
+    )
+    good = await coordinator._async_update_data()
+    assert good.get("online") is True
+    coordinator.data = good
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", exc=TimeoutError())
+
+    stale = await coordinator._async_update_data()
+    assert stale["online"] is False
+    assert stale["battery"]["percent"] == 63
     assert coordinator._consecutive_failures == 1
 
 

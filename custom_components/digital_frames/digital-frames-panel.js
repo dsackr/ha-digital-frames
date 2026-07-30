@@ -3825,22 +3825,34 @@
         (frame.entityId || '').includes('battery')
       );
 
-      const isOnline = state && state.state !== 'unavailable' && state.state !== 'unknown';
+      // online:false = last-known telemetry while asleep (not HA "unavailable").
+      const attrs = (state && state.attributes) || {};
+      const isOnline = !!(
+        state
+        && state.state !== 'unavailable'
+        && state.state !== 'unknown'
+        && attrs.online !== false
+      );
 
-      if (!isOnline && !isCharging) {
-        html = '<span class="dot-off">●</span>';
-      } else {
-        let bat = '';
-        if (isCharging) {
-          if (isNaN(pct) || pct === 0 || !hasBattery) {
-            bat = `<span style="color:#4caf50;font-size:14px;margin-right:2px" title="Plugged in">🔌</span>`;
-          } else {
-            bat = `<span title="Charging">⚡</span>${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
-          }
-        } else if (hasBattery && !isNaN(pct)) {
-          bat = `${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
+      let bat = '';
+      if (isCharging) {
+        if (isNaN(pct) || pct === 0 || !hasBattery) {
+          bat = `<span style="color:#4caf50;font-size:14px;margin-right:2px" title="Plugged in">🔌</span>`;
+        } else {
+          bat = `<span title="Charging">⚡</span>${pct >= 20 ? '🔋' : '🪫'}${pct}% `;
         }
+      } else if (hasBattery && !isNaN(pct)) {
+        const title = isOnline ? '' : ' title="Last known (frame asleep / offline)"';
+        bat = `<span${title}>${pct >= 20 ? '🔋' : '🪫'}${pct}%</span> `;
+      }
+
+      if (isOnline || isCharging) {
         html = `${bat}<span class="dot-on">●</span>`;
+      } else if (bat) {
+        // Asleep with retained battery — not a bare red dot.
+        html = `${bat}<span class="dot-off" title="Asleep / offline">●</span>`;
+      } else {
+        html = '<span class="dot-off" title="Asleep / offline">●</span>';
       }
 
       // hass is re-assigned on every state change of ANY entity in the
@@ -4924,7 +4936,10 @@
            (frame.entityId || '').includes('battery')
          );
 
-         const isOnline = state.state !== 'unavailable' && state.state !== 'unknown';
+         const attrs = state.attributes || {};
+         const isOnline = state.state !== 'unavailable'
+           && state.state !== 'unknown'
+           && attrs.online !== false;
 
          if (isCharging) {
            if (isNaN(pct) || pct === 0 || !hasBattery) {
@@ -4932,8 +4947,10 @@
            } else {
              batteryHtml = `<span style="color:#4caf50">⚡ Charging (${pct}%)</span>`;
            }
-         } else if (isOnline && hasBattery && !isNaN(pct)) {
-           batteryHtml = `${pct}%`;
+         } else if (hasBattery && !isNaN(pct)) {
+           batteryHtml = isOnline
+             ? `${pct}%`
+             : `${pct}% <span style="opacity:.75">(last known · asleep)</span>`;
          }
        }
        this.shadowRoot.getElementById('frame-info-battery').innerHTML = batteryHtml;
