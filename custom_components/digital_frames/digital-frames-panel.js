@@ -567,12 +567,15 @@
     }
     .modal-row { margin-bottom: 12px; }
     .modal-row label {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 6px;
       font-size: 13px;
-      color: var(--secondary-text-color);
+      color: var(--primary-text-color);
       margin-bottom: 4px;
+      font-weight: 500;
     }
-    .modal-row select, .modal-row input[type="text"] {
+    .modal-row select, .modal-row input[type="text"], .modal-row input[type="number"] {
       width: 100%;
       padding: 8px 10px;
       border-radius: 8px;
@@ -582,6 +585,51 @@
       font-size: 13px;
       box-sizing: border-box;
     }
+    .modal-row input:disabled, .modal-row select:disabled {
+      opacity: 1;
+      color: var(--primary-text-color);
+      background: var(--secondary-background-color, rgba(127,127,127,.12));
+      border-color: var(--divider-color, rgba(0,0,0,.12));
+      cursor: not-allowed;
+    }
+    .modal-row.flow-field-disabled label {
+      color: var(--primary-text-color);
+      opacity: 0.85;
+    }
+    .flow-help-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid var(--secondary-text-color, #888);
+      background: transparent;
+      color: var(--secondary-text-color, #888);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .flow-help-btn:hover, .flow-help-btn[aria-expanded="true"] {
+      border-color: var(--primary-color, #3b82f6);
+      color: var(--primary-color, #3b82f6);
+    }
+    .flow-help-pop {
+      display: none;
+      margin-top: 6px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--secondary-background-color, rgba(127,127,127,.12));
+      border: 1px solid var(--divider-color, rgba(0,0,0,.12));
+      color: var(--primary-text-color);
+      font-size: 12px;
+      line-height: 1.4;
+      font-weight: 400;
+    }
+    .flow-help-pop.open { display: block; }
     #upload-modal-files {
       display: block;
       width: 100%;
@@ -3912,8 +3960,8 @@
       const labels = {
         scan_interval: 'HA status poll interval (seconds)',
         fast_poll_when_queued: 'Fast-poll frame while image is queued (every 30s)',
-        frame_always_on: 'Always on (keep-awake, like official Fraimic)',
-        frame_sleep_minutes: 'Minutes between image checks',
+        frame_always_on: 'Always on',
+        frame_sleep_minutes: 'Sleep Interval',
         resolution: 'Frame Type',
         rotation_edge: 'Rotated hanging (which edge is up)',
         rotate_portrait_180: 'Flip Portrait Image',
@@ -4186,6 +4234,8 @@
             standardContainer.appendChild(fieldEl);
           }
         }
+        // After both fields exist: Sleep Interval greys when Always on.
+        this._syncSleepIntervalEnabled();
 
         body.appendChild(standardContainer);
         body.appendChild(advancedToggle);
@@ -4264,15 +4314,73 @@
       if (firstInput) firstInput.focus();
     }
 
+    _isOfficialFraimicFrame(frame) {
+      if (!frame) return false;
+      if (frame.driver && frame.driver !== 'fraimic') return false;
+      // Prefer MAC-corrected origin from the frames API (community panels
+      // sometimes store size "13.3" but are not official hardware).
+      return frame.origin === 'official';
+    }
+
+    _attachFlowHelp(labelEl, row, helpText) {
+      if (!helpText) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'flow-help-btn';
+      btn.textContent = '?';
+      btn.setAttribute('aria-label', 'Help');
+      btn.setAttribute('aria-expanded', 'false');
+      const pop = document.createElement('div');
+      pop.className = 'flow-help-pop';
+      pop.textContent = helpText;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const open = !pop.classList.contains('open');
+        // Close other open help pops in this form.
+        const body = this.shadowRoot.getElementById('flow-modal-body');
+        if (body) {
+          body.querySelectorAll('.flow-help-pop.open').forEach((el) => {
+            if (el !== pop) el.classList.remove('open');
+          });
+          body.querySelectorAll('.flow-help-btn[aria-expanded="true"]').forEach((el) => {
+            if (el !== btn) el.setAttribute('aria-expanded', 'false');
+          });
+        }
+        pop.classList.toggle('open', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      labelEl.appendChild(btn);
+      row.appendChild(pop);
+    }
+
+    _syncSleepIntervalEnabled() {
+      const body = this.shadowRoot.getElementById('flow-modal-body');
+      if (!body) return;
+      const alwaysOn = body.querySelector('[data-flow-field="frame_always_on"]');
+      const sleepMin = body.querySelector('[data-flow-field="frame_sleep_minutes"]');
+      if (!alwaysOn || !sleepMin) return;
+      const frame = this._frameSettingsTarget;
+      const official = this._isOfficialFraimicFrame(frame);
+      // Official: both stay read-only. Clone: sleep greys when Always on.
+      if (official) return;
+      const always = !!alwaysOn.checked;
+      sleepMin.disabled = always;
+      const sleepRow = sleepMin.closest('.modal-row');
+      if (sleepRow) sleepRow.classList.toggle('flow-field-disabled', always);
+    }
+
     _buildFlowField(field, stepKey, errorCode) {
       const row = document.createElement('div');
       row.className = 'modal-row';
 
       const label = document.createElement('label');
-      label.textContent = this._flowText(
+      const labelText = document.createElement('span');
+      labelText.textContent = this._flowText(
         `${stepKey}.data.${field.name}`,
         this._flowFieldLabelFallback(field.name) || field.name,
       );
+      label.appendChild(labelText);
       row.appendChild(label);
 
       let input;
@@ -4316,48 +4424,48 @@
           this._submitFlowStep();
         }
       });
-      if (this._frameSettingsTarget) {
-        const frame = this._frameSettingsTarget;
-        const isOfficialFraimic = (frame.driver === 'fraimic' || !frame.driver)
-          && frame.origin === 'official';
-        if (isOfficialFraimic && (field.name === 'frame_always_on' || field.name === 'frame_sleep_minutes')) {
-          // Read-only: show last *detected* values from the frame, not the
-          // unused HA option defaults (which often look "off" / 15m).
-          if (field.name === 'frame_always_on' && frame.keepAwakeActual != null) {
-            input.checked = !!frame.keepAwakeActual;
-          }
-          if (field.name === 'frame_sleep_minutes' && frame.sleepMinutesActual != null) {
-            input.value = String(frame.sleepMinutesActual);
-          }
-          input.disabled = true;
-          row.style.opacity = '0.5';
-          row.title = 'Detected from the frame (read-only on official Fraimic — cannot be changed from HA)';
+
+      const frame = this._frameSettingsTarget;
+      const isOfficialFraimic = this._isOfficialFraimicFrame(frame);
+      const powerField = field.name === 'frame_always_on'
+        || field.name === 'frame_sleep_minutes';
+
+      if (isOfficialFraimic && powerField) {
+        // Read-only: show last *detected* values from the frame.
+        if (field.name === 'frame_always_on' && frame.keepAwakeActual != null) {
+          input.checked = !!frame.keepAwakeActual;
         }
+        if (field.name === 'frame_sleep_minutes' && frame.sleepMinutesActual != null) {
+          input.value = String(frame.sleepMinutesActual);
+        }
+        input.disabled = true;
+        row.classList.add('flow-field-disabled');
       }
+
+      if (field.name === 'frame_always_on') {
+        input.addEventListener('change', () => this._syncSleepIntervalEnabled());
+      }
+
       row.appendChild(input);
 
-      let hint = this._flowText(`${stepKey}.data_description.${field.name}`, '');
-      if (this._frameSettingsTarget) {
-        const frame = this._frameSettingsTarget;
-        const isOfficialFraimic = (frame.driver === 'fraimic' || !frame.driver)
-          && frame.origin === 'official';
-        if (isOfficialFraimic && (field.name === 'frame_always_on' || field.name === 'frame_sleep_minutes')) {
-          const parts = ['Read-only on official Fraimic — value is detected from the device.'];
-          if (field.name === 'frame_always_on' && frame.keepAwakeActual != null) {
-            parts.push(frame.keepAwakeActual ? 'Currently: always on.' : 'Currently: not always on (battery sleep).');
-          }
-          if (field.name === 'frame_sleep_minutes' && frame.sleepMinutesActual != null) {
-            parts.push(`Currently: ${frame.sleepMinutesActual} minutes.`);
-          }
-          hint = parts.join(' ');
-        }
+      // Compact help behind "?": no wall of secondary text under every field.
+      let helpText = '';
+      if (field.name === 'frame_always_on') {
+        helpText = isOfficialFraimic
+          ? 'Detected from the frame. Official Fraimic hardware does not allow changing always-on from Home Assistant.'
+          : (this._flowText(`${stepKey}.data_description.${field.name}`, '')
+            || 'When on, the frame stays on Wi‑Fi and never deep-sleeps (high battery use — best when powered).');
+      } else if (field.name === 'frame_sleep_minutes') {
+        helpText = isOfficialFraimic
+          ? 'Detected from the frame. Official Fraimic hardware does not allow changing sleep interval from Home Assistant.'
+          : (this._flowText(`${stepKey}.data_description.${field.name}`, '')
+            || 'Sleep time between check-ins for a new image.');
+      } else {
+        // Other options fields: keep optional description via ? only when present.
+        helpText = this._flowText(`${stepKey}.data_description.${field.name}`, '') || '';
       }
-      if (hint) {
-        const p = document.createElement('div');
-        p.className = 'modal-file-summary';
-        p.textContent = hint;
-        row.appendChild(p);
-      }
+      if (helpText) this._attachFlowHelp(label, row, helpText);
+
       if (errorCode) {
         const category = stepKey.includes('.options.') ? 'options' : 'config';
         const err = document.createElement('div');

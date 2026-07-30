@@ -315,15 +315,15 @@ test.describe('Frame management and discovery banner', () => {
     });
     expect(hasResolutionField).toBe(false);
 
-    // Always-on shows a friendly label (not raw frame_always_on).
+    // Always-on shows a short friendly label (not raw frame_always_on).
     const alwaysOnLabel = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       const input = root.getElementById('flow-field-frame_always_on');
       const row = input && input.closest('.modal-row');
-      const label = row && row.querySelector('label');
+      const label = row && row.querySelector('label span');
       return label ? label.textContent : null;
     });
-    expect(alwaysOnLabel).toMatch(/Always on/i);
+    expect(alwaysOnLabel).toBe('Always on');
 
     // Assert advanced fields (scan_interval, fast_poll_when_queued) hidden initially
     const advancedHiddenBefore = await page.evaluate(() => {
@@ -634,31 +634,93 @@ test.describe('Frame management: hover overlay quadrants (real mouse input)', ()
     
     await openConfigureFor(page, 'entry_1');
 
-    // Disabled + greyed, but values reflect *detected* keep_awake / sleep
+    // Disabled but readable; values reflect *detected* keep_awake / sleep
     // (entry_1 has keep_awake_actual: true, sleep_minutes_actual: 25).
+    // Long prose is behind "?", not a wall of secondary text.
     const fieldsState = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       const alwaysOn = root.getElementById('flow-field-frame_always_on');
       const sleepMin = root.getElementById('flow-field-frame_sleep_minutes');
       const alwaysRow = alwaysOn.closest('.modal-row');
+      const helpBtn = alwaysRow.querySelector('.flow-help-btn');
+      const helpPop = alwaysRow.querySelector('.flow-help-pop');
+      if (helpBtn) helpBtn.click();
       return {
         alwaysOnDisabled: alwaysOn.disabled,
         alwaysOnChecked: alwaysOn.checked,
-        alwaysOnOpacity: alwaysRow.style.opacity,
-        alwaysOnHint: (alwaysRow.querySelector('.modal-file-summary') || {}).textContent || '',
+        alwaysOnLabel: alwaysRow.querySelector('label span')?.textContent,
+        helpOpen: helpPop?.classList.contains('open'),
+        helpText: helpPop?.textContent || '',
+        summaryText: (alwaysRow.querySelector('.modal-file-summary') || {}).textContent || '',
         sleepMinDisabled: sleepMin.disabled,
         sleepMinValue: sleepMin.value,
-        sleepMinOpacity: sleepMin.closest('.modal-row').style.opacity,
+        sleepLabel: sleepMin.closest('.modal-row').querySelector('label span')?.textContent,
       };
     });
 
     expect(fieldsState.alwaysOnDisabled).toBe(true);
     expect(fieldsState.alwaysOnChecked).toBe(true);
-    expect(fieldsState.alwaysOnOpacity).toBe('0.5');
-    expect(fieldsState.alwaysOnHint).toMatch(/detected|read-only/i);
-    expect(fieldsState.alwaysOnHint).toMatch(/always on/i);
+    expect(fieldsState.alwaysOnLabel).toBe('Always on');
+    expect(fieldsState.sleepLabel).toBe('Sleep Interval');
+    expect(fieldsState.summaryText).toBe('');
+    expect(fieldsState.helpOpen).toBe(true);
+    expect(fieldsState.helpText).toMatch(/Official Fraimic|does not allow/i);
     expect(fieldsState.sleepMinDisabled).toBe(true);
     expect(fieldsState.sleepMinValue).toBe('25');
-    expect(fieldsState.sleepMinOpacity).toBe('0.5');
+  });
+
+  test('configure options → clone can edit Always on; Sleep greys when Always on', async ({ page }) => {
+    const cloneFrames = [
+      {
+        entry_id: 'entry_clone',
+        title: 'Community 13.3',
+        width: 1200,
+        height: 1600,
+        orientation: 'portrait',
+        host: '192.168.1.50',
+        orientation_entity_id: 'select.entry_clone_orientation',
+        driver: 'fraimic',
+        origin: 'clone',
+        size: '13.3_clone',
+        keep_awake_actual: false,
+        sleep_minutes_actual: 15,
+      },
+    ];
+    await mockServer.stop();
+    mockServer = createMockServer({ frames: cloneFrames });
+    baseUrl = await mockServer.start();
+    await gotoPanel(page, baseUrl, { frames: cloneFrames });
+
+    await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      const frame = panel._frames.find((f) => f.entryId === 'entry_clone');
+      panel._openFrameConfigureFlow(frame);
+    });
+    await page.waitForFunction(() => {
+      const panel = document.getElementById('panel');
+      return panel._flowModal && panel._flowModal.step && panel._flowModal.step.step_id === 'init';
+    }, { timeout: 5000 });
+
+    const state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const alwaysOn = root.getElementById('flow-field-frame_always_on');
+      const sleepMin = root.getElementById('flow-field-frame_sleep_minutes');
+      // Start with always-on off → sleep editable
+      alwaysOn.checked = false;
+      alwaysOn.dispatchEvent(new Event('change'));
+      const sleepEditableWhenOff = !sleepMin.disabled;
+      alwaysOn.checked = true;
+      alwaysOn.dispatchEvent(new Event('change'));
+      const sleepDisabledWhenOn = sleepMin.disabled;
+      return {
+        alwaysOnDisabled: alwaysOn.disabled,
+        sleepEditableWhenOff,
+        sleepDisabledWhenOn,
+      };
+    });
+
+    expect(state.alwaysOnDisabled).toBe(false);
+    expect(state.sleepEditableWhenOff).toBe(true);
+    expect(state.sleepDisabledWhenOn).toBe(true);
   });
 });

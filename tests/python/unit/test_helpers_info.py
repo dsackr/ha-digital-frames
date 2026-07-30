@@ -34,6 +34,26 @@ def test_parse_keep_awake_from_html():
     ) is None
 
 
+def test_origin_for_fraimic_entry_mac_tiebreak():
+    """Community panels mis-tagged as size 13.3 must still report clone."""
+    from types import SimpleNamespace
+
+    from custom_components.digital_frames.const import CONF_MAC, CONF_SIZE
+    from custom_components.digital_frames.helpers import origin_for_fraimic_entry
+    from custom_components.digital_frames.frame_types import ORIGIN_CLONE, ORIGIN_OFFICIAL
+
+    official = SimpleNamespace(data={CONF_SIZE: "13.3", CONF_MAC: "3cdc75737330"})
+    assert origin_for_fraimic_entry(official) == ORIGIN_OFFICIAL
+
+    community_wrong_size = SimpleNamespace(
+        data={CONF_SIZE: "13.3", CONF_MAC: "90e5b1d6e09c"}  # non-Fraimic OUI
+    )
+    assert origin_for_fraimic_entry(community_wrong_size) == ORIGIN_CLONE
+
+    clone_key = SimpleNamespace(data={CONF_SIZE: "13.3_clone", CONF_MAC: ""})
+    assert origin_for_fraimic_entry(clone_key) == ORIGIN_CLONE
+
+
 def test_parse_sleep_minutes_from_html():
     # Sleep matches
     assert parse_sleep_minutes_from_html(

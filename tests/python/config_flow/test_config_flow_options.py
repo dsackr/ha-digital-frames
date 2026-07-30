@@ -64,6 +64,7 @@ async def test_official_form_defaults_use_detected_keep_awake(
 
     entry = make_frame_entry(
         size="13.3",  # official profile
+        mac="3cdc75737330",  # official OUI
         options={
             CONF_FRAME_SLEEP_MINUTES: 15,
             CONF_FRAME_ALWAYS_ON: False,  # option says off…

@@ -188,13 +188,13 @@ slow ESP32 sequential panels (7.3").
 User-facing controls on the frame's **Configure / options** form and the
 Digital Frames panel frame-settings flow (standard fields, not Advanced).
 
-For official Fraimic hardware (which does not accept HA writes to deep
-sleep / always-on), these controls are **disabled/greyed out** but still
-**reflect the values detected** from the frame (`keep_awake_actual` /
-`sleep_minutes_actual` scraped from HTML `/info` on successful polls).
-Clone firmware can change the settings from HA; official is read-only
-display of what the device reports. Frame Information also shows Keep
-Awake (Actual).
+Configure labels are short (**Always on**, **Sleep Interval**); longer
+explanations sit behind a **?** help control (click to expand). Official
+Fraimic (MAC OUI + type registry — not merely size ``13.3``) cannot change
+power settings from HA: controls are disabled but still show values
+detected from `/info` (`keep_awake_actual` / `sleep_minutes_actual`).
+Community panels stay editable; **Sleep Interval** greys when **Always on**
+is checked. Frame Information also shows Keep Awake (Actual).
 
 | Option key | UI label (en) | Meaning |
 |---|---|---|

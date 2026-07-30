@@ -61,6 +61,7 @@ from .const import (
 from .frame_types import FRAME_TYPES
 from .helpers import (
     orientation_for_hass_entry,
+    origin_for_fraimic_entry,
     render_spec_for_entry,
     render_spec_for_hass_entry,
 )
@@ -763,7 +764,7 @@ class DigitalFramesFramesView(HomeAssistantView):
                             else (
                                 "samsung"
                                 if is_samsung
-                                else (frame_type.origin if frame_type else None)
+                                else origin_for_fraimic_entry(entry)
                             )
                         ),
                         "platform": (

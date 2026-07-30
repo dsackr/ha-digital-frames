@@ -22,7 +22,7 @@ function flowModalState(page) {
       title: root.getElementById('flow-modal-title').textContent,
       fields: [...body.querySelectorAll('[data-flow-field]')].map((el) => {
         const row = el.closest('.modal-row');
-        const labelEl = row && row.querySelector('label');
+        const labelEl = row && (row.querySelector('label span') || row.querySelector('label'));
         return {
           name: el.dataset.flowField,
           type: el.dataset.flowType,
@@ -209,7 +209,9 @@ test.describe('Embedded flow renderer', () => {
     expect(state.fields.find((f) => f.name === 'resolution')).toBeUndefined();
     // Labels must be human-readable (not raw schema keys).
     expect(state.fields.find((f) => f.name === 'frame_always_on').label)
-      .toBe('Always on (keep-awake, like official Fraimic)');
+      .toMatch(/Always on/);
+    expect(state.fields.find((f) => f.name === 'frame_sleep_minutes').label)
+      .toMatch(/Sleep Interval/);
     expect(state.fields.find((f) => f.name === 'rotate_portrait_180').label)
       .toBe('Flip Portrait Image');
 

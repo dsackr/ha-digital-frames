@@ -24,6 +24,7 @@ from .const import (
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATE_PORTRAIT_180,
     CONF_ROTATION_EDGE,
+    CONF_SIZE,
     CONF_WIDTH,
     DOMAIN,
     DRIVER_FRAIMIC,
@@ -34,7 +35,7 @@ from .const import (
     ORIENTATION_LANDSCAPE,
     ORIENTATION_PORTRAIT,
 )
-from .frame_types import FRAME_TYPES, ORIGIN_OFFICIAL
+from .frame_types import FRAME_TYPES, ORIGIN_CLONE, ORIGIN_OFFICIAL
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -292,6 +293,44 @@ def mac_from_info(info: dict[str, Any]) -> str:
 # Official Fraimic Wi-Fi module OUIs. Mirrors manifest.json's dhcp
 # matchers (which can't be imported from here) -- keep the two in sync.
 _OFFICIAL_MAC_PREFIXES = ("1cdbd4", "3cdc75")
+
+
+def is_official_mac(mac: str | None) -> bool | None:
+    """True/False if *mac* matches a known official OUI; None if unknown/empty."""
+    if not mac:
+        return None
+    norm = "".join(c for c in str(mac).lower() if c.isalnum())
+    if len(norm) < 6:
+        return None
+    return any(norm.startswith(p) for p in _OFFICIAL_MAC_PREFIXES)
+
+
+def origin_for_fraimic_entry(entry: "ConfigEntry") -> str | None:
+    """official/clone for a Fraimic-family entry, with MAC OUI tie-break.
+
+    Entries sometimes store size ``13.3`` (official registry id) for a
+    community panel. When a non-official MAC is present, report ``clone``
+    so power controls stay editable.
+    """
+    size = entry.data.get(CONF_SIZE) or ""
+    frame_type = FRAME_TYPES.get(size)
+    mac = entry.data.get(CONF_MAC) or ""
+    mac_official = is_official_mac(mac)
+
+    if mac_official is False:
+        # Non-Fraimic OUI → community panel for capability purposes.
+        if size.endswith("_clone") and size in FRAME_TYPES:
+            return ORIGIN_CLONE
+        if frame_type is not None and frame_type.origin == ORIGIN_CLONE:
+            return ORIGIN_CLONE
+        base = size.removesuffix("_clone") if size else ""
+        if base and f"{base}_clone" in FRAME_TYPES:
+            return ORIGIN_CLONE
+        return ORIGIN_CLONE
+
+    if frame_type is not None:
+        return frame_type.origin
+    return None
 
 
 def dimensions_from_info(info: dict[str, Any]) -> tuple[int, int] | None:

@@ -737,11 +737,10 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         # the greyed-out controls still *reflect* what the frame is doing.
         try:
             from .const import DOMAIN  # noqa: PLC0415
-            from .frame_types import FRAME_TYPES, ORIGIN_OFFICIAL  # noqa: PLC0415
+            from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
+            from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
 
-            size_key = self.config_entry.data.get(CONF_SIZE)
-            ft = FRAME_TYPES.get(size_key) if size_key else None
-            is_official = ft is not None and ft.origin == ORIGIN_OFFICIAL
+            is_official = origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
             coord = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
             actual = getattr(coord, "data", None) if coord is not None else None
             if is_official and isinstance(actual, dict):
