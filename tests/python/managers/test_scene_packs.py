@@ -118,6 +118,39 @@ async def test_catalog_hides_incompatible_min_integration(
     assert scene_pack_manager.catalog_meta().get("packs_hidden_incompatible") == 1
 
 
+async def test_fetch_index_reads_integration_version_off_the_event_loop(
+    hass, scene_pack_manager, aioclient_mock, monkeypatch
+):
+    """Regression: _async_fetch_index called _integration_version()
+    (reads manifest.json) directly on the event loop. Caching made repeat
+    calls free, but the first read on every fresh HA restart still tripped
+    HA's blocking-call detector ("Detected blocking call to open ... inside
+    the event loop"), observed repeatedly in production logs (2026-07-30).
+    Verifies the read now happens via hass.async_add_executor_job (a
+    worker thread), not the thread the test's event loop runs on."""
+    import threading
+
+    from custom_components.digital_frames import scene_packs as sp
+    from custom_components.digital_frames.const import SCENE_PACK_INDEX_URL
+
+    calling_threads: list[threading.Thread] = []
+
+    def _fake_integration_version():
+        calling_threads.append(threading.current_thread())
+        return "0.12.0"
+
+    monkeypatch.setattr(sp, "_integration_version", _fake_integration_version)
+    aioclient_mock.get(
+        SCENE_PACK_INDEX_URL,
+        json={"schema_version": 1, "catalog_version": "1.0.0", "packs": []},
+    )
+
+    await scene_pack_manager.async_list_available()
+
+    assert calling_threads, "_integration_version was never called"
+    assert calling_threads[0] is not threading.main_thread()
+
+
 # ---------------------------------------------------------------------------
 # Install / sync / uninstall (fake library + mocked catalog fetch)
 # ---------------------------------------------------------------------------

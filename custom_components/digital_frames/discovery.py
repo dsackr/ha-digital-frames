@@ -81,6 +81,12 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
                 # interval retries from scratch.
                 _LOGGER.exception("Digital Frames background discovery scan failed")
 
+    # Listeners that need explicit teardown on HA stop -- NOT the two
+    # async_listen_once hooks below, which already self-unsubscribe the
+    # moment they fire (or, for _on_stop, are mid-removal by the bus
+    # dispatcher while running). Force-unsubbing an already-fired once
+    # listener raised "Unable to remove unknown job listener" on every
+    # normal start/stop cycle (see the 2026-07-30 stability investigation).
     unsubs: list = []
 
     # First sweep as soon as HA is fully started (or immediately if the
@@ -94,9 +100,7 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
         async def _on_started(_event) -> None:
             await _async_scan()
 
-        unsubs.append(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
-        )
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
     unsubs.append(async_track_time_interval(hass, _async_scan, SCAN_INTERVAL))
 
@@ -105,7 +109,7 @@ def async_setup_discovery(hass: "HomeAssistant") -> None:
         for unsub in domain_data.pop("_discovery_unsub", []):
             unsub()
 
-    unsubs.append(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop))
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
     domain_data["_discovery_unsub"] = unsubs
 
     # Exposed for the on-demand rescan endpoint below: frames sleep, so a

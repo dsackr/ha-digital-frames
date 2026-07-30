@@ -49,7 +49,15 @@ frame moved; pending flows dedup via `unique_id`.
   `_match_and_update_meural`).
 - **If it silently breaks**: users can't add frames at all, or duplicate
   entries get created for the same physical frame; Meurals never appear
-  under Settings → Devices & Services → Discovered.
+  under Settings → Devices & Services → Discovered. A real, lower-severity
+  bug found in production (2026-07-30): `async_setup_discovery` registered
+  its `EVENT_HOMEASSISTANT_STARTED`/`_STOP` hooks via `async_listen_once`
+  (which self-unsubscribes the instant it fires) but then *also*
+  force-unsubscribed them again from `_on_stop`'s cleanup loop -- raising
+  "Unable to remove unknown job listener" on every normal start-then-stop
+  cycle. Caught internally by HA core (not fatal) but real log noise during
+  exactly the restart cycles this integration was already suspected of
+  causing. Fixed by only force-unsubscribing the persistent interval timer.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
   `tests/python/config_flow/test_config_flow_user_scan.py` (menu,
@@ -57,7 +65,11 @@ frame moved; pending flows dedup via `unique_id`.
   integration_discovery + confirm, size auto-detect, dedup);
   `tests/python/unit/test_meural.py` (`meural_unique_id`, dual-probe
   `scan_subnet`); `tests/python/unit/test_discovery_meural.py`
-  (background sweep starts Meural discovery flow / skips configured).
+  (background sweep starts Meural discovery flow / skips configured;
+  `test_setup_discovery_start_stop_does_not_leak_listener_errors` drives a
+  full not-running → started → stop cycle and asserts no listener-removal
+  error is logged -- confirmed to fail with both original error variants
+  when the fix is reverted).
 
 ## 2. Options flow (scan interval, orientation edge, 180° flip)
 User edits power/sleep, flip, hanging edge, and advanced poll settings via HA's
@@ -171,7 +183,21 @@ slow ESP32 sequential panels (7.3").
   causing the frame to repeatedly download and redraw the same image on every
   wake; or push-on-wake never fires because no `device_tracker` matches and
   fast poll is off (clone pull still works; push-only frames wait for a
-  successful normal poll or manual wake).
+  successful normal poll or manual wake). A real, severe instance found in
+  production (2026-07-30): `__init__.async_setup_entry`'s `_bind_tracker` --
+  the `EVENT_HOMEASSISTANT_STARTED` listener that (re)binds this watch for
+  entries set up before HA finished starting -- was a plain, undecorated
+  function. Home Assistant's `HassJob` auto-detection runs an undecorated
+  listener in the executor thread pool instead of on the event loop, so
+  `_async_on_network_home`'s `self.hass.async_create_task(...)`
+  (coordinator.py:293) executed from a worker thread whenever a matching
+  device_tracker was already home at boot. HA's own thread-safety guard logs
+  this as able to "crash or data to corrupt"; live Supervisor logs confirmed
+  it correlated with repeated `Watchdog missed a Home Assistant Core API
+  response` → forced Core restarts, i.e. exactly the "HA has frozen/rebooted
+  multiple times" reports, and predates (so is independent of) the KPF 7
+  Atkinson dither regression. Fixed by decorating `_bind_tracker` with
+  `@callback` so HA schedules it on the event loop.
 - **Test status**: **Backend-tested** —
   `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (online
   push+pull, offline stage-for-pull, default no fast poll, optional fast
@@ -180,7 +206,13 @@ slow ESP32 sequential panels (7.3").
   `tests/python/coordinator/test_coordinator_device_tracker.py` (IP/MAC
   match, home transition flushes, teardown),
   `tests/python/setup/test_entities.py` (queued sensor attrs image_id /
-  queued_at). **Panel-tested** — `tests/panel/dashboard.spec.js` (on deck
+  queued_at),
+  `tests/python/setup/test_init_setup_entry.py`
+  (`test_late_bound_tracker_watch_does_not_violate_thread_safety` --
+  reproduces the exact late-bind-before-HA-started path with a tracker
+  already home, and asserts no thread-safety violation is logged; confirmed
+  to fail with the original `RuntimeError` when `@callback` is reverted).
+  **Panel-tested** — `tests/panel/dashboard.spec.js` (on deck
   wall badge + Frame Info row), `tests/panel/fraimic-card.spec.js` (ON DECK
   badge).
 
@@ -596,7 +628,11 @@ images/JSON only (see frame-addons `docs/CATALOG_SCHEMA.md`).
   time) — an unreachable catalog, or one that no longer listed this
   `pack_id`, left the scene gone and the pack stuck "installed" forever,
   every retry failing identically. Uninstall no longer touches the
-  network at all.
+  network at all. Also, `_async_fetch_index` called `_integration_version()`
+  (reads `manifest.json`) directly on the event loop -- caching made it a
+  one-time cost per HA run, but that first hit still tripped HA's blocking-
+  call detector on every fresh restart, observed repeatedly in production
+  logs (2026-07-30). Fixed by running it through `hass.async_add_executor_job`.
 - **Test status**: Panel-tested indirectly (`addons-categories.spec.js`;
   `addons-catalog-refresh.spec.js` covers the catalog re-fetching on tab
   activation and panel revive rather than only once at initial load).
@@ -605,7 +641,8 @@ images/JSON only (see frame-addons `docs/CATALOG_SCHEMA.md`).
   already-installed guard, uninstall scene+image cleanup and untag-vs-delete,
   uninstall succeeds when the remote catalog is unreachable, sync recovery
   by filename, orientation-aware assignment, **checksum mismatch**,
-  **min_integration filter**, version tuple helpers).
+  **min_integration filter**, version tuple helpers,
+  `test_fetch_index_reads_integration_version_off_the_event_loop`).
 
 ## 18. Scene-pack "widgets" (RETIRED — use Live Agenda)
 **Retired in Content Platform Phases 5–6.** Widget runtime code
@@ -749,8 +786,8 @@ displayed if available.
   `digital-frames-panel.js` (`_openFrameSettingsMenu`, `_renderFrameOrientationDisplay`,
   `_stageFrameOrientation`, `_pollFrameOrientation`, the `frame-settings-save` click handler);
   `library_http.py` (`DigitalFramesFramePollOrientationView`).
-- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, the camera entity fails to load or serve the active frame image, orientation icons jump around as the label text changes length, an orientation click auto-applies without a Save Changes step (or Save Changes silently drops a staged orientation change), Rediscover does nothing / leaves the frame's displayed orientation stale, or the external link icon or actual keep-awake status is missing or incorrect.
-- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py`, `tests/python/library/test_library_http_frame_poll_orientation.py` (poll_orientation endpoint forces a refresh, 404s on unknown entry, 400s on missing entry_id). **Panel-tested** — `tests/panel/frame-manage.spec.js` (orientation lock staged locally and only applied on Save Changes; icons stay in a fixed position regardless of label length; Rediscover polls immediately without staging/saving; UI link icon matches the frame's type and IP; Keep Awake actual status displayed).
+- **If it silently breaks**: wrong/missing sensor values, selecting an orientation doesn't change rendering, locking/unlocking fails, the camera entity fails to load or serve the active frame image, orientation icons jump around as the label text changes length, an orientation click auto-applies without a Save Changes step (or Save Changes silently drops a staged orientation change), Rediscover does nothing / leaves the frame's displayed orientation stale, or the external link icon or actual keep-awake status is missing or incorrect. A real bug found in production (2026-07-30): `DigitalFramesCamera.async_camera_image` imported `_get_manager` from `.library`, but that helper is defined in `.library_http` -- a hard `ImportError` on every camera snapshot request once no in-memory `last_thumbnail` was cached (e.g. right after a restart), 500ing the entity's `camera_proxy` endpoint. Fixed by importing from the correct module.
+- **Test status**: **Backend-tested** — `tests/python/setup/test_entities.py` (including `test_camera_image_falls_back_to_library_thumbnail`, which exercises the `last_thumbnail is None` path that reaches the `_get_manager` import -- confirmed to fail with the original `ImportError` before the fix), `tests/python/library/test_library_http_frame_poll_orientation.py` (poll_orientation endpoint forces a refresh, 404s on unknown entry, 400s on missing entry_id). **Panel-tested** — `tests/panel/frame-manage.spec.js` (orientation lock staged locally and only applied on Save Changes; icons stay in a fixed position regardless of label length; Rediscover polls immediately without staging/saving; UI link icon matches the frame's type and IP; Keep Awake actual status displayed).
 
 ## 22. Render spec resolution (orientation lock + rotation + hanging edge)
 Central "how should this image be composed for this frame" resolution —

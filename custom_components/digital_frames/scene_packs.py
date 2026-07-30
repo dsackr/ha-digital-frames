@@ -238,7 +238,11 @@ class ScenePackManager:
         # index still lists them (Content Platform Phase 5/6).
         packs = [p for p in packs if isinstance(p, dict) and p.get("type") != "widget"]
 
-        integ = _integration_version()
+        # _integration_version() reads manifest.json on first call (cached
+        # after) -- off the event loop via executor so a cache-cold catalog
+        # fetch never trips HA's blocking-call detector (see the 2026-07-30
+        # stability investigation in KEY_PRODUCT_FLOWS.md).
+        integ = await self.hass.async_add_executor_job(_integration_version)
         compatible: list[dict[str, Any]] = []
         skipped = 0
         for pack in packs:

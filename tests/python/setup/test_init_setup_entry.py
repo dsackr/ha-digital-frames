@@ -62,6 +62,46 @@ async def test_fresh_install_auto_creates_scenes_hub_once(hass, make_frame_entry
     assert len(hub_entries) == 1
 
 
+async def test_late_bound_tracker_watch_does_not_violate_thread_safety(
+    hass, make_frame_entry, caplog
+):
+    """Regression: __init__._bind_tracker (the EVENT_HOMEASSISTANT_STARTED
+    listener that (re)binds the device_tracker wake-watch for entries set up
+    before HA finished starting) was a plain, undecorated function. Home
+    Assistant's HassJob auto-detection runs an undecorated listener in the
+    executor thread pool rather than on the event loop -- so the moment it
+    ran, coordinator.py's `self.hass.async_create_task(...)` (inside
+    `_async_on_network_home`, reached here because the tracker starts
+    already home) executed from a worker thread instead of the event loop.
+    HA's own thread-safety guard flags this as able to "crash or data to
+    corrupt" -- confirmed in production logs as the actual trigger behind
+    repeated Supervisor watchdog restarts. Missing `@callback` was the fix;
+    this reproduces the exact late-bind path (hass not yet running at setup)
+    that only exercises it.
+    """
+    from homeassistant.const import STATE_HOME, EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+
+    entry = make_frame_entry(host="192.168.1.50", mac="aabbccddeeff")
+    entry.add_to_hass(hass)
+
+    hass.states.async_set(
+        "device_tracker.frame_wifi",
+        STATE_HOME,
+        {"ip": "192.168.1.50", "mac": "aa:bb:cc:dd:ee:ff"},
+    )
+
+    hass.set_state(CoreState.not_running)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await hass.async_block_till_done()
+
+    assert "thread other than the event loop" not in caplog.text
+
+
 async def test_unload_removes_services_only_when_last_frame_gone(
     hass, make_frame_entry
 ):

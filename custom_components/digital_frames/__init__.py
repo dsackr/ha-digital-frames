@@ -13,7 +13,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.components.http import StaticPathConfig
@@ -519,6 +519,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         # their entities; also re-run immediately if already running.
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED  # noqa: PLC0415
 
+        @callback
         def _bind_tracker(_event=None) -> None:
             coordinator.async_setup_tracker_watch()
 

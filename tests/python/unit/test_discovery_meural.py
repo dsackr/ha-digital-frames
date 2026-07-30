@@ -251,3 +251,55 @@ def test_match_and_update_meural_ignores_fraimic():
         _match_and_update_meural(fake_hass, [entry], "192.168.1.10", "meural:X")
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_setup_discovery_start_stop_does_not_leak_listener_errors(
+    hass, monkeypatch, caplog
+):
+    """Regression: async_setup_discovery force-unsubscribed its own
+    EVENT_HOMEASSISTANT_STARTED/_STOP async_listen_once hooks on stop, even
+    though those already self-unsubscribe the moment they fire (or, for
+    _on_stop, are mid-removal by the bus dispatcher while running). That
+    raised "Unable to remove unknown job listener" on every normal
+    start-then-stop cycle in production -- caught internally by HA core (not
+    fatal) but real log noise/code smell during exactly the restart cycles
+    this integration was already suspected of causing. Fixed by only
+    force-unsubscribing the persistent interval timer, not the two
+    self-cleaning once-listeners."""
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
+    from homeassistant.core import CoreState
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.digital_frames.discovery import async_setup_discovery
+
+    await async_setup_component(hass, "http", {})
+
+    monkeypatch.setattr(
+        "custom_components.digital_frames.discovery.get_local_ip",
+        lambda: "192.168.1.2",
+    )
+    monkeypatch.setattr(
+        "custom_components.digital_frames.discovery.scan_subnet",
+        lambda *a, **kw: _async_empty_list(),
+    )
+    monkeypatch.setattr(
+        "custom_components.digital_frames.discovery.async_get_clientsession",
+        lambda hass: object(),
+    )
+
+    hass.set_state(CoreState.not_running)
+    async_setup_discovery(hass)
+
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await hass.async_block_till_done()
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+
+    assert "Unable to remove unknown job listener" not in caplog.text
+
+
+async def _async_empty_list():
+    return []

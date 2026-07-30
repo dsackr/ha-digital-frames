@@ -287,3 +287,34 @@ async def test_camera_image_returns_coordinator_thumbnail(hass, make_frame_entry
     camera = DigitalFramesCamera(coordinator, entry)
     img = await camera.async_camera_image()
     assert img == b"png-bytes"
+
+
+async def test_camera_image_falls_back_to_library_thumbnail(hass, make_frame_entry):
+    """Regression: async_camera_image imported _get_manager from `.library`,
+    which doesn't define it (it lives in `.library_http`) -- a real
+    ImportError on every camera snapshot request once no in-memory
+    last_thumbnail was cached (e.g. after a restart), 500ing the entity's
+    camera_proxy endpoint. Only exercised when last_thumbnail is None and
+    last_image_id is set, so test_camera_image_returns_coordinator_thumbnail
+    above (which sets last_thumbnail) never caught it."""
+    from custom_components.digital_frames.camera import DigitalFramesCamera
+
+    entry = make_frame_entry()
+
+    class _FakeLibraryManager:
+        async def async_get_thumbnail(self, image_id, edge):
+            assert image_id == "img-1"
+            assert edge == 480
+            return b"thumb-bytes"
+
+    hass.data.setdefault(DOMAIN, {})["_library"] = _FakeLibraryManager()
+
+    coordinator = _fake_coordinator(pending_send=None)
+    coordinator.hass = hass
+    coordinator.last_thumbnail = None
+    coordinator.last_image_id = "img-1"
+
+    camera = DigitalFramesCamera(coordinator, entry)
+    camera.hass = hass
+    img = await camera.async_camera_image()
+    assert img == b"thumb-bytes"

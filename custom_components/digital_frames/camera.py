@@ -62,7 +62,7 @@ class DigitalFramesCamera(CoordinatorEntity[DigitalFramesCoordinator], Camera):
 
         image_id = getattr(coordinator, "last_image_id", None)
         if image_id is not None:
-            from .library import _get_manager
+            from .library_http import _get_manager
             manager = _get_manager(self.hass)
             try:
                 # Get a 480px thumbnail or the original
