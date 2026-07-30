@@ -267,6 +267,43 @@ def test_atkinson_and_fs_produce_valid_length(sample_image_bytes):
     assert set(p.getdata()).issubset(set(range(6)))
 
 
+def test_atkinson_full_panel_size_completes_quickly(sample_image_bytes):
+    """Regression: cp3 made Atkinson (a pure-Python per-pixel loop) the
+    default dither for every real send, but it had only ever been measured
+    on tiny crops -- at the 7.3" panel's actual 800x480 resolution it turned
+    out to burn a CPU core for seconds per send (worse on weaker HA hosts),
+    which a user reported as Home Assistant itself rebooting on every send.
+    A large chunk of that cost was `_np.clip()` on lone numpy scalars going
+    through generic ufunc dispatch instead of a plain comparison. Bound this
+    generously (not a tight perf assertion, just a guard against another
+    silent multi-x regression slipping in unmeasured) at the real, registered
+    resolution instead of a "small canvas" stand-in.
+    """
+    import time
+
+    from custom_components.digital_frames.image_converter import (
+        _open_as_rgb,
+        _prepare_for_spectra6,
+        _quantize_atkinson_p,
+        _resize_cover_centered,
+    )
+
+    width, height = CLONE_7_3
+    src = sample_image_bytes(1600, 960, color=(90, 130, 60))
+    img = _resize_cover_centered(_open_as_rgb(src), width, height)
+
+    start = time.monotonic()
+    p = _quantize_atkinson_p(_prepare_for_spectra6(img))
+    elapsed = time.monotonic() - start
+
+    assert p.mode == "P"
+    assert set(p.getdata()).issubset(set(range(6)))
+    assert elapsed < 6.0, (
+        f"Atkinson dither took {elapsed:.1f}s at {width}x{height} -- "
+        "this is the panel-freezing regression from cp3, don't let it back in"
+    )
+
+
 def test_quantized_pixels_are_restricted_to_spectra6_palette(sample_image_bytes):
     from custom_components.digital_frames.image_converter import (
         SPECTRA6_PALETTE_RGB,

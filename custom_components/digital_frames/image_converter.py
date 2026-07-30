@@ -234,11 +234,15 @@ def _quantize_atkinson_p(image: "Image.Image") -> "Image.Image":
     for y in range(height):
         for x in range(width):
             old = working[y, x]
-            r, g, b = (
-                float(_np.clip(old[0], 0, 255)),
-                float(_np.clip(old[1], 0, 255)),
-                float(_np.clip(old[2], 0, 255)),
-            )
+            o0, o1, o2 = old[0], old[1], old[2]
+            # Plain comparisons instead of _np.clip(): clip() on a lone
+            # numpy scalar goes through generic ufunc dispatch, which
+            # measured as ~45% of this loop's total runtime (this loop
+            # runs once per pixel, so that overhead is paid ~2*width*height
+            # times per image -- see the 7.3" panel reboot investigation).
+            r = 0.0 if o0 < 0 else (255.0 if o0 > 255 else float(o0))
+            g = 0.0 if o1 < 0 else (255.0 if o1 > 255 else float(o1))
+            b = 0.0 if o2 < 0 else (255.0 if o2 > 255 else float(o2))
             idx = _closest_palette_index(r, g, b)
             new = _PALETTE_F32[idx]
             working[y, x] = new

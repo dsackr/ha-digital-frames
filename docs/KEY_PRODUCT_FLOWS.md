@@ -302,13 +302,29 @@ renderer — see KPF 28/29).
   resolution; fixed via `math.ceil` (any resulting 1px overage is trimmed
   by the existing centered crop, so this can only shrink the gap, never
   introduce one).
+
+  Not silent, but a real regression from the same cp3 change: making
+  Atkinson (`_quantize_atkinson_p`, a pure-Python per-pixel loop) the
+  default dither for every ordinary send was never measured at a real
+  panel resolution before shipping (CI only ever ran it on tiny crops "for
+  speed"). At the 7.3" panel's actual 800×480 it burned a CPU core for
+  several seconds per send (worse on weaker HA hosts), reported by a user
+  as Home Assistant itself rebooting on every send to that frame. Root
+  cause was largely `_np.clip()` called per pixel on lone numpy scalars —
+  generic ufunc dispatch overhead that alone was ~45% of the loop's
+  runtime; replaced with a plain Python comparison (same float32 math, same
+  output — verified byte-identical against the prior implementation across
+  several sizes), roughly halving encode time with no dithering/quality
+  change.
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_image_converter.py` (including the cover-crop
   resize fully covering its canvas with no unfilled edge gap, reproduced
   against a known-affected source size and registered resolution;
   Fraimic-aligned cp3: ideal palette, RGBL pure-ink mapping, enhance
   chain, Atkinson on a small canvas; packing/geometry tests use
-  `dither="fs"` so CI stays fast),
+  `dither="fs"` so CI stays fast; `test_atkinson_full_panel_size_completes_quickly`
+  bounds Atkinson wall-clock time at the real 7.3" 800x480 resolution as a
+  guard against this exact multi-x perf regression recurring unmeasured),
   `tests/python/unit/test_panel_codec.py`, including pack→unpack
   byte-exact round-trips against both byte layouts. Flagged as the riskiest
   silent-failure surface in the codebase in the initial gap analysis; also
