@@ -262,14 +262,19 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
     # relative to what the panel's raster expects.
     assert len(wire) == (native_w * native_h) // 2
 
-    # Content must actually match a correct rotate-then-quantize-then-pack
-    # of the same source (not just be *some* native-sized bytes). The
-    # reference composes at the *effective* size (matching the renderer)
-    # and applies the same canvas rotation image_converter._process would
-    # for an ordinary photo send -- resize/rotate order must not matter
-    # here since the source is built only from exact palette colours.
-    reference_png = _exact_palette_marker_png(eff_w, eff_h)
-    reference_bin = encode_for_panel(reference_png, eff_w, eff_h, rotation=90)
+    # Content: skill path unpacks the already-Spectra bin, NEAREST-rotates,
+    # and re-packs without re-running the vivid prepass (that would re-dither
+    # palette edges). Mirror that here for a byte-exact reference.
+    from PIL import Image
+
+    from custom_components.digital_frames.image_converter import (
+        _pack_p_image_fast,
+        _quantize_exact_real_world_p,
+    )
+
+    ref_img = unpack_spectra6_bin(unrotated_bin, eff_w, eff_h)
+    ref_img = ref_img.rotate(90, expand=True, resample=Image.Resampling.NEAREST)
+    reference_bin = _pack_p_image_fast(_quantize_exact_real_world_p(ref_img))
     assert wire == reference_bin
 
     # And it must actually differ from the (bug's) pass-through bytes --

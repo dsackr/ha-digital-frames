@@ -269,6 +269,14 @@ Custom Assist/LLM intents to generate an AI image, display a specific library im
 Converts any Pillow-readable image into the frame's proprietary packed-
 nibble binary format: auto-rotate, cover-crop, manual crop, canvas
 rotation, dithering, and two PanelCodecs (split-half vs. sequential).
+
+**Color (cp2):** before Floyd–Steinberg, a vibrance/contrast pre-pass and
+green-dominant lift (`_prepare_for_spectra6`) reduce muddy olive midtones.
+Quantize matches against `SPECTRA6_MATCH_RGB` (higher chroma centroids),
+then remaps palette slots to measured `SPECTRA6_REAL_WORLD_RGB` for pack
+preview. Library bins are stored under `…/<codec_id>/<COLOR_PIPELINE_ID>/`
+so older muted encodings are not reused after a pipeline bump.
+
 Call sites that produce wire payload for a send should use
 `panel_codec.encode_for_panel*` (codec selection by panel geometry);
 packing primitives remain in `image_converter.py`. Also the reverse
@@ -278,8 +286,9 @@ renderer — see KPF 28/29).
 - **Entry points**: `panel_codec.py` (`encode_for_panel`,
   `encode_for_panel_with_preview`, `encode_path_for_panel_with_preview`),
   `image_converter.py` (`convert_image*`, `_process`, `_process_cropped`,
+  `_prepare_for_spectra6`, `_quantize_to_spectra6*`,
   `_pack_to_spectra6_bin` / `_pack_p_image_fast`, `default_cover_crop_box`,
-  `unpack_spectra6_bin`, `preview_png_from_bin`).
+  `unpack_spectra6_bin`, `preview_png_from_bin`, `COLOR_PIPELINE_ID`).
 - **If it silently breaks**: this is the "garbled/duplicated image on the
   physical frame" failure the module's own docstring calls out — no
   exception, just a wrong picture on real hardware. A broken unpacker is

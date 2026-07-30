@@ -54,7 +54,10 @@ Conversion pipeline
    center -- overflow is cropped
 4. Optionally rotate the finished canvas (90/180/270) -- used for frames
    physically hung in their non-native orientation and/or upside down
-5. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg dithering
+5. Prepare for Spectra gamut (saturation / contrast / green lift) then
+   quantize with Floyd-Steinberg. Matching uses a slightly more saturated
+   palette so photos pull toward primary inks; preview/pack still map to
+   measured real-world panel colors.
 6. Pack pixels into the nibble format described above, using the byte
    ordering that matches the final resolution's physical panel
 """
@@ -66,7 +69,7 @@ import math
 from typing import Tuple
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageEnhance
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "Pillow is required for image conversion. "
@@ -85,10 +88,13 @@ from .frame_types import LAYOUT_SPLIT_HALF, frame_type_for_resolution
 # Palette constants
 # ---------------------------------------------------------------------------
 
+# Bump when the color pipeline changes so library .bin caches miss and
+# re-encode (muted cp1 bins must not keep serving after a vivid upgrade).
+COLOR_PIPELINE_ID = "cp2"
+
 # Real-world RGB values measured from an actual Spectra 6 display under D65
-# lighting (from the epdoptimize project). These are used as the quantization
-# target so that dithering error diffusion is computed in perceptually accurate
-# colour space rather than against idealised primaries.
+# lighting (from the epdoptimize project). Used for *preview* RGB and for
+# legacy packer pixel→nibble lookup after indices are chosen.
 SPECTRA6_REAL_WORLD_RGB: Tuple[Tuple[int, int, int], ...] = (
     (25, 30, 33),     # Black   → nibble 0
     (232, 232, 232),  # White   → nibble 1
@@ -98,18 +104,34 @@ SPECTRA6_REAL_WORLD_RGB: Tuple[Tuple[int, int, int], ...] = (
     (18, 95, 32),     # Green   → nibble 6
 )
 
+# Quantization *match* targets: same order as REAL_WORLD, but higher chroma
+# so continuous-tone photos (especially foliage) land on green/yellow/red
+# primaries instead of dithering toward gray-olive midtones. Indices still
+# map 1:1 to SPECTRA6_NIBBLE_VALUES / REAL_WORLD for packing and preview.
+SPECTRA6_MATCH_RGB: Tuple[Tuple[int, int, int], ...] = (
+    (12, 14, 16),      # Black
+    (248, 248, 248),   # White
+    (255, 228, 36),    # Yellow — punchier
+    (210, 22, 28),     # Red
+    (28, 92, 220),     # Blue
+    (16, 155, 48),     # Green — brighter/more saturated than panel-measured
+)
+
 # Raw nibble values that the Spectra 6 hardware expects for each palette entry.
 # Note that value 4 is intentionally skipped (unused by the hardware).
 SPECTRA6_NIBBLE_VALUES: Tuple[int, ...] = (0, 1, 2, 3, 5, 6)
 
 # Sanity check: palette and nibble tables must stay in sync.
 assert len(SPECTRA6_REAL_WORLD_RGB) == len(SPECTRA6_NIBBLE_VALUES)
+assert len(SPECTRA6_MATCH_RGB) == len(SPECTRA6_NIBBLE_VALUES)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_palette_image() -> "Image.Image":
+def _build_palette_image(
+    rgb_table: Tuple[Tuple[int, int, int], ...] = SPECTRA6_MATCH_RGB,
+) -> "Image.Image":
     """
     Build a single-pixel palette image used by Pillow's quantize() method.
 
@@ -118,12 +140,51 @@ def _build_palette_image() -> "Image.Image":
     a valid colour rather than an arbitrary one.
     """
     pal_image = Image.new("P", (1, 1))
-    flat_palette = tuple(v for rgb in SPECTRA6_REAL_WORLD_RGB for v in rgb)
+    flat_palette = tuple(v for rgb in rgb_table for v in rgb)
     # Pad to 256 colours × 3 channels = 768 bytes.
-    padding_colour = SPECTRA6_REAL_WORLD_RGB[0]  # black
-    padding = padding_colour * (256 - len(SPECTRA6_REAL_WORLD_RGB))
+    padding_colour = rgb_table[0]  # black
+    padding = padding_colour * (256 - len(rgb_table))
     pal_image.putpalette(flat_palette + padding)
     return pal_image
+
+
+def _real_world_palette_bytes() -> bytes:
+    """768-byte palette: six Spectra real-world colors + black padding."""
+    flat = bytes(v for rgb in SPECTRA6_REAL_WORLD_RGB for v in rgb)
+    pad = bytes(SPECTRA6_REAL_WORLD_RGB[0]) * (256 - len(SPECTRA6_REAL_WORLD_RGB))
+    return flat + pad
+
+
+def _prepare_for_spectra6(image: "Image.Image") -> "Image.Image":
+    """Boost chroma/contrast so FS dither uses more of the 6 inks.
+
+    Photo greens are often closer (in sRGB) to yellow+black mixtures than to
+    Spectra green; a mild saturation/contrast pre-pass plus a green lift
+    reduces muddy olive midtones without changing packing layout.
+    """
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Global vibrance-ish boost (Color then mild Contrast).
+    image = ImageEnhance.Color(image).enhance(1.38)
+    image = ImageEnhance.Contrast(image).enhance(1.10)
+
+    if _np is None:
+        return image
+
+    arr = _np.asarray(image, dtype=_np.float32)
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    # Pixels where green is the dominant channel: pull toward Spectra green.
+    green_dom = (g >= r) & (g >= b) & (g > 40)
+    if _np.any(green_dom):
+        # Lift G, slightly suppress R (kills brown/olive cast), nudge B down.
+        g2 = _np.clip(g * 1.18 + 8.0, 0, 255)
+        r2 = _np.clip(r * 0.92, 0, 255)
+        b2 = _np.clip(b * 0.95, 0, 255)
+        arr[green_dom, 0] = r2[green_dom]
+        arr[green_dom, 1] = g2[green_dom]
+        arr[green_dom, 2] = b2[green_dom]
+    return Image.fromarray(arr.astype(_np.uint8), mode="RGB")
 
 
 def _resize_cover_centered(
@@ -255,19 +316,14 @@ def _auto_rotate(
 
 def _quantize_to_spectra6(image: "Image.Image") -> "Image.Image":
     """
-    Quantize *image* (must be RGB) to the 6 Spectra 6 real-world colours using
+    Quantize *image* (must be RGB) to the 6 Spectra 6 colours using
     Floyd-Steinberg error-diffusion dithering.
 
     Returns an RGB image where every pixel is one of the six palette entries in
-    :data:`SPECTRA6_REAL_WORLD_RGB`.
+    :data:`SPECTRA6_REAL_WORLD_RGB` (match uses SPECTRA6_MATCH_RGB, then
+    palette slots are remapped for pack/preview).
     """
-    pal_image = _build_palette_image()
-    # quantize() returns a palette-mode image; convert back to RGB so that
-    # pixel values are plain (r, g, b) tuples for the packing step.
-    return image.quantize(
-        dither=Image.Dither.FLOYDSTEINBERG,
-        palette=pal_image,
-    ).convert("RGB")
+    return _quantize_to_spectra6_p(image).convert("RGB")
 
 
 def _nibble_for_pixel(quantized_image: "Image.Image", x: int, y: int) -> int:
@@ -442,13 +498,41 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
 
 
 def _quantize_to_spectra6_p(image: "Image.Image") -> "Image.Image":
-    """Identical quantization to _quantize_to_spectra6 but returns the
-    P-mode (palette-index) image the fast packer consumes, instead of
-    converting back to RGB."""
-    return image.quantize(
+    """Quantize with match palette + FS dither; return P-mode for packing.
+
+    Matching uses SPECTRA6_MATCH_RGB (higher chroma). Indices are copied onto
+    a fresh P-image whose palette is SPECTRA6_REAL_WORLD_RGB so convert/pack
+    see panel-measured colors while nibble indices stay correct.
+    """
+    prepared = _prepare_for_spectra6(image)
+    matched = prepared.quantize(
         dither=Image.Dither.FLOYDSTEINBERG,
-        palette=_build_palette_image(),
+        palette=_build_palette_image(SPECTRA6_MATCH_RGB),
     )
+    # putpalette on the quantize() result is unreliable across Pillow builds;
+    # rebuild so indices map to real-world RGB for pack + preview.
+    out = Image.new("P", matched.size)
+    out.putpalette(_real_world_palette_bytes())
+    out.putdata(list(matched.getdata()))
+    return out
+
+
+def _quantize_exact_real_world_p(image: "Image.Image") -> "Image.Image":
+    """Map already-panel-colored RGB to P indices without vivid prepass/dither.
+
+    Used when rotating an existing Spectra ``.bin`` (text skills): the source
+    is already 6-color; re-running FS + prepare would re-dither edges.
+    """
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    matched = image.quantize(
+        dither=Image.Dither.NONE,
+        palette=_build_palette_image(SPECTRA6_REAL_WORLD_RGB),
+    )
+    out = Image.new("P", matched.size)
+    out.putpalette(_real_world_palette_bytes())
+    out.putdata(list(matched.getdata()))
+    return out
 
 
 def _open_as_rgb(source: "str | bytes") -> "Image.Image":
@@ -715,7 +799,7 @@ def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Ima
         indices = bytes(rows)
 
     image = Image.frombytes("P", (width, height), indices)
-    image.putpalette(_build_palette_image().getpalette())
+    image.putpalette(_real_world_palette_bytes())
     return image.convert("RGB")
 
 

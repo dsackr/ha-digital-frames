@@ -170,6 +170,49 @@ def test_default_cover_crop_box_is_centered_for_wider_source():
     assert (y0, y1) == (0.0, 1.0)
 
 
+def test_prepare_for_spectra6_increases_green_dominance():
+    """Foliage-like olive should get greener before quantize."""
+    from PIL import Image
+
+    from custom_components.digital_frames.image_converter import _prepare_for_spectra6
+
+    # Olive/brown-green typical of undithered landscape midtones.
+    src = Image.new("RGB", (32, 32), (90, 110, 70))
+    out = _prepare_for_spectra6(src)
+    r, g, b = out.getpixel((16, 16))
+    assert g > 110
+    assert g - r > (110 - 90)  # gap to red widened (less brown)
+
+
+def test_green_field_uses_more_green_nibble_than_mud(sample_image_bytes):
+    """After cp2 pipeline, a green field should lean on Spectra green ink."""
+    from PIL import Image
+    import io
+
+    from custom_components.digital_frames.image_converter import (
+        SPECTRA6_NIBBLE_VALUES,
+        convert_image_bytes,
+    )
+
+    # Saturated green photo-like solid (not pure Spectra green).
+    img = Image.new("RGB", (200, 150), (40, 160, 50))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    width, height = CLONE_7_3
+    packed = convert_image_bytes(buf.getvalue(), width, height)
+    # Count high/low nibbles that are green (6).
+    green_n = SPECTRA6_NIBBLE_VALUES[5]  # index 5 → nibble 6
+    green_pixels = 0
+    for byte in packed:
+        if (byte >> 4) == green_n:
+            green_pixels += 1
+        if (byte & 0xF) == green_n:
+            green_pixels += 1
+    total = width * height
+    # Majority of a pure green field should land on green ink (not yellow/black mud).
+    assert green_pixels / total > 0.55, f"only {green_pixels}/{total} green nibbles"
+
+
 def test_quantized_pixels_are_restricted_to_spectra6_palette(sample_image_bytes):
     from custom_components.digital_frames.image_converter import SPECTRA6_REAL_WORLD_RGB
     from PIL import Image

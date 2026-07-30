@@ -414,10 +414,12 @@ def text_skill_payload_for_codec(
         _encode_preview_png,
         _open_as_rgb,
         _pack_p_image_fast,
+        _quantize_exact_real_world_p,
         _quantize_to_spectra6_p,
         preview_png_from_bin,
         unpack_spectra6_bin,
     )
+    from PIL import Image as _PILImage  # noqa: PLC0415
 
     def _image_from_rgb_png() -> Any:
         image = _open_as_rgb(rgb_png)  # type: ignore[arg-type]
@@ -434,7 +436,10 @@ def text_skill_payload_for_codec(
             return _image_from_rgb_png()
         image = unpack_spectra6_bin(spectra_bin, width, height)
         if rotation:
-            image = image.rotate(rotation, expand=True)
+            # NEAREST keeps hard palette edges; no re-blur into midtones.
+            image = image.rotate(
+                rotation, expand=True, resample=_PILImage.Resampling.NEAREST
+            )
         return image
 
     if codec_id in (CODEC_JPEG_Q90, CODEC_PNG):
@@ -453,8 +458,14 @@ def text_skill_payload_for_codec(
     rotated_image: Any | None = None
     if rotation:
         rotated_image = _decode_and_rotate()
-        p_image = _quantize_to_spectra6_p(rotated_image)
+        if rgb_png:
+            # Full photo/text pipeline (AA grays need match+FS).
+            p_image = _quantize_to_spectra6_p(rotated_image)
+        else:
+            # Already Spectra-packed: do not re-run vivid prepass / FS.
+            p_image = _quantize_exact_real_world_p(rotated_image)
         spectra_bin = _pack_p_image_fast(p_image)
+        rotated_image = p_image.convert("RGB")
 
     preview: bytes | None = None
     if rotated_image is not None:

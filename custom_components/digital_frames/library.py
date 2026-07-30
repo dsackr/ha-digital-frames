@@ -498,13 +498,21 @@ class LocalLibraryBackend(LibraryBackend):
         variant: str = "",
         codec_id: str = "",
     ) -> str:
-        # Phase 2: bin/<WxH[variant]>/<codec_id>/<image_id>.bin
+        # Phase 2: bin/<WxH[variant]>/<codec_id>/<COLOR_PIPELINE_ID>/<image_id>.bin
+        # so a color-pipeline upgrade (cp2 vivid quantize) misses old muted bins.
         # Legacy (no codec_id): bin/<WxH[variant]>/<image_id>.bin
         image_id = _safe_image_id(image_id)
         res = _bin_res_key(width, height, variant)
         if codec_id:
+            from .image_converter import COLOR_PIPELINE_ID  # noqa: PLC0415
+
             return os.path.join(
-                self._root, "bin", res, codec_id, f"{image_id}.bin"
+                self._root,
+                "bin",
+                res,
+                codec_id,
+                COLOR_PIPELINE_ID,
+                f"{image_id}.bin",
             )
         return os.path.join(self._root, "bin", res, f"{image_id}.bin")
 
@@ -583,11 +591,8 @@ class LocalLibraryBackend(LibraryBackend):
             if os.path.isfile(path):
                 with open(path, "rb") as f:
                     return f.read()
-            # Fall back to pre-Phase-2 layout for the same geometry.
-            legacy = self._bin_path(image_id, width, height, variant, "")
-            if os.path.isfile(legacy):
-                with open(legacy, "rb") as f:
-                    return f.read()
+            # Do not fall back to pre-cp2 / legacy paths for Spectra bins:
+            # those were encoded with the older muted quantizer.
             return None
         path = self._bin_path(image_id, width, height, variant, "")
         if not os.path.isfile(path):
@@ -991,7 +996,11 @@ class DropboxLibraryBackend(LibraryBackend):
         image_id = _safe_image_id(image_id)
         res = _bin_res_key(width, height, variant)
         if codec_id:
-            return f"{self._root}/bin/{res}/{codec_id}/{image_id}.bin"
+            from .image_converter import COLOR_PIPELINE_ID  # noqa: PLC0415
+
+            return (
+                f"{self._root}/bin/{res}/{codec_id}/{COLOR_PIPELINE_ID}/{image_id}.bin"
+            )
         return f"{self._root}/bin/{res}/{image_id}.bin"
 
     async def _original_dropbox_path(self, image_id: str) -> tuple[str, str]:
@@ -1081,13 +1090,9 @@ class DropboxLibraryBackend(LibraryBackend):
         codec_id: str = "",
     ) -> bytes | None:
         if codec_id:
-            data = await self._dropbox_download_bin(
-                self._bin_path(image_id, width, height, variant, codec_id)
-            )
-            if data is not None:
-                return data
+            # No fallback to pre-cp2 muted Spectra bins.
             return await self._dropbox_download_bin(
-                self._bin_path(image_id, width, height, variant, "")
+                self._bin_path(image_id, width, height, variant, codec_id)
             )
         return await self._dropbox_download_bin(
             self._bin_path(image_id, width, height, variant, "")
