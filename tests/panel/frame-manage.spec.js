@@ -308,13 +308,22 @@ test.describe('Frame management and discovery banner', () => {
       return panel._flowModal && panel._flowModal.step && panel._flowModal.step.step_id === 'init';
     }, { timeout: 5000 });
 
-    // Assert resolution / Frame Type is standard (not hidden)
-    const isResolutionVisible = await page.evaluate(() => {
+    // Frame Type is fixed at add time — not re-offered when size is set.
+    const hasResolutionField = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      const el = root.getElementById('flow-field-resolution');
-      return el && el.offsetParent !== null;
+      return !!root.getElementById('flow-field-resolution');
     });
-    expect(isResolutionVisible).toBe(true);
+    expect(hasResolutionField).toBe(false);
+
+    // Always-on shows a friendly label (not raw frame_always_on).
+    const alwaysOnLabel = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const input = root.getElementById('flow-field-frame_always_on');
+      const row = input && input.closest('.modal-row');
+      const label = row && row.querySelector('label');
+      return label ? label.textContent : null;
+    });
+    expect(alwaysOnLabel).toMatch(/Always on/i);
 
     // Assert advanced fields (scan_interval, fast_poll_when_queued) hidden initially
     const advancedHiddenBefore = await page.evaluate(() => {

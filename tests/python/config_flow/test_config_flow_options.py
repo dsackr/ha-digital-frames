@@ -42,7 +42,6 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
         str(k): k.default() for k in schema if getattr(k, "default", None) is not None
     }
     assert defaults["scan_interval"] == 120
-    assert defaults["resolution"] == "13.3"
     assert defaults[CONF_FRAME_SLEEP_MINUTES] == 45
     assert defaults[CONF_FRAME_ALWAYS_ON] is True
     assert defaults[CONF_FAST_POLL_WHEN_QUEUED] is False
@@ -51,6 +50,8 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     assert CONF_FRAME_SLEEP_MINUTES in field_names
     assert CONF_FRAME_ALWAYS_ON in field_names
     assert CONF_FAST_POLL_WHEN_QUEUED in field_names
+    # Frame Type is fixed at add time — not re-offered when size is already set.
+    assert "resolution" not in field_names
 
 
 async def test_size_unset_leaves_unset_option_available(hass, make_frame_entry):
@@ -59,6 +60,7 @@ async def test_size_unset_leaves_unset_option_available(hass, make_frame_entry):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     schema = result["data_schema"].schema
+    # Legacy entries without a type still get a Frame Type (resolution) field.
     resolution_key = next(k for k in schema if str(k) == "resolution")
     assert "" in schema[resolution_key].container
 
@@ -101,7 +103,6 @@ async def test_orientation_lock_carried_through_unrelated_save(hass, make_frame_
             CONF_FAST_POLL_WHEN_QUEUED: True,
             CONF_FRAME_SLEEP_MINUTES: 20,
             CONF_FRAME_ALWAYS_ON: True,
-            "resolution": "13.3",
             CONF_ROTATION_EDGE: EDGE_RIGHT,
             "rotate_portrait_180": False,
             "rotate_landscape_180": True,

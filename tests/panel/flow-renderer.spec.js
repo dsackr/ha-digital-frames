@@ -20,15 +20,20 @@ function flowModalState(page) {
     return {
       open: overlay.style.display === 'flex',
       title: root.getElementById('flow-modal-title').textContent,
-      fields: [...body.querySelectorAll('[data-flow-field]')].map((el) => ({
-        name: el.dataset.flowField,
-        type: el.dataset.flowType,
-        tag: el.tagName.toLowerCase(),
-        inputType: el.type || null,
-        value: el.type === 'checkbox' ? el.checked : el.value,
-        min: el.min || null,
-        options: el.tagName === 'SELECT' ? [...el.options].map((o) => o.value) : null,
-      })),
+      fields: [...body.querySelectorAll('[data-flow-field]')].map((el) => {
+        const row = el.closest('.modal-row');
+        const labelEl = row && row.querySelector('label');
+        return {
+          name: el.dataset.flowField,
+          type: el.dataset.flowType,
+          tag: el.tagName.toLowerCase(),
+          inputType: el.type || null,
+          value: el.type === 'checkbox' ? el.checked : el.value,
+          min: el.min || null,
+          label: labelEl ? labelEl.textContent : null,
+          options: el.tagName === 'SELECT' ? [...el.options].map((o) => o.value) : null,
+        };
+      }),
       fieldErrors: [...body.querySelectorAll('.flow-field-error')].map((el) => el.textContent),
       fb: root.getElementById('flow-modal-fb').textContent,
       submitVisible: root.getElementById('flow-modal-submit').style.display !== 'none',
@@ -194,13 +199,19 @@ test.describe('Embedded flow renderer', () => {
     expect(state.fields).toEqual([
       expect.objectContaining({ name: 'frame_always_on', type: 'boolean', value: false }),
       expect.objectContaining({ name: 'frame_sleep_minutes', type: 'integer', value: '15', min: '1' }),
-      expect.objectContaining({ name: 'resolution', type: 'select', value: '13.3' }),
       expect.objectContaining({ name: 'rotate_portrait_180', type: 'boolean', inputType: 'checkbox', value: false }),
       expect.objectContaining({ name: 'rotate_landscape_180', type: 'boolean', value: false }),
       expect.objectContaining({ name: 'scan_interval', type: 'integer', inputType: 'number', value: '300', min: '30' }),
       expect.objectContaining({ name: 'fast_poll_when_queued', type: 'boolean', value: false }),
       expect.objectContaining({ name: 'rotation_edge', type: 'select', value: 'left' }),
     ]);
+    // Frame Type is not re-offered once the entry has a size.
+    expect(state.fields.find((f) => f.name === 'resolution')).toBeUndefined();
+    // Labels must be human-readable (not raw schema keys).
+    expect(state.fields.find((f) => f.name === 'frame_always_on').label)
+      .toBe('Always on (keep-awake, like official Fraimic)');
+    expect(state.fields.find((f) => f.name === 'rotate_portrait_180').label)
+      .toBe('Flip Portrait Image');
 
     await setFlowField(page, 'scan_interval', '120');
     await setFlowField(page, 'rotation_edge', 'right');
@@ -212,7 +223,6 @@ test.describe('Embedded flow renderer', () => {
     expect(mockServer.flowSubmissions[0].body).toEqual({
       frame_always_on: false,
       frame_sleep_minutes: 15,
-      resolution: '13.3',
       scan_interval: 120,
       fast_poll_when_queued: false,
       rotation_edge: 'right',

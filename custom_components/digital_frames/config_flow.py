@@ -805,9 +805,14 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             schema_dict[
                 vol.Optional(CONF_FAST_POLL_WHEN_QUEUED, default=current_fast_poll)
             ] = bool
-            schema_dict[
-                vol.Optional(CONF_RESOLUTION, default=current_size or "")
-            ] = vol.In(size_options)
+            # Frame Type (schema key still "resolution" for HA translation
+            # keys) maps to entry.data size / packing profile. It is fixed at
+            # add time for normal entries — only offer the field when size is
+            # missing (legacy / pre-type entries) so users can set it once.
+            if not current_size:
+                schema_dict[
+                    vol.Optional(CONF_RESOLUTION, default="")
+                ] = vol.In(size_options)
             schema_dict[
                 vol.Optional(CONF_ROTATION_EDGE, default=current_edge)
             ] = vol.In(edge_options)

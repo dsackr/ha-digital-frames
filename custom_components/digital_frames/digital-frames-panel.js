@@ -3873,7 +3873,7 @@
       // The flow API returns raw field names/step ids; human strings live
       // in the frontend translation store. Fetched once, merged across the
       // config + options categories. Failure is non-fatal -- the renderer
-      // falls back to raw names.
+      // falls back to built-in friendly labels (never snake_case keys).
       if (this._flowTranslations) return this._flowTranslations;
       const resources = {};
       for (const category of ['config', 'options']) {
@@ -3882,7 +3882,8 @@
             type: 'frontend/get_translations',
             language: (this._hass.language || 'en'),
             category,
-            integration: 'fraimic',
+            // Domain is digital_frames (post-rename); fraimic keys 404.
+            integration: 'digital_frames',
           });
           Object.assign(resources, (resp && resp.resources) || {});
         } catch (err) {
@@ -3893,8 +3894,39 @@
       return resources;
     }
 
+    // Friendly labels when HA translations are missing (rename lag, offline
+    // store, empty harness). Keys are schema field names from config_flow.
+    _flowFieldLabelFallback(fieldName) {
+      const labels = {
+        scan_interval: 'HA status poll interval (seconds)',
+        fast_poll_when_queued: 'Fast-poll frame while image is queued (every 30s)',
+        frame_always_on: 'Always on (keep-awake, like official Fraimic)',
+        frame_sleep_minutes: 'Minutes between image checks',
+        resolution: 'Frame Type',
+        rotation_edge: 'Rotated hanging (which edge is up)',
+        rotate_portrait_180: 'Flip Portrait Image',
+        rotate_landscape_180: 'Flip Landscape Image',
+        meural_email: 'Meural / Netgear email',
+        meural_password: 'Meural / Netgear password',
+        meural_unlink_cloud: 'Unlink Meural cloud account',
+        host: 'IP address',
+        name: 'Name',
+        mac_address: 'Wi‑Fi MAC',
+        mdc_pin: 'MDC PIN',
+      };
+      return labels[fieldName] || null;
+    }
+
     _flowText(key, fallback, placeholders) {
       let text = (this._flowTranslations || {})[key];
+      if (!text) {
+        // Prefer a known friendly field label over a raw snake_case name.
+        const fieldMatch = typeof key === 'string' && key.match(/\.data\.([^.]+)$/);
+        if (fieldMatch) {
+          const friendly = this._flowFieldLabelFallback(fieldMatch[1]);
+          if (friendly) text = friendly;
+        }
+      }
       if (!text) return fallback;
       for (const [name, value] of Object.entries(placeholders || {})) {
         text = text.split(`{${name}}`).join(value);
@@ -4021,7 +4053,7 @@
       body.innerHTML = '';
 
       const category = modal.base.includes('/options/') ? 'options' : 'config';
-      const keyBase  = `component.fraimic.${category}`;
+      const keyBase  = `component.digital_frames.${category}`;
 
       if (result.type === 'create_entry') {
         modal.finished = true;
@@ -4225,7 +4257,10 @@
       row.className = 'modal-row';
 
       const label = document.createElement('label');
-      label.textContent = this._flowText(`${stepKey}.data.${field.name}`, field.name);
+      label.textContent = this._flowText(
+        `${stepKey}.data.${field.name}`,
+        this._flowFieldLabelFallback(field.name) || field.name,
+      );
       row.appendChild(label);
 
       let input;
@@ -4291,7 +4326,10 @@
         const category = stepKey.includes('.options.') ? 'options' : 'config';
         const err = document.createElement('div');
         err.className = 'flow-field-error';
-        err.textContent = this._flowText(`component.fraimic.${category}.error.${errorCode}`, errorCode);
+        err.textContent = this._flowText(
+          `component.digital_frames.${category}.error.${errorCode}`,
+          errorCode,
+        );
         row.appendChild(err);
       }
       return row;

@@ -135,7 +135,7 @@
           "fast_poll_when_queued": "Off by default. When on, HA probes the frame every 30 seconds while a send is waiting — useful only if you have no network device tracker (UniFi, Omada, router presence, etc.). Prefer leaving this off when presence tracking can signal wake.",
           "frame_always_on": "When on, the frame stays on Wi‑Fi and never deep-sleeps (high battery use — best when powered). When off, it wakes, checks for an image, then deep-sleeps.",
           "frame_sleep_minutes": "Battery mode: deep-sleep between wake→pull cycles. Always-on mode: how often to re-check the pull URL for a new image (default 15).",
-          "resolution": "The physical print size of your frame. Leave unset if you don't need to change it.",
+          "resolution": "Panel profile used for packing images (size / origin). Only shown when the type was never set — it does not change in normal use.",
           "rotation_edge": "Only matters when the frame's Orientation is locked to its non-native orientation (e.g. a portrait frame hung landscape). Official Fraimic frames hang left-edge-up; if images on a rotated clone come out upside down, switch this.",
           "meural_email": "Shared Netgear account for all Meural frames. Required for permanent pin (send) and album push. Leave blank to keep the current link.",
           "meural_password": "Required when linking or re-linking. Not stored in this form's options — only used to obtain tokens.",

@@ -59,16 +59,25 @@ frame moved; pending flows dedup via `unique_id`.
   `scan_subnet`); `tests/python/unit/test_discovery_meural.py`
   (background sweep starts Meural discovery flow / skips configured).
 
-## 2. Options flow (scan interval, size, orientation edge, 180° flip)
-User edits a frame's scan interval, physical size (renamed to Frame Type), hanging edge, and
-180°-rotation flags (renamed to Flip Portrait/Landscape Image) via HA's Configure dialog.
-Advanced settings (scan interval, hanging edge) and actions (Reconnect Frame, Remove from HA)
-are collapsed under an expandable Advanced Settings section in the Configure modal.
-- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`).
-- **If it silently breaks**: settings don't stick, or the orientation lock
+## 2. Options flow (scan interval, orientation edge, 180° flip)
+User edits power/sleep, flip, hanging edge, and advanced poll settings via HA's
+Configure dialog (or the panel's embedded options flow). Labels come from
+`strings.json` / `translations/en.json` under domain **digital_frames** (not
+the legacy fraimic domain); the panel also has friendly fallbacks if
+translations fail.
+
+**Frame Type** (schema key `resolution` → `entry.data` size / packing profile)
+is chosen at add time. Configure does **not** re-offer it when size is already
+set. Legacy entries without a size still get a one-time Frame Type field.
+
+Advanced settings (scan interval, fast poll when queued, hanging edge) and
+actions (Reconnect Frame, Remove from HA) are under expandable Advanced Settings.
+- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`, `_flowFieldLabelFallback`).
+- **If it silently breaks**: settings don't stick, labels show snake_case
+  keys, Frame Type reappears for normal entries, or the orientation lock
   resets when saving an unrelated field.
-- **Test status**: Panel-tested (`flow-renderer.spec.js`). **Backend-tested** —
-  `tests/python/config_flow/test_config_flow_options.py`.
+- **Test status**: Panel-tested (`flow-renderer.spec.js`, `frame-manage.spec.js`).
+  **Backend-tested** — `tests/python/config_flow/test_config_flow_options.py`.
 
 ## 3. Coordinator polling & IP self-healing
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if

@@ -196,8 +196,9 @@ function createMockServer({
     }),
     optionsInit: (flowId) => ({
       type: 'form', flow_id: flowId, handler: 'entry_1', step_id: 'init',
+      // Mirrors real options flow when frame type is already set: no
+      // "resolution" / Frame Type field (fixed at add time).
       data_schema: [
-        { name: 'resolution', type: 'select', optional: true, default: '13.3', options: [['13.3', '13.3 inch e-ink'], ['7.3', '7.3 inch e-ink']] },
         { name: 'scan_interval', type: 'integer', valueMin: 30, optional: true, default: 300 },
         { name: 'fast_poll_when_queued', type: 'boolean', optional: true, default: false },
         { name: 'rotation_edge', type: 'select', optional: true, default: 'left', options: [['left', 'Left edge up (Fraimic default)'], ['right', 'Right edge up']] },
