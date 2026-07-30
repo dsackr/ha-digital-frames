@@ -134,3 +134,48 @@ async def test_scenes_hub_entry_has_no_coordinator(hass, make_scenes_hub_entry):
     await hass.async_block_till_done()
 
     assert entry.entry_id not in hass.data[DOMAIN]
+
+
+async def test_offline_fraimic_frame_keeps_coordinator_for_send(
+    hass, make_frame_entry, monkeypatch
+):
+    """Sleeping frames must still load — otherwise send/queue has no coordinator.
+
+    Regression: first_refresh ConfigEntryNotReady used to put Fraimic entries
+    in setup_retry and remove them from hass.data, so "Send to Frames" failed
+    with "No frame coordinator found" while Desktop/Meural (online or soft-
+    fail) still worked.
+    """
+    import aiohttp
+    from homeassistant.config_entries import ConfigEntryState
+
+    class _OfflineResponse:
+        async def __aenter__(self):
+            raise aiohttp.ClientConnectionError("frame asleep")
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _OfflineSession:
+        def get(self, *a, **kw):
+            return _OfflineResponse()
+
+        def post(self, *a, **kw):
+            return _OfflineResponse()
+
+    monkeypatch.setattr(
+        "custom_components.digital_frames.coordinator.async_get_clientsession",
+        lambda hass: _OfflineSession(),
+    )
+
+    entry = make_frame_entry(host="192.168.1.99", entry_id="asleep-frame")
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.entry_id in hass.data[DOMAIN]
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator is not None
+    assert coordinator.last_update_success is False

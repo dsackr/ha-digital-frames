@@ -74,10 +74,12 @@ _GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
 
 def _get_manager(hass):
+    """Return the domain LibraryManager (raises if domain setup has not finished)."""
     domain_data = hass.data.get(DOMAIN, {})
     manager = domain_data.get("_library")
     if manager is None:
         raise RuntimeError("Library manager not initialised")
+    return manager
 
 
 def _pending_deck_fields(coordinator) -> dict:
@@ -94,7 +96,6 @@ def _pending_deck_fields(coordinator) -> dict:
         "queued_image_id": pending.get("image_id"),
         "queued_at": pending.get("queued_at"),
     }
-    return manager
 
 
 class DigitalFramesLibraryListView(HomeAssistantView):

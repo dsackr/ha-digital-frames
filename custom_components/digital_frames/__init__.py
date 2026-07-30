@@ -493,23 +493,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
     domain_data[entry.entry_id] = coordinator
     domain_data[f"_options_snapshot_{entry.entry_id}"] = dict(entry.options)
 
-    # First data fetch. Fraimic raises ConfigEntryNotReady when offline
-    # (HA retries). Meural/Samsung soft-fail so the coordinator stays loaded
-    # for send resolution even if the panel is asleep during startup.
+    # First data fetch. Soft-fail for every driver when the panel is offline:
+    # keep the coordinator in hass.data so send/queue, pull staging, and
+    # device_tracker wake-flush still work. Raising ConfigEntryNotReady for
+    # sleeping Fraimic frames (the old behaviour) put entries in setup_retry
+    # with *no* coordinator — "Send to Frames" then failed with
+    # "No frame coordinator found" and the panel looked half-loaded.
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:
-        driver = entry.data.get("driver") or "fraimic"
-        if driver in ("meural", "samsung"):
-            _LOGGER.warning(
-                "Initial poll for %s frame %s failed; keeping entry loaded for send",
-                driver,
-                entry.title,
-            )
-        else:
-            domain_data.pop(entry.entry_id, None)
-            domain_data.pop(f"_options_snapshot_{entry.entry_id}", None)
-            raise
+        _LOGGER.warning(
+            "Initial poll for frame %s failed; keeping entry loaded for "
+            "send/queue (frame may be sleeping or off-network)",
+            entry.title,
+        )
 
     # If the frame is already awake at setup, point it at HA's pull URL and
     # a short sleep cycle so it can pull on every subsequent wake.

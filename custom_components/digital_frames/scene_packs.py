@@ -70,16 +70,25 @@ def _version_tuple(raw: str | None) -> tuple[int, ...]:
 
 
 def _integration_version() -> str:
-    """Version stamped in manifest.json (auto-bumped on release)."""
+    """Version stamped in manifest.json (auto-bumped on release).
+
+    Cached after first read so hot paths never re-hit the filesystem on the
+    event loop (HA flags blocking ``read_text`` during setup).
+    """
+    cached = getattr(_integration_version, "_cached", None)
+    if cached is not None:
+        return cached
     try:
         import json
         from pathlib import Path
 
         path = Path(__file__).with_name("manifest.json")
         data = json.loads(path.read_text(encoding="utf-8"))
-        return str(data.get("version") or "0")
+        version = str(data.get("version") or "0")
     except Exception:  # noqa: BLE001
-        return "0"
+        version = "0"
+    _integration_version._cached = version  # type: ignore[attr-defined]
+    return version
 
 
 def _pack_compatible(pack: dict[str, Any], integration_version: str) -> bool:

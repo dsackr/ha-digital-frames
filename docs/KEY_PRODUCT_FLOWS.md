@@ -74,13 +74,24 @@ are collapsed under an expandable Advanced Settings section in the Configure mod
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
 it goes silent for 3 polls, a subnet rescan finds its new IP (a DHCP-moved
 frame).
+
+**Setup soft-fail:** if the first poll fails (frame asleep / off-network),
+the config entry still loads and the coordinator stays in `hass.data` so
+send/queue and device_tracker wake-flush work. A hard `ConfigEntryNotReady`
+would leave sleeping frames in `setup_retry` with no coordinator — panel
+send then fails with "No frame coordinator found".
+
 - **Entry points**: `coordinator.py` (`DigitalFramesCoordinator._async_update_data`,
-  `_async_try_find_new_host`, `_maybe_persist_fingerprint`).
+  `_async_try_find_new_host`, `_maybe_persist_fingerprint`),
+  `__init__.py` (`async_setup_entry` first_refresh soft-fail).
 - **If it silently breaks**: sensors go "unavailable" forever after a router
-  reassigns the frame's IP; the user thinks the frame is dead.
+  reassigns the frame's IP; the user thinks the frame is dead; or sleeping
+  frames cannot accept a queued send because the entry never finishes setup.
 - **Test status**: **Backend-tested** —
   `tests/python/coordinator/test_coordinator_polling.py`,
-  `test_coordinator_concurrency.py`.
+  `test_coordinator_concurrency.py`,
+  `tests/python/setup/test_init_setup_entry.py`
+  (`test_offline_fraimic_frame_keeps_coordinator_for_send`).
 
 ## 4. Send image now (pull-first + optional push) — the core send primitive
 Every "send to frame" path (service, raw upload, library send, scene send,
