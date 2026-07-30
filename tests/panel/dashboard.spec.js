@@ -112,6 +112,59 @@ test.describe('Consolidated dashboard', () => {
     expect(state.configText).toContain('local storage');
   });
 
+  test('viewing shows on-deck badge when a frame has a queued send', async ({ page }) => {
+    await mockServer.stop();
+    const deckFrames = [
+      {
+        ...FRAMES[0],
+        last_image_id: 'image_2',
+        queued: true,
+        queued_image_id: 'image_2',
+        queued_at: 1700000000,
+      },
+      FRAMES[1],
+    ];
+    mockServer = createMockServer({ frames: deckFrames, images: IMAGES, scenes: SCENES });
+    baseUrl = await mockServer.start();
+    await gotoPanel(page, baseUrl, { frames: deckFrames });
+
+    const tiles = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const out = {};
+      for (const tile of root.querySelectorAll('.wall-tile')) {
+        const badge = tile.querySelector('.wall-tile-badge');
+        out[tile.dataset.entryId] = {
+          kind: badge && badge.style.display !== 'none' ? badge.dataset.kind : null,
+          text: badge && badge.style.display !== 'none' ? badge.textContent : null,
+        };
+      }
+      return out;
+    });
+    expect(tiles.entry_1.kind).toBe('ondeck');
+    expect(tiles.entry_1.text).toBe('on deck');
+    expect(tiles.entry_2.kind).toBe('onframe');
+
+    // Frame Information surfaces the waiting image name.
+    await page.evaluate(() => {
+      const panel = document.getElementById('panel');
+      const frame = panel._frames.find((f) => f.entryId === 'entry_1');
+      panel._openFrameSettingsMenu(frame);
+    });
+    const onDeck = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const row = root.getElementById('frame-info-on-deck-row');
+      const val = root.getElementById('frame-info-on-deck');
+      return {
+        visible: row && row.style.display !== 'none',
+        text: val ? val.textContent : '',
+      };
+    });
+    expect(onDeck.visible).toBe(true);
+    // Filename when library list is hydrated; otherwise the image_id.
+    expect(onDeck.text).toMatch(/two\.png|image_2/);
+    expect(onDeck.text).toContain('queued');
+  });
+
   test('viewing shows on-frame content; modeling blanks every unassigned tile', async ({ page }) => {
     const readTiles = () => page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;

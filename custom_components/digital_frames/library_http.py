@@ -78,6 +78,22 @@ def _get_manager(hass):
     manager = domain_data.get("_library")
     if manager is None:
         raise RuntimeError("Library manager not initialised")
+
+
+def _pending_deck_fields(coordinator) -> dict:
+    """Shape pending_send for the frames list / panel on-deck UI."""
+    pending = getattr(coordinator, "pending_send", None)
+    if not pending:
+        return {
+            "queued": False,
+            "queued_image_id": None,
+            "queued_at": None,
+        }
+    return {
+        "queued": True,
+        "queued_image_id": pending.get("image_id"),
+        "queued_at": pending.get("queued_at"),
+    }
     return manager
 
 
@@ -797,10 +813,11 @@ class DigitalFramesFramesView(HomeAssistantView):
                         # DigitalFramesCoordinator.last_thumbnail and
                         # DigitalFramesFrameThumbnailView below.
                         "has_thumbnail": getattr(coordinator, "last_thumbnail", None) is not None,
-                        # True while a send to this frame is queued awaiting
-                        # delivery (frame asleep/unreachable) -- see
-                        # DigitalFramesCoordinator.pending_send.
-                        "queued": getattr(coordinator, "pending_send", None) is not None,
+                        # On-deck send (frame asleep/unreachable) -- see
+                        # DigitalFramesCoordinator.pending_send. queued_image_id
+                        # / queued_at let the panel show *what* is waiting,
+                        # not only that something is queued.
+                        **_pending_deck_fields(coordinator),
                     }
                 )
 

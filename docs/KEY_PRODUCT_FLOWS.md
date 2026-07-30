@@ -124,6 +124,15 @@ asleep, the staged pull payload is enough — success is reported as
    installs with no network device tracker. Exposed under Advanced Settings
    in the frame options UI.
 
+**On deck (what is waiting):** while `pending_send` is set, the product
+surfaces the queued image as "on deck" — not only a boolean:
+- `GET /api/digital_frames/frames` includes `queued`, `queued_image_id`,
+  `queued_at`
+- `sensor.*_queued_image` is `queued`/`idle` with attributes `image_id`,
+  `queued_at`
+- Wall tiles badge **on deck** (orange) with the waiting thumbnail; Frame
+  Information shows an **On deck** row; Lovelace card badge **ON DECK**
+
 Image upload timeout for the push path still comes from the panel profile
 (`FrameType.send_timeout_s` / `send_timeout_for_entry`) — default 240s for
 slow ESP32 sequential panels (7.3").
@@ -149,7 +158,11 @@ slow ESP32 sequential panels (7.3").
   poll, provision always_on flag, token URL shape, pull-only pending flush,
   pull view cleanup on get),
   `tests/python/coordinator/test_coordinator_device_tracker.py` (IP/MAC
-  match, home transition flushes, teardown).
+  match, home transition flushes, teardown),
+  `tests/python/setup/test_entities.py` (queued sensor attrs image_id /
+  queued_at). **Panel-tested** — `tests/panel/dashboard.spec.js` (on deck
+  wall badge + Frame Info row), `tests/panel/fraimic-card.spec.js` (ON DECK
+  badge).
 
 ## 4b. Frame power options (sleep interval + always-on)
 User-facing controls on the frame's **Configure / options** form and the
@@ -625,7 +638,11 @@ schedule to "broken" instead of erroring at fire time.
   schedule, `next_fire_at` math including monthly day-of-month clamping).
 
 ## 21. HA entities: sensors + Orientation select + Camera display
-Read-only device telemetry (battery/wifi/charging/firmware/IP/queued), a per-frame Orientation control that persists into config entry options (supporting lock/unlock and follow-device settings), and a Camera entity representing the frame's dynamic canvas (active photo display).
+Read-only device telemetry (battery/wifi/charging/firmware/IP/queued-on-deck), a per-frame Orientation control that persists into config entry options (supporting lock/unlock and follow-device settings), and a Camera entity representing the frame's dynamic canvas (active photo display).
+
+`sensor.*_queued_image` is `idle` or `queued`; when queued, attributes
+include `image_id` (library id when known) and `queued_at` (unix time) so
+dashboards and automations can see **what** is on deck.
 
 The panel's Frame Information modal (per-frame gear/info popup) surfaces the
 Orientation control as Portrait/Landscape lock icons plus the live

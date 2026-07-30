@@ -129,8 +129,22 @@ def test_queued_send_sensor_reflects_pending_state(make_frame_entry):
     entry = make_frame_entry()
     idle = DigitalFramesQueuedSendSensor(_fake_coordinator(pending_send=None), entry)
     assert idle.native_value == "idle"
-    queued = DigitalFramesQueuedSendSensor(_fake_coordinator(pending_send={"token": "x"}), entry)
+    assert idle.extra_state_attributes == {}
+    queued = DigitalFramesQueuedSendSensor(
+        _fake_coordinator(
+            pending_send={
+                "token": "x",
+                "image_id": "img-on-deck",
+                "queued_at": 1700000000.0,
+            }
+        ),
+        entry,
+    )
     assert queued.native_value == "queued"
+    assert queued.extra_state_attributes == {
+        "image_id": "img-on-deck",
+        "queued_at": 1700000000.0,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1017,7 +1017,7 @@
       if (this._staged) {
         this._setBadge('PREVIEW', 'preview');
       } else if (this._frame && this._frame.queued) {
-        this._setBadge('⏳ QUEUED', 'queued');
+        this._setBadge('ON DECK', 'queued');
       } else if (this._mediaSourceUrl) {
         this._setBadge('ON FRAME', '');
       } else {
@@ -1338,7 +1338,7 @@
             }
           }, 1200);
         } else if (result.queued) {
-          this._showFeedback('success', '⏳ Frame is asleep — queued, will send on wake.');
+          this._showFeedback('success', '⏳ Frame is asleep — on deck, will send on wake.');
           setTimeout(() => {
             if (this._staged === staged) {
               this._unstage();

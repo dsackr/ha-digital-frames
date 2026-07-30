@@ -121,6 +121,24 @@ test.describe('Fraimic card', () => {
     expect(mockServer.requestLog).toContain('GET /api/digital_frames/library/image/image_beach?thumb=480');
   });
 
+  test('shows ON DECK badge when the frame has a queued send', async ({ page }) => {
+    const frames = [{
+      ...FRAMES[0],
+      last_image_id: 'image_beach',
+      queued: true,
+      queued_image_id: 'image_beach',
+    }, FRAMES[1]];
+    await start({ frames, images: IMAGES });
+    await mountCard(page, baseUrl, { entry_id: 'entry_1' }, frames);
+
+    await page.waitForFunction(
+      () => document.getElementById('card').shadowRoot.getElementById('mediaImg').style.display === 'block'
+    );
+    const badge = await cardQ(page, 'badge');
+    expect(badge.display).toBe('block');
+    expect(badge.text).toBe('ON DECK');
+  });
+
   test('a render-preview send (upload or xOTD skill) shows via the frame thumbnail endpoint', async ({ page }) => {
     const frames = [{ ...FRAMES[0], last_image_id: null, has_thumbnail: true }, FRAMES[1]];
     await start({ frames });

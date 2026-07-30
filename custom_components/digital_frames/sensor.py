@@ -458,7 +458,12 @@ class MeuralWifiRssiSensor(DigitalFramesBaseSensor):
 class DigitalFramesQueuedSendSensor(DigitalFramesBaseSensor):
     """Whether a send to this frame is queued awaiting delivery, because the
     frame was asleep/unreachable when it was sent -- see
-    DigitalFramesCoordinator.pending_send."""
+    DigitalFramesCoordinator.pending_send.
+
+    State is ``queued`` / ``idle``. Attributes expose what is on deck
+    (``image_id``, ``queued_at``) so automations and the UI can identify
+    the waiting image without polling the coordinator store.
+    """
 
     def __init__(
         self,
@@ -474,3 +479,18 @@ class DigitalFramesQueuedSendSensor(DigitalFramesBaseSensor):
         """Return "queued" while a send is waiting for the frame to wake,
         else "idle"."""
         return "queued" if self.coordinator.pending_send is not None else "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """On-deck payload identity while queued; empty when idle."""
+        pending = self.coordinator.pending_send
+        if not pending:
+            return {}
+        attrs: dict[str, Any] = {}
+        image_id = pending.get("image_id")
+        if image_id:
+            attrs["image_id"] = image_id
+        queued_at = pending.get("queued_at")
+        if queued_at is not None:
+            attrs["queued_at"] = queued_at
+        return attrs

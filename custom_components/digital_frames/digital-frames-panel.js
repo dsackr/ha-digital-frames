@@ -1964,6 +1964,7 @@
     .wall-tile-badge[data-kind="staged"]  { background: var(--primary-color, #03a9f4); }
     .wall-tile-badge[data-kind="scene"]   { background: #8b5cf6; }
     .wall-tile-badge[data-kind="onframe"] { background: rgba(100, 116, 139, .9); }
+    .wall-tile-badge[data-kind="ondeck"]  { background: #ea580c; }
     .wall-tile-badge[data-kind="skill"]   { background: #d97706; }
     .wall-tile-skill {
       display: flex;
@@ -3295,6 +3296,10 @@
               <label>Keep Awake (Actual)</label>
               <span id="frame-info-keep-awake" style="color:var(--secondary-text-color)"></span>
             </div>
+            <div class="modal-row" id="frame-info-on-deck-row" style="display:none">
+              <label>On deck</label>
+              <span id="frame-info-on-deck" style="color:var(--secondary-text-color)"></span>
+            </div>
             <div class="feedback" id="frame-settings-fb"></div>
             <div class="modal-actions" style="flex-wrap:wrap">
               <button class="btn-primary" id="frame-settings-save">Save Changes</button>
@@ -3652,6 +3657,9 @@
             frame.deviceOrientation = match.device_orientation;
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
+            frame.queued = !!match.queued;
+            frame.queuedImageId = match.queued_image_id || null;
+            frame.queuedAt = match.queued_at || null;
             frame.keepAwakeActual = match.keep_awake_actual;
             frame.sleepMinutesActual = match.sleep_minutes_actual;
           }
@@ -3679,6 +3687,9 @@
             deviceOrientation: f.device_orientation,
             lastImageId: f.last_image_id,
             hasThumbnail: f.has_thumbnail,
+            queued: !!f.queued,
+            queuedImageId: f.queued_image_id || null,
+            queuedAt: f.queued_at || null,
             keepAwakeActual: f.keep_awake_actual,
             sleepMinutesActual: f.sleep_minutes_actual,
           });
@@ -4815,6 +4826,32 @@
         keepAwakeRow.style.display = 'flex';
       } else {
         keepAwakeRow.style.display = 'none';
+      }
+
+      const onDeckRow = this.shadowRoot.getElementById('frame-info-on-deck-row');
+      const onDeckVal = this.shadowRoot.getElementById('frame-info-on-deck');
+      if (onDeckRow && onDeckVal) {
+        if (frame.queued) {
+          const deckId = frame.queuedImageId || frame.lastImageId;
+          let label = 'Waiting for frame wake';
+          if (deckId) {
+            const img = (this._images || []).find((i) => i.image_id === deckId);
+            const name = img ? (img.filename || img.name || deckId) : deckId;
+            label = name;
+          }
+          if (frame.queuedAt) {
+            try {
+              const when = new Date(frame.queuedAt * 1000);
+              if (!Number.isNaN(when.getTime())) {
+                label += ` · queued ${when.toLocaleString()}`;
+              }
+            } catch (_) { /* ignore */ }
+          }
+          onDeckVal.textContent = label;
+          onDeckRow.style.display = 'flex';
+        } else {
+          onDeckRow.style.display = 'none';
+        }
       }
 
       const orientBtns = this.shadowRoot.getElementById('frame-info-orientation-btns');
@@ -6471,9 +6508,14 @@
         if (resp.ok && result.success) {
           fb.className = 'feedback ok';
           fb.textContent = result.packer ? `✓ Sent! (packer: ${result.packer})` : '✓ Sent!';
+          if (frame) this._clearFrameOnDeck(frame);
+          if (frame && imageId) frame.lastImageId = imageId;
+          this._renderFrames();
         } else if (result.queued) {
           fb.className = 'feedback ok';
-          fb.textContent = '⏳ Frame is asleep — image queued, will send when it wakes.';
+          fb.textContent = '⏳ Frame is asleep — image is on deck; will send when it wakes.';
+          if (frame) this._markFrameOnDeck(frame, imageId);
+          this._renderFrames();
         } else {
           fb.className = 'feedback err';
           fb.textContent = `Failed: ${result.message || resp.statusText || resp.status}`;
@@ -8475,6 +8517,29 @@
     // yet. Not scoped to placed tiles -- a frame not on this wall's canvas
     // still gets sent if it has an image assigned, since placement and
     // "active" are unrelated (see the note above this section).
+    // Record a queued (on-deck) send on the in-memory frame so wall tiles
+    // and Frame Info show the waiting image without waiting for a frames
+    // list refresh. imageId may be null for raw uploads.
+    _markFrameOnDeck(frame, imageId) {
+      if (!frame) return;
+      frame.queued = true;
+      frame.queuedImageId = imageId || null;
+      frame.queuedAt = Date.now() / 1000;
+      if (imageId) {
+        frame.lastImageId = imageId;
+        frame.hasThumbnail = true;
+      } else {
+        frame.hasThumbnail = true;
+      }
+    }
+
+    _clearFrameOnDeck(frame) {
+      if (!frame) return;
+      frame.queued = false;
+      frame.queuedImageId = null;
+      frame.queuedAt = null;
+    }
+
     // One library image → one physical frame, immediately. Shared by the
     // per-tile picker's Send button and "Send to Frames" (whole wall).
     // Returns { queued } on acceptance; throws on a real failure.
@@ -8490,10 +8555,14 @@
         method: 'POST', headers: this._authHeaders(), body: form,
       });
       const result = await resp.json().catch(() => ({}));
-      if (result.queued) return { queued: true };
+      if (result.queued) {
+        this._markFrameOnDeck(frame, imageId);
+        return { queued: true };
+      }
       if (!resp.ok || !result.success) {
         throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
       }
+      this._clearFrameOnDeck(frame);
       return { queued: false };
     }
 
@@ -8542,14 +8611,20 @@
       const failed = results.filter(r => !r.success && !r.queued);
 
       if (ok.length) {
-        for (const r of ok) r.frame.lastImageId = r.imageId;
+        for (const r of ok) {
+          this._clearFrameOnDeck(r.frame);
+          r.frame.lastImageId = r.imageId;
+        }
+      }
+      // Queued frames already marked on-deck inside _sendLibraryImageToFrame.
+      if (ok.length || queued.length) {
         this._renderFrames();
       }
 
       const parts = [];
       if (ok.length) parts.push(`✓ Sent to ${ok.length} frame${ok.length === 1 ? '' : 's'}`);
       if (queued.length) {
-        parts.push(`⏳ ${queued.length} asleep — queued: `
+        parts.push(`⏳ ${queued.length} on deck (asleep): `
           + queued.map(q => q.frame.title).join(', '));
       }
       if (failed.length) {
@@ -8658,7 +8733,9 @@
 
       // No assignment for this tile. Two modes (per Dale):
       // - VIEWING (no scene selected, nothing staged/cleared): show what's
-      //   actually on the physical frame, labeled "on frame".
+      //   actually on the physical frame, labeled "on frame" — or, when a
+      //   send is queued for a sleeping frame, show the waiting image as
+      //   "on deck" so you can see what will deliver on wake.
       // - MODELING (a scene is selected, or any pick/clear was made this
       //   session): a tile without an assignment must read BLANK -- blank
       //   means "Send to Frames will not touch this frame", and showing
@@ -8666,7 +8743,19 @@
       //   ambiguous again.
       const modeling = !!this._wallActiveSceneId
         || Object.keys(this._wallPendingMappings).length > 0;
-      if (!modeling && frame.lastImageId) {
+      const deckImageId = frame.queuedImageId || (frame.queued ? frame.lastImageId : null);
+      if (!modeling && frame.queued && deckImageId) {
+        media.innerHTML = '';
+        this._loadThumbnail(deckImageId, media);
+        badge.textContent = 'on deck';
+        badge.dataset.kind = 'ondeck';
+        badge.style.display = '';
+      } else if (!modeling && frame.queued && frame.hasThumbnail) {
+        media.innerHTML = `<img src="/api/digital_frames/frame/${this._esc(frame.entryId)}/thumbnail" alt="">`;
+        badge.textContent = 'on deck';
+        badge.dataset.kind = 'ondeck';
+        badge.style.display = '';
+      } else if (!modeling && frame.lastImageId) {
         media.innerHTML = '';
         this._loadThumbnail(frame.lastImageId, media);
         badge.textContent = 'on frame';
@@ -9579,17 +9668,22 @@
             method: 'POST', headers: this._authHeaders(), body: form,
           });
           const result = await resp.json().catch(() => ({}));
-          if (result.queued) queued = true;
-          else if (!resp.ok || !result.success) {
+          if (result.queued) {
+            queued = true;
+            this._markFrameOnDeck(frame, null);
+          } else if (!resp.ok || !result.success) {
             throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+          } else {
+            this._clearFrameOnDeck(frame);
           }
         } else {
           const r = await this._sendLibraryImageToFrame(frame, imageId);
           queued = r.queued;
           if (!queued) frame.lastImageId = imageId;
         }
+        if (queued || imageId) this._renderFrames();
         fb.textContent = queued
-          ? `⏳ ${frame.title} is asleep — image queued for delivery on wake.`
+          ? `⏳ ${frame.title} is asleep — image is on deck; will send on wake.`
           : `✓ Sent to ${frame.title}.`;
       } catch (err) {
         fb.className = 'feedback err';

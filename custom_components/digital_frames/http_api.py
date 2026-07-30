@@ -261,12 +261,15 @@ class DigitalFramesFrameStatusView(HomeAssistantView):
         except ValueError as err:
             return self.json_message(str(err), status_code=404)
 
+        pending = coordinator.pending_send
         return self.json(
             {
                 "entry_id": entry.entry_id,
                 "last_image_id": coordinator.last_image_id,
                 "has_thumbnail": coordinator.last_thumbnail is not None,
-                "queued": coordinator.pending_send is not None,
+                "queued": pending is not None,
+                "queued_image_id": (pending or {}).get("image_id"),
+                "queued_at": (pending or {}).get("queued_at"),
             }
         )
 
