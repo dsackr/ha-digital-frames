@@ -188,11 +188,13 @@ slow ESP32 sequential panels (7.3").
 User-facing controls on the frame's **Configure / options** form and the
 Digital Frames panel frame-settings flow (standard fields, not Advanced).
 
-For official Fraimic hardware (which does not honor deep sleep settings),
-these controls are disabled/greyed out. For clones, they are fully editable.
-The actual keep-awake setting currently active on the frame is parsed from
-its HTML `/info` page during successful polls and displayed in the Frame
-Information popup.
+For official Fraimic hardware (which does not accept HA writes to deep
+sleep / always-on), these controls are **disabled/greyed out** but still
+**reflect the values detected** from the frame (`keep_awake_actual` /
+`sleep_minutes_actual` scraped from HTML `/info` on successful polls).
+Clone firmware can change the settings from HA; official is read-only
+display of what the device reports. Frame Information also shows Keep
+Awake (Actual).
 
 | Option key | UI label (en) | Meaning |
 |---|---|---|

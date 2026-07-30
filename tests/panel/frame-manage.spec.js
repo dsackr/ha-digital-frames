@@ -634,22 +634,31 @@ test.describe('Frame management: hover overlay quadrants (real mouse input)', ()
     
     await openConfigureFor(page, 'entry_1');
 
-    // Verify fields are disabled and greyed out
+    // Disabled + greyed, but values reflect *detected* keep_awake / sleep
+    // (entry_1 has keep_awake_actual: true, sleep_minutes_actual: 25).
     const fieldsState = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       const alwaysOn = root.getElementById('flow-field-frame_always_on');
       const sleepMin = root.getElementById('flow-field-frame_sleep_minutes');
+      const alwaysRow = alwaysOn.closest('.modal-row');
       return {
         alwaysOnDisabled: alwaysOn.disabled,
-        alwaysOnOpacity: alwaysOn.closest('.modal-row').style.opacity,
+        alwaysOnChecked: alwaysOn.checked,
+        alwaysOnOpacity: alwaysRow.style.opacity,
+        alwaysOnHint: (alwaysRow.querySelector('.modal-file-summary') || {}).textContent || '',
         sleepMinDisabled: sleepMin.disabled,
+        sleepMinValue: sleepMin.value,
         sleepMinOpacity: sleepMin.closest('.modal-row').style.opacity,
       };
     });
 
     expect(fieldsState.alwaysOnDisabled).toBe(true);
+    expect(fieldsState.alwaysOnChecked).toBe(true);
     expect(fieldsState.alwaysOnOpacity).toBe('0.5');
+    expect(fieldsState.alwaysOnHint).toMatch(/detected|read-only/i);
+    expect(fieldsState.alwaysOnHint).toMatch(/always on/i);
     expect(fieldsState.sleepMinDisabled).toBe(true);
+    expect(fieldsState.sleepMinValue).toBe('25');
     expect(fieldsState.sleepMinOpacity).toBe('0.5');
   });
 });

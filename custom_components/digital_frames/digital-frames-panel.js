@@ -4317,17 +4317,41 @@
         }
       });
       if (this._frameSettingsTarget) {
-        const isOfficialFraimic = (this._frameSettingsTarget.driver === 'fraimic' || !this._frameSettingsTarget.driver)
-          && this._frameSettingsTarget.origin === 'official';
+        const frame = this._frameSettingsTarget;
+        const isOfficialFraimic = (frame.driver === 'fraimic' || !frame.driver)
+          && frame.origin === 'official';
         if (isOfficialFraimic && (field.name === 'frame_always_on' || field.name === 'frame_sleep_minutes')) {
+          // Read-only: show last *detected* values from the frame, not the
+          // unused HA option defaults (which often look "off" / 15m).
+          if (field.name === 'frame_always_on' && frame.keepAwakeActual != null) {
+            input.checked = !!frame.keepAwakeActual;
+          }
+          if (field.name === 'frame_sleep_minutes' && frame.sleepMinutesActual != null) {
+            input.value = String(frame.sleepMinutesActual);
+          }
           input.disabled = true;
           row.style.opacity = '0.5';
-          row.title = 'Not supported on official Fraimic hardware';
+          row.title = 'Detected from the frame (read-only on official Fraimic — cannot be changed from HA)';
         }
       }
       row.appendChild(input);
 
-      const hint = this._flowText(`${stepKey}.data_description.${field.name}`, '');
+      let hint = this._flowText(`${stepKey}.data_description.${field.name}`, '');
+      if (this._frameSettingsTarget) {
+        const frame = this._frameSettingsTarget;
+        const isOfficialFraimic = (frame.driver === 'fraimic' || !frame.driver)
+          && frame.origin === 'official';
+        if (isOfficialFraimic && (field.name === 'frame_always_on' || field.name === 'frame_sleep_minutes')) {
+          const parts = ['Read-only on official Fraimic — value is detected from the device.'];
+          if (field.name === 'frame_always_on' && frame.keepAwakeActual != null) {
+            parts.push(frame.keepAwakeActual ? 'Currently: always on.' : 'Currently: not always on (battery sleep).');
+          }
+          if (field.name === 'frame_sleep_minutes' && frame.sleepMinutesActual != null) {
+            parts.push(`Currently: ${frame.sleepMinutesActual} minutes.`);
+          }
+          hint = parts.join(' ');
+        }
+      }
       if (hint) {
         const p = document.createElement('div');
         p.className = 'modal-file-summary';

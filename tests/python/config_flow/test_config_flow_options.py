@@ -54,6 +54,36 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     assert "resolution" not in field_names
 
 
+async def test_official_form_defaults_use_detected_keep_awake(
+    hass, make_frame_entry
+):
+    """Official panels: form defaults show scraped actuals, not stale options."""
+    from types import SimpleNamespace
+
+    from custom_components.digital_frames.const import DOMAIN
+
+    entry = make_frame_entry(
+        size="13.3",  # official profile
+        options={
+            CONF_FRAME_SLEEP_MINUTES: 15,
+            CONF_FRAME_ALWAYS_ON: False,  # option says off…
+        },
+    )
+    entry.add_to_hass(hass)
+    # …but the device reports always-on + 25m (as scraped from /info).
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
+        data={"keep_awake_actual": True, "sleep_minutes_actual": 25}
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    defaults = {
+        str(k): k.default() for k in schema if getattr(k, "default", None) is not None
+    }
+    assert defaults[CONF_FRAME_ALWAYS_ON] is True
+    assert defaults[CONF_FRAME_SLEEP_MINUTES] == 25
+
+
 async def test_size_unset_leaves_unset_option_available(hass, make_frame_entry):
     entry = make_frame_entry(size="")
     entry.add_to_hass(hass)

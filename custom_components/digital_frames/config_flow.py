@@ -732,6 +732,28 @@ class DigitalFramesOptionsFlow(OptionsFlow):
                 CONF_FRAME_ALWAYS_ON, DEFAULT_FRAME_ALWAYS_ON
             )
         )
+        # Official Fraimic: HA cannot change sleep/always-on on the device, but
+        # we scrape the live values from /info. Prefer those for the form so
+        # the greyed-out controls still *reflect* what the frame is doing.
+        try:
+            from .const import DOMAIN  # noqa: PLC0415
+            from .frame_types import FRAME_TYPES, ORIGIN_OFFICIAL  # noqa: PLC0415
+
+            size_key = self.config_entry.data.get(CONF_SIZE)
+            ft = FRAME_TYPES.get(size_key) if size_key else None
+            is_official = ft is not None and ft.origin == ORIGIN_OFFICIAL
+            coord = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+            actual = getattr(coord, "data", None) if coord is not None else None
+            if is_official and isinstance(actual, dict):
+                if actual.get("keep_awake_actual") is not None:
+                    current_always_on = bool(actual["keep_awake_actual"])
+                if actual.get("sleep_minutes_actual") is not None:
+                    try:
+                        current_sleep_min = int(actual["sleep_minutes_actual"])
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:  # noqa: BLE001
+            pass
         current_fast_poll: bool = bool(
             self.config_entry.options.get(
                 CONF_FAST_POLL_WHEN_QUEUED, DEFAULT_FAST_POLL_WHEN_QUEUED
