@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_IMPORT
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -154,6 +154,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     library_manager = LibraryManager(hass)
     await library_manager.async_load()
     hass.data.setdefault(DOMAIN, {})["_library"] = library_manager
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, library_manager.async_shutdown)
 
     # Seed the Spectra 6 six-box color test into the library once (album
     # "Test Patterns") so users can send a hardware palette check to any

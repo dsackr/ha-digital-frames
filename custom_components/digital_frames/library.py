@@ -1983,6 +1983,26 @@ class LibraryManager:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error("Library backfill failed for '%s': %s", item, err)
 
+    async def async_shutdown(self, _event: object = None) -> None:
+        """Cancel any in-flight backfill work on Home Assistant stop.
+
+        .bin generation is cache-warming, not something shutdown needs to
+        wait for -- a miss just regenerates on the next send. Without this,
+        HA's own shutdown sequence tries to wait for `_backfill_task`
+        (`async_create_task` tracks it) but gives up after its shutdown
+        budget and proceeds anyway, logging "Integrations should cancel
+        non-critical tasks..." and occasionally cascading into unrelated
+        teardown errors elsewhere (listeners removed out of order). This
+        got much easier to hit once cp3 made the default dither slower.
+        """
+        task = self._backfill_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     async def _backfill_one(self, record: LibraryImage) -> None:
         """Generate whatever wire payloads `record` is missing for the
         frames currently configured (Spectra .bin or Meural JPEG)."""

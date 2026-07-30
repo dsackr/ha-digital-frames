@@ -434,15 +434,39 @@ into the manifest and queued for `.bin` generation.
 Every image gets a per-resolution `.bin` pre-generated in the background
 across all configured frame resolutions/orientations; a send before
 backfill finishes still works via on-demand conversion+cache.
+
+The background worker (`_async_backfill_worker`, one `asyncio.Task` per
+`LibraryManager`) is domain-level state that outlives any single frame's
+config entry, so it's cancelled on `EVENT_HOMEASSISTANT_STOP`
+(`async_shutdown`, wired up in `__init__.async_setup`) rather than on any
+per-entry unload. Bin generation is cache-warming, not something shutdown
+needs to wait for — a miss just regenerates on the next send.
 - **Entry points**: `library.py` (`_schedule_backfill`,
-  `_async_backfill_worker`, `async_get_bin_for_send`).
+  `_async_backfill_worker`, `LibraryManager.async_shutdown`,
+  `async_get_bin_for_send`), `__init__.py` (`async_setup` wiring
+  `async_shutdown` to `EVENT_HOMEASSISTANT_STOP`).
 - **If it silently breaks**: sends are slow, or a send uses stale bytes
-  after a crop change if cache invalidation is missed.
+  after a crop change if cache invalidation is missed. A real instance of
+  a related failure mode: before `async_shutdown` existed, the backfill
+  task was never cancelled on HA stop, so a slow encode (worse once cp3's
+  Atkinson dither became the default — see KPF 7) could still be running
+  at shutdown. HA's own shutdown sequence waits out a budget for tracked
+  tasks like this one, logs "Integrations should cancel non-critical
+  tasks...", then proceeds anyway — in practice this widened a window that
+  cascaded into unrelated teardown errors elsewhere. Note this only
+  cancels the asyncio-level task promptly; a `.bin` encode already running
+  inside `hass.async_add_executor_job` can't be preempted mid-computation
+  (Python threads aren't forcibly interruptible), so an in-flight encode's
+  worker thread may still finish in the background after shutdown proceeds
+  — harmless (it just writes a cache file nothing reads until next start),
+  but not eliminated by this fix.
 - **Test status**: **Backend-tested** —
   `tests/python/library/test_library_crop_albums_backfill.py` (backfill
   generates bins for configured frame resolutions, on-the-fly generation
   + caching when uncached, cache-hit skips reconversion, `pack_method`
-  override bypasses the cache without polluting it).
+  override bypasses the cache without polluting it,
+  `async_shutdown` cancels an in-flight backfill task rather than leaving
+  it dangling for HA's shutdown sequence to wait out and give up on).
 
 ## 12. Manual crop editing per image/aspect ratio
 User can save a manual crop rectangle for one image. Crops are saved by aspect ratio keys (e.g. ratio:1.7778), making them shared across all frames with matching aspect ratios, with exact resolution and orientation fallbacks, invalidating cached renders.

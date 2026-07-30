@@ -11,6 +11,8 @@ after a crop change if cache invalidation is missed.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from custom_components.digital_frames.helpers import RenderSpec
@@ -175,6 +177,44 @@ async def test_backfill_generates_bin_for_configured_frame_resolution(
         record["image_id"], 1200, 1600, "", CODEC_SPECTRA6_SPLIT_HALF
     )
     assert cached is not None
+
+
+async def test_async_shutdown_cancels_in_flight_backfill_task(
+    hass, library_manager, make_frame_entry, sample_image_bytes, monkeypatch
+):
+    """Regression: the background backfill task (KPF 11) wasn't cancelled on
+    Home Assistant stop, so a slow encode -- e.g. cp3's per-pixel Atkinson
+    dither -- could still be running when hass tears down. HA's own
+    shutdown sequence then waits out its budget, logs "Integrations should
+    cancel non-critical tasks..." and proceeds anyway, which cascaded into
+    unrelated teardown errors in practice. async_shutdown (wired to
+    EVENT_HOMEASSISTANT_STOP in __init__.async_setup) should cancel it
+    promptly instead of leaving HA to give up on it."""
+    entry = make_frame_entry(width=1200, height=1600)
+    entry.add_to_hass(hass)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_backfill_one = library_manager._backfill_one
+
+    async def _slow_backfill_one(record):
+        started.set()
+        await release.wait()
+        await original_backfill_one(record)
+
+    monkeypatch.setattr(library_manager, "_backfill_one", _slow_backfill_one)
+
+    await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    task = library_manager._backfill_task
+    assert task is not None and not task.done()
+
+    await library_manager.async_shutdown()
+
+    assert task.done()
+    assert task.cancelled()
+    release.set()  # don't leave the fake worker's await dangling
 
 
 async def test_get_bin_for_send_generates_on_the_fly_when_uncached(
