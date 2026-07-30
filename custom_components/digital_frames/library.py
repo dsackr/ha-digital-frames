@@ -498,21 +498,13 @@ class LocalLibraryBackend(LibraryBackend):
         variant: str = "",
         codec_id: str = "",
     ) -> str:
-        # Phase 2: bin/<WxH[variant]>/<codec_id>/<COLOR_PIPELINE_ID>/<image_id>.bin
-        # so a color-pipeline upgrade (e.g. cp3 Fraimic-aligned) misses old bins.
+        # Phase 2: bin/<WxH[variant]>/<codec_id>/<image_id>.bin
         # Legacy (no codec_id): bin/<WxH[variant]>/<image_id>.bin
         image_id = _safe_image_id(image_id)
         res = _bin_res_key(width, height, variant)
         if codec_id:
-            from .image_converter import COLOR_PIPELINE_ID  # noqa: PLC0415
-
             return os.path.join(
-                self._root,
-                "bin",
-                res,
-                codec_id,
-                COLOR_PIPELINE_ID,
-                f"{image_id}.bin",
+                self._root, "bin", res, codec_id, f"{image_id}.bin"
             )
         return os.path.join(self._root, "bin", res, f"{image_id}.bin")
 
@@ -591,8 +583,11 @@ class LocalLibraryBackend(LibraryBackend):
             if os.path.isfile(path):
                 with open(path, "rb") as f:
                     return f.read()
-            # Do not fall back to pre-pipeline / legacy paths for Spectra bins:
-            # those were encoded with the older muted quantizer.
+            # Fall back to pre-Phase-2 layout for the same geometry.
+            legacy = self._bin_path(image_id, width, height, variant, "")
+            if os.path.isfile(legacy):
+                with open(legacy, "rb") as f:
+                    return f.read()
             return None
         path = self._bin_path(image_id, width, height, variant, "")
         if not os.path.isfile(path):
@@ -996,11 +991,7 @@ class DropboxLibraryBackend(LibraryBackend):
         image_id = _safe_image_id(image_id)
         res = _bin_res_key(width, height, variant)
         if codec_id:
-            from .image_converter import COLOR_PIPELINE_ID  # noqa: PLC0415
-
-            return (
-                f"{self._root}/bin/{res}/{codec_id}/{COLOR_PIPELINE_ID}/{image_id}.bin"
-            )
+            return f"{self._root}/bin/{res}/{codec_id}/{image_id}.bin"
         return f"{self._root}/bin/{res}/{image_id}.bin"
 
     async def _original_dropbox_path(self, image_id: str) -> tuple[str, str]:
@@ -1090,9 +1081,13 @@ class DropboxLibraryBackend(LibraryBackend):
         codec_id: str = "",
     ) -> bytes | None:
         if codec_id:
-            # No fallback to older COLOR_PIPELINE_ID Spectra bins.
-            return await self._dropbox_download_bin(
+            data = await self._dropbox_download_bin(
                 self._bin_path(image_id, width, height, variant, codec_id)
+            )
+            if data is not None:
+                return data
+            return await self._dropbox_download_bin(
+                self._bin_path(image_id, width, height, variant, "")
             )
         return await self._dropbox_download_bin(
             self._bin_path(image_id, width, height, variant, "")
@@ -1992,8 +1987,7 @@ class LibraryManager:
         (`async_create_task` tracks it) but gives up after its shutdown
         budget and proceeds anyway, logging "Integrations should cancel
         non-critical tasks..." and occasionally cascading into unrelated
-        teardown errors elsewhere (listeners removed out of order). This
-        got much easier to hit once cp3 made the default dither slower.
+        teardown errors elsewhere (listeners removed out of order).
         """
         task = self._backfill_task
         if task is not None and not task.done():

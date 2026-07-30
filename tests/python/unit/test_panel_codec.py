@@ -76,13 +76,13 @@ def test_encode_for_panel_uses_registered_resolution(sample_image_bytes):
     # Smoke: both codecs produce the expected 4bpp length.
     for ft in FRAME_TYPES.values():
         w, h = ft.resolution
-        out = encode_for_panel(sample_image_bytes(200, 150), w, h, dither="fs")
+        out = encode_for_panel(sample_image_bytes(200, 150), w, h)
         assert len(out) == (w * h) // 2
 
 
 def test_encode_for_panel_rejects_unknown_resolution(sample_image_bytes):
     with pytest.raises(ValueError, match="No registered frame type"):
-        encode_for_panel(sample_image_bytes(10, 10), 9999, 9999, dither="fs")
+        encode_for_panel(sample_image_bytes(10, 10), 9999, 9999)
 
 
 def test_encode_for_panel_with_preview_spectra_crop_box_matches_encode_for_panel(
@@ -96,9 +96,9 @@ def test_encode_for_panel_with_preview_spectra_crop_box_matches_encode_for_panel
     source = sample_image_bytes(400, 300, color=(200, 50, 50))
     crop_box = (0.1, 0.1, 0.6, 0.9)
 
-    wire_only = encode_for_panel(source, w, h, crop_box=crop_box, dither="fs")
+    wire_only = encode_for_panel(source, w, h, crop_box=crop_box)
     wire, preview = encode_for_panel_with_preview(
-        source, w, h, codec_id=None, crop_box=crop_box, dither="fs"
+        source, w, h, codec_id=None, crop_box=crop_box
     )
 
     assert wire == wire_only
@@ -127,14 +127,14 @@ def test_encode_for_panel_with_preview_no_crop_box_unchanged(sample_image_bytes)
     before this param existed -- no perturbation of the ordinary path."""
     w, h = 1200, 1600
     source = sample_image_bytes(400, 300)
-    wire, preview = encode_for_panel_with_preview(source, w, h, dither="fs")
+    wire, preview = encode_for_panel_with_preview(source, w, h)
     assert len(wire) == (w * h) // 2
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_text_skill_payload_spectra_pass_through_with_preview(sample_image_bytes):
     w, h = 1200, 1600
-    bin_bytes = encode_for_panel(sample_image_bytes(200, 150), w, h, dither="fs")
+    bin_bytes = encode_for_panel(sample_image_bytes(200, 150), w, h)
     wire, preview = text_skill_payload_for_codec(
         bin_bytes, w, h, 0, CODEC_SPECTRA6_SPLIT_HALF
     )
@@ -146,7 +146,7 @@ def test_text_skill_payload_spectra_pass_through_with_preview(sample_image_bytes
 def test_text_skill_payload_jpeg_from_spectra_bin_fallback(sample_image_bytes):
     # No RGB PNG: JPEG path falls back to unpacking Spectra .bin.
     w, h = 1200, 1600
-    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h, dither="fs")
+    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
     wire, preview = text_skill_payload_for_codec(
         bin_bytes, w, h, 0, CODEC_JPEG_Q90, None
     )
@@ -205,7 +205,7 @@ def test_text_skill_payload_spectra_bad_bin_with_rotation_raises():
 
 def test_text_skill_payload_spectra_prefers_rgb_preview(sample_image_bytes):
     w, h = 1200, 1600
-    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h, dither="fs")
+    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
     rgb_png = sample_image_bytes(w, h)
     wire, preview = text_skill_payload_for_codec(
         bin_bytes, w, h, 0, CODEC_SPECTRA6_SPLIT_HALF, rgb_png
@@ -225,9 +225,8 @@ def _exact_palette_marker_png(width: int, height: int) -> bytes:
 
     from PIL import Image
 
-    # Ideal Spectra palette (Fraimic bin converter)
-    black = (0, 0, 0)
-    red = (255, 0, 0)
+    black = (25, 30, 33)
+    red = (178, 19, 24)
     img = Image.new("RGB", (width, height), color=black)
     marker = Image.new("RGB", (width // 2, height // 2), color=red)
     img.paste(marker, (0, 0))
@@ -252,7 +251,7 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
     composition_png = _exact_palette_marker_png(eff_w, eff_h)
     # What the pinned external renderer actually produces today: packed at
     # the composition size, with no knowledge of the frame's rotation.
-    unrotated_bin = encode_for_panel(composition_png, eff_w, eff_h, dither="fs")
+    unrotated_bin = encode_for_panel(composition_png, eff_w, eff_h)
 
     wire, _preview = text_skill_payload_for_codec(
         unrotated_bin, eff_w, eff_h, 90, CODEC_SPECTRA6_SPLIT_HALF, None
@@ -263,19 +262,14 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
     # relative to what the panel's raster expects.
     assert len(wire) == (native_w * native_h) // 2
 
-    # Content: skill path unpacks the already-Spectra bin, NEAREST-rotates,
-    # and re-packs without re-running the vivid prepass (that would re-dither
-    # palette edges). Mirror that here for a byte-exact reference.
-    from PIL import Image
-
-    from custom_components.digital_frames.image_converter import (
-        _pack_p_image_fast,
-        _quantize_exact_real_world_p,
-    )
-
-    ref_img = unpack_spectra6_bin(unrotated_bin, eff_w, eff_h)
-    ref_img = ref_img.rotate(90, expand=True, resample=Image.Resampling.NEAREST)
-    reference_bin = _pack_p_image_fast(_quantize_exact_real_world_p(ref_img))
+    # Content must actually match a correct rotate-then-quantize-then-pack
+    # of the same source (not just be *some* native-sized bytes). The
+    # reference composes at the *effective* size (matching the renderer)
+    # and applies the same canvas rotation image_converter._process would
+    # for an ordinary photo send -- resize/rotate order must not matter
+    # here since the source is built only from exact palette colours.
+    reference_png = _exact_palette_marker_png(eff_w, eff_h)
+    reference_bin = encode_for_panel(reference_png, eff_w, eff_h, rotation=90)
     assert wire == reference_bin
 
     # And it must actually differ from the (bug's) pass-through bytes --
@@ -294,14 +288,14 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_with_rgb_png():
     native_w, native_h = 1200, 1600
 
     composition_png = _exact_palette_marker_png(eff_w, eff_h)
-    unrotated_bin = encode_for_panel(composition_png, eff_w, eff_h, dither="fs")
+    unrotated_bin = encode_for_panel(composition_png, eff_w, eff_h)
 
     wire, preview = text_skill_payload_for_codec(
         unrotated_bin, eff_w, eff_h, 90, CODEC_SPECTRA6_SPLIT_HALF, composition_png
     )
 
     assert len(wire) == (native_w * native_h) // 2
-    reference_bin = encode_for_panel(composition_png, eff_w, eff_h, rotation=90, dither="fs")
+    reference_bin = encode_for_panel(composition_png, eff_w, eff_h, rotation=90)
     assert wire == reference_bin
     assert wire != unrotated_bin
     assert preview is not None
@@ -317,7 +311,7 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_with_rgb_png():
 
 def test_text_skill_payload_png_from_spectra_bin_fallback(sample_image_bytes):
     w, h = 1200, 1600
-    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h, dither="fs")
+    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
     wire, preview = text_skill_payload_for_codec(bin_bytes, w, h, 0, CODEC_PNG, None)
     assert wire[:8] == b"\x89PNG\r\n\x1a\n"
     assert wire != bin_bytes
@@ -356,7 +350,7 @@ def test_text_skill_payload_png_never_falls_through_to_spectra_bytes(
     Samsung frame's skill send returned raw Spectra6 nibble-packed bytes
     mislabeled as PNG."""
     w, h = 1200, 1600
-    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h, dither="fs")
+    bin_bytes = encode_for_panel(sample_image_bytes(400, 300), w, h)
     wire, _preview = text_skill_payload_for_codec(bin_bytes, w, h, 0, CODEC_PNG, None)
     # A real PNG never starts with the Spectra bin's own bytes.
     assert wire != bin_bytes

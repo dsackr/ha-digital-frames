@@ -302,12 +302,25 @@ Converts any Pillow-readable image into the frame's proprietary packed-
 nibble binary format: auto-rotate, cover-crop, manual crop, canvas
 rotation, dithering, and two PanelCodecs (split-half vs. sequential).
 
-**Color (cp3 — Fraimic-aligned):** matches
-`Fraimic/fraimic_bin_converter` defaults: enhance (brightness 1.1, contrast
-1.2, saturation 1.2, edge/smooth/sharpen), ideal 6 primaries, **RGBL**
-distance metric, and **Atkinson** dither (FS available as `dither="fs"`).
-Library bins live under `…/<codec_id>/<COLOR_PIPELINE_ID>/` (`cp3`) so older
-encodings are not reused.
+**2026-07-29/30 "cp2"/"cp3" color pipeline experiment, reverted 2026-07-30:**
+two commits tried to make the packed colors match Fraimic's own reference
+converter more closely (vivid/boosted saturation, then a full enhance +
+RGBL-distance + Atkinson-dither rewrite matching
+`Fraimic/fraimic_bin_converter`). Atkinson replaced Floyd–Steinberg as the
+*default* dither for every real send; it's a pure-Python per-pixel loop
+that took multiple seconds per encode at real panel resolutions (never
+measured at real size before shipping — see the git history of this file
+for the perf investigation and a partial fix). During the same window,
+production logs showed Home Assistant itself freezing and being
+force-restarted by the Supervisor watchdog repeatedly; a separate,
+unrelated thread-safety bug (`__init__._bind_tracker` missing `@callback`)
+turned out to be the actual root cause of *those* restarts and predated
+cp2/cp3 by two days, but by that point confidence in the color-pipeline
+changes was gone and every additional fix attempt was read as "another
+thing broke." Both commits were reverted wholesale rather than iterated on
+further. If revisiting Fraimic-parity color matching, budget real
+hardware-resolution performance testing *before* changing any default, and
+land it as an opt-in `dither=` value first, not a default-path change.
 
 Call sites that produce wire payload for a send should use
 `panel_codec.encode_for_panel*` (codec selection by panel geometry);
@@ -318,9 +331,8 @@ renderer — see KPF 28/29).
 - **Entry points**: `panel_codec.py` (`encode_for_panel`,
   `encode_for_panel_with_preview`, `encode_path_for_panel_with_preview`),
   `image_converter.py` (`convert_image*`, `_process`, `_process_cropped`,
-  `_prepare_for_spectra6`, `_quantize_to_spectra6*`,
   `_pack_to_spectra6_bin` / `_pack_p_image_fast`, `default_cover_crop_box`,
-  `unpack_spectra6_bin`, `preview_png_from_bin`, `COLOR_PIPELINE_ID`).
+  `unpack_spectra6_bin`, `preview_png_from_bin`).
 - **If it silently breaks**: this is the "garbled/duplicated image on the
   physical frame" failure the module's own docstring calls out — no
   exception, just a wrong picture on real hardware. A broken unpacker is
@@ -334,29 +346,10 @@ renderer — see KPF 28/29).
   resolution; fixed via `math.ceil` (any resulting 1px overage is trimmed
   by the existing centered crop, so this can only shrink the gap, never
   introduce one).
-
-  Not silent, but a real regression from the same cp3 change: making
-  Atkinson (`_quantize_atkinson_p`, a pure-Python per-pixel loop) the
-  default dither for every ordinary send was never measured at a real
-  panel resolution before shipping (CI only ever ran it on tiny crops "for
-  speed"). At the 7.3" panel's actual 800×480 it burned a CPU core for
-  several seconds per send (worse on weaker HA hosts), reported by a user
-  as Home Assistant itself rebooting on every send to that frame. Root
-  cause was largely `_np.clip()` called per pixel on lone numpy scalars —
-  generic ufunc dispatch overhead that alone was ~45% of the loop's
-  runtime; replaced with a plain Python comparison (same float32 math, same
-  output — verified byte-identical against the prior implementation across
-  several sizes), roughly halving encode time with no dithering/quality
-  change.
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_image_converter.py` (including the cover-crop
   resize fully covering its canvas with no unfilled edge gap, reproduced
-  against a known-affected source size and registered resolution;
-  Fraimic-aligned cp3: ideal palette, RGBL pure-ink mapping, enhance
-  chain, Atkinson on a small canvas; packing/geometry tests use
-  `dither="fs"` so CI stays fast; `test_atkinson_full_panel_size_completes_quickly`
-  bounds Atkinson wall-clock time at the real 7.3" 800x480 resolution as a
-  guard against this exact multi-x perf regression recurring unmeasured),
+  against a known-affected source size and registered resolution),
   `tests/python/unit/test_panel_codec.py`, including pack→unpack
   byte-exact round-trips against both byte layouts. Flagged as the riskiest
   silent-failure surface in the codebase in the initial gap analysis; also

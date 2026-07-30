@@ -54,11 +54,7 @@ Conversion pipeline
    center -- overflow is cropped
 4. Optionally rotate the finished canvas (90/180/270) -- used for frames
    physically hung in their non-native orientation and/or upside down
-5. Fraimic-aligned color pipeline (github.com/Fraimic/fraimic_bin_converter):
-   brightness/contrast/saturation + edge/smooth/sharpen, then quantize with
-   a tuned RGB+luma distance metric and **Atkinson** dither by default
-   (Floyd–Steinberg available as a fast option). Matching uses ideal 6
-   primaries (not muted measured panel RGB).
+5. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg dithering
 6. Pack pixels into the nibble format described above, using the byte
    ordering that matches the final resolution's physical panel
 """
@@ -70,7 +66,7 @@ import math
 from typing import Tuple
 
 try:
-    from PIL import Image, ImageEnhance, ImageFilter
+    from PIL import Image
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "Pillow is required for image conversion. "
@@ -89,56 +85,31 @@ from .frame_types import LAYOUT_SPLIT_HALF, frame_type_for_resolution
 # Palette constants
 # ---------------------------------------------------------------------------
 
-# Bump when the color pipeline changes so library .bin caches miss and
-# re-encode (older muted / cp2 bins must not keep serving).
-COLOR_PIPELINE_ID = "cp3"
-
-# Ideal 6-color palette from Fraimic/fraimic_bin_converter (PALETTE_COLORS).
-# Order: Black, White, Yellow, Red, Blue, Green → COLOR_CODES / nibbles below.
-SPECTRA6_PALETTE_RGB: Tuple[Tuple[int, int, int], ...] = (
-    (0, 0, 0),        # Black   → nibble 0
-    (255, 255, 255),  # White   → nibble 1
-    (255, 255, 0),    # Yellow  → nibble 2
-    (255, 0, 0),      # Red     → nibble 3
-    (0, 0, 255),      # Blue    → nibble 5
-    (0, 255, 0),      # Green   → nibble 6
+# Real-world RGB values measured from an actual Spectra 6 display under D65
+# lighting (from the epdoptimize project). These are used as the quantization
+# target so that dithering error diffusion is computed in perceptually accurate
+# colour space rather than against idealised primaries.
+SPECTRA6_REAL_WORLD_RGB: Tuple[Tuple[int, int, int], ...] = (
+    (25, 30, 33),     # Black   → nibble 0
+    (232, 232, 232),  # White   → nibble 1
+    (239, 222, 68),   # Yellow  → nibble 2
+    (178, 19, 24),    # Red     → nibble 3
+    (33, 87, 186),    # Blue    → nibble 5
+    (18, 95, 32),     # Green   → nibble 6
 )
-
-# Backward-compatible alias (older tests / docs referred to "real world").
-SPECTRA6_REAL_WORLD_RGB = SPECTRA6_PALETTE_RGB
 
 # Raw nibble values that the Spectra 6 hardware expects for each palette entry.
 # Note that value 4 is intentionally skipped (unused by the hardware).
 SPECTRA6_NIBBLE_VALUES: Tuple[int, ...] = (0, 1, 2, 3, 5, 6)
 
-assert len(SPECTRA6_PALETTE_RGB) == len(SPECTRA6_NIBBLE_VALUES)
-
-# Fraimic enhance defaults (convert_to_bin_spectra6.py CLI).
-_ENHANCE_BRIGHTNESS = 1.1
-_ENHANCE_CONTRAST = 1.2
-_ENHANCE_SATURATION = 1.2
-
-# Precomputed arrays for RGBL metric (Fraimic closest_palette_color).
-if _np is not None:
-    _PALETTE_F32 = _np.array(SPECTRA6_PALETTE_RGB, dtype=_np.float32)
-    _PALETTE_LUMA = (
-        _np.array(
-            [r * 250 + g * 350 + b * 400 for (r, g, b) in SPECTRA6_PALETTE_RGB],
-            dtype=_np.float32,
-        )
-        / (255.0 * 1000)
-    )
-else:  # pragma: no cover
-    _PALETTE_F32 = None
-    _PALETTE_LUMA = None
+# Sanity check: palette and nibble tables must stay in sync.
+assert len(SPECTRA6_REAL_WORLD_RGB) == len(SPECTRA6_NIBBLE_VALUES)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_palette_image(
-    rgb_table: Tuple[Tuple[int, int, int], ...] = SPECTRA6_PALETTE_RGB,
-) -> "Image.Image":
+def _build_palette_image() -> "Image.Image":
     """
     Build a single-pixel palette image used by Pillow's quantize() method.
 
@@ -147,134 +118,12 @@ def _build_palette_image(
     a valid colour rather than an arbitrary one.
     """
     pal_image = Image.new("P", (1, 1))
-    flat_palette = tuple(v for rgb in rgb_table for v in rgb)
+    flat_palette = tuple(v for rgb in SPECTRA6_REAL_WORLD_RGB for v in rgb)
     # Pad to 256 colours × 3 channels = 768 bytes.
-    padding_colour = rgb_table[0]  # black
-    padding = padding_colour * (256 - len(rgb_table))
+    padding_colour = SPECTRA6_REAL_WORLD_RGB[0]  # black
+    padding = padding_colour * (256 - len(SPECTRA6_REAL_WORLD_RGB))
     pal_image.putpalette(flat_palette + padding)
     return pal_image
-
-
-def _palette_bytes(
-    rgb_table: Tuple[Tuple[int, int, int], ...] = SPECTRA6_PALETTE_RGB,
-) -> bytes:
-    """768-byte palette for putpalette()."""
-    flat = bytes(v for rgb in rgb_table for v in rgb)
-    pad = bytes(rgb_table[0]) * (256 - len(rgb_table))
-    return flat + pad
-
-
-def _real_world_palette_bytes() -> bytes:
-    """Alias: palette bytes for pack/preview (Fraimic ideal primaries)."""
-    return _palette_bytes(SPECTRA6_PALETTE_RGB)
-
-
-def _prepare_for_spectra6(image: "Image.Image") -> "Image.Image":
-    """Fraimic bin-converter enhance chain (defaults from their CLI).
-
-    brightness 1.1 → contrast 1.2 → saturation 1.2 → EDGE_ENHANCE →
-    SMOOTH → SHARPEN. Compensates for e-ink softness without our older
-    ad-hoc green channel hacks.
-    """
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    image = ImageEnhance.Brightness(image).enhance(_ENHANCE_BRIGHTNESS)
-    image = ImageEnhance.Contrast(image).enhance(_ENHANCE_CONTRAST)
-    image = ImageEnhance.Color(image).enhance(_ENHANCE_SATURATION)
-    image = image.filter(ImageFilter.EDGE_ENHANCE)
-    image = image.filter(ImageFilter.SMOOTH)
-    image = image.filter(ImageFilter.SHARPEN)
-    return image
-
-
-def _closest_palette_index(r: float, g: float, b: float) -> int:
-    """Fraimic RGBL distance → palette index (0..5).
-
-    Port of convert_to_bin_spectra6.closest_palette_color: weighted RGB
-    distance + luma term so blue/green print density is compensated.
-    Pure Python loop over 6 colours (faster than per-pixel numpy argmin).
-    """
-    luma1 = (r * 250.0 + g * 350.0 + b * 400.0) / (255.0 * 1000.0)
-    best_i = 0
-    best_d = 1e30
-    for i, (pr, pg, pb) in enumerate(SPECTRA6_PALETTE_RGB):
-        dr = r - pr
-        dg = g - pg
-        db = b - pb
-        # boost blue, reduce green a bit and red a little more (Fraimic)
-        rgb_dist = (
-            (dr * dr * 0.250 + dg * dg * 0.350 + db * db * 0.400)
-            * 0.75
-            / (255.0 * 255.0)
-        )
-        pluma = (pr * 250.0 + pg * 350.0 + pb * 400.0) / (255.0 * 1000.0)
-        ld = luma1 - pluma
-        total = 1.5 * rgb_dist + 0.60 * ld * ld
-        if total < best_d:
-            best_d = total
-            best_i = i
-    return best_i
-
-
-def _quantize_atkinson_p(image: "Image.Image") -> "Image.Image":
-    """Atkinson dither + Fraimic RGBL metric → P-mode indices.
-
-    Port of quantize_atkinson_indexed from fraimic_bin_converter.
-    """
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    width, height = image.size
-
-    if _np is None:  # pragma: no cover
-        return _quantize_fs_pillow_p(image)
-
-    working = _np.array(image, dtype=_np.float32)
-    indices = _np.zeros((height, width), dtype=_np.uint8)
-
-    for y in range(height):
-        for x in range(width):
-            old = working[y, x]
-            o0, o1, o2 = old[0], old[1], old[2]
-            # Plain comparisons instead of _np.clip(): clip() on a lone
-            # numpy scalar goes through generic ufunc dispatch, which
-            # measured as ~45% of this loop's total runtime (this loop
-            # runs once per pixel, so that overhead is paid ~2*width*height
-            # times per image -- see the 7.3" panel reboot investigation).
-            r = 0.0 if o0 < 0 else (255.0 if o0 > 255 else float(o0))
-            g = 0.0 if o1 < 0 else (255.0 if o1 > 255 else float(o1))
-            b = 0.0 if o2 < 0 else (255.0 if o2 > 255 else float(o2))
-            idx = _closest_palette_index(r, g, b)
-            new = _PALETTE_F32[idx]
-            working[y, x] = new
-            indices[y, x] = idx
-            err = old - new
-            # Atkinson: right 1/8, bottom-left 1/8, bottom 1/4, bottom-right 1/8
-            if x + 1 < width:
-                working[y, x + 1] += err * (1.0 / 8.0)
-            if y + 1 < height:
-                if x - 1 >= 0:
-                    working[y + 1, x - 1] += err * (1.0 / 8.0)
-                working[y + 1, x] += err * (1.0 / 4.0)
-                if x + 1 < width:
-                    working[y + 1, x + 1] += err * (1.0 / 8.0)
-
-    out = Image.frombytes("P", (width, height), indices.tobytes())
-    out.putpalette(_palette_bytes())
-    return out
-
-
-def _quantize_fs_pillow_p(image: "Image.Image") -> "Image.Image":
-    """Floyd–Steinberg via Pillow (Fraimic --dither fs: fast, Euclidean)."""
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    matched = image.quantize(
-        dither=Image.Dither.FLOYDSTEINBERG,
-        palette=_build_palette_image(SPECTRA6_PALETTE_RGB),
-    )
-    out = Image.new("P", matched.size)
-    out.putpalette(_palette_bytes())
-    out.putdata(list(matched.getdata()))
-    return out
 
 
 def _resize_cover_centered(
@@ -404,20 +253,28 @@ def _auto_rotate(
     return image
 
 
-def _quantize_to_spectra6(
-    image: "Image.Image",
-    *,
-    dither: str = "atkinson",
-) -> "Image.Image":
-    """Quantize *image* to the 6 Spectra colours; return RGB palette image."""
-    return _quantize_to_spectra6_p(image, dither=dither).convert("RGB")
+def _quantize_to_spectra6(image: "Image.Image") -> "Image.Image":
+    """
+    Quantize *image* (must be RGB) to the 6 Spectra 6 real-world colours using
+    Floyd-Steinberg error-diffusion dithering.
+
+    Returns an RGB image where every pixel is one of the six palette entries in
+    :data:`SPECTRA6_REAL_WORLD_RGB`.
+    """
+    pal_image = _build_palette_image()
+    # quantize() returns a palette-mode image; convert back to RGB so that
+    # pixel values are plain (r, g, b) tuples for the packing step.
+    return image.quantize(
+        dither=Image.Dither.FLOYDSTEINBERG,
+        palette=pal_image,
+    ).convert("RGB")
 
 
 def _nibble_for_pixel(quantized_image: "Image.Image", x: int, y: int) -> int:
     """Look up the Spectra 6 nibble value for the pixel at (x, y)."""
     r, g, b = quantized_image.load()[x, y]
     try:
-        index = SPECTRA6_PALETTE_RGB.index((r, g, b))
+        index = SPECTRA6_REAL_WORLD_RGB.index((r, g, b))
     except ValueError:
         raise ValueError(
             f"Unexpected pixel colour ({r}, {g}, {b}) at ({x}, {y}). "
@@ -440,7 +297,9 @@ def _pack_row_half(
             low_nibble = _nibble_for_pixel(quantized_image, odd_x, y)
         else:
             # Odd-width half — pad the missing partner pixel with white.
-            low_nibble = SPECTRA6_NIBBLE_VALUES[1]  # white
+            low_nibble = SPECTRA6_NIBBLE_VALUES[
+                SPECTRA6_REAL_WORLD_RGB.index((232, 232, 232))
+            ]
         out.append((high_nibble << 4) | low_nibble)
     return bytes(out)
 
@@ -452,7 +311,7 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     resolution (see frame_types.py / panel_codec.py and the module docstring).
 
     :param quantized_image: RGB image whose pixels are restricted to the six
-        entries of :data:`SPECTRA6_PALETTE_RGB`.
+        entries of :data:`SPECTRA6_REAL_WORLD_RGB`.
     :returns: Raw bytes ready to be sent as a ``.bin`` file.
     :raises ValueError: If a pixel colour does not match any palette entry
         (indicates a bug in the quantization step), or if no registered
@@ -522,15 +381,19 @@ def _pack_sequential(quantized_image: "Image.Image") -> bytes:
 # scripts/verify_packing.py -- run it after touching either path.
 # ---------------------------------------------------------------------------
 
-# P-mode palette index → hardware nibble. Indices 0-5 are SPECTRA6_PALETTE_RGB
-# order; padding indices map to black.
+# P-mode palette index → hardware nibble. quantize() indices 0-5 are the six
+# colours in SPECTRA6_REAL_WORLD_RGB order; indices 6-255 are the black
+# padding entries from _build_palette_image, which the legacy RGB round-trip
+# collapses to black (tuple.index returns the first match), so they map to
+# black's nibble here too.
 _P_INDEX_TO_NIBBLE = bytes(
     list(SPECTRA6_NIBBLE_VALUES)
     + [SPECTRA6_NIBBLE_VALUES[0]] * (256 - len(SPECTRA6_NIBBLE_VALUES))
 )
 
-# White pads the missing partner pixel of an odd-width (half-)row.
-_WHITE_NIBBLE = SPECTRA6_NIBBLE_VALUES[1]
+# White pads the missing partner pixel of an odd-width (half-)row -- mirrors
+# the hardcoded (232, 232, 232) lookup in _pack_row_half.
+_WHITE_NIBBLE = SPECTRA6_NIBBLE_VALUES[SPECTRA6_REAL_WORLD_RGB.index((232, 232, 232))]
 
 
 def _pack_nibble_pairs(nibbles: bytes) -> bytes:
@@ -578,38 +441,14 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
     return _pack_segments_fast(nibbles, width, height, 0, width)
 
 
-def _quantize_to_spectra6_p(
-    image: "Image.Image",
-    *,
-    dither: str = "atkinson",
-) -> "Image.Image":
-    """Fraimic enhance + quantize → P-mode (default Atkinson + RGBL).
-
-    *dither*: ``"atkinson"`` (default, Fraimic recommendation) or ``"fs"``
-    (Floyd–Steinberg via Pillow, faster / less color-accurate).
-    """
-    prepared = _prepare_for_spectra6(image)
-    if dither == "fs":
-        return _quantize_fs_pillow_p(prepared)
-    return _quantize_atkinson_p(prepared)
-
-
-def _quantize_exact_real_world_p(image: "Image.Image") -> "Image.Image":
-    """Map already-panel-colored RGB to P indices without enhance/dither.
-
-    Used when rotating an existing Spectra ``.bin`` (text skills): the source
-    is already 6-color; re-running Atkinson + prepare would re-dither edges.
-    """
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    matched = image.quantize(
-        dither=Image.Dither.NONE,
-        palette=_build_palette_image(SPECTRA6_PALETTE_RGB),
+def _quantize_to_spectra6_p(image: "Image.Image") -> "Image.Image":
+    """Identical quantization to _quantize_to_spectra6 but returns the
+    P-mode (palette-index) image the fast packer consumes, instead of
+    converting back to RGB."""
+    return image.quantize(
+        dither=Image.Dither.FLOYDSTEINBERG,
+        palette=_build_palette_image(),
     )
-    out = Image.new("P", matched.size)
-    out.putpalette(_palette_bytes())
-    out.putdata(list(matched.getdata()))
-    return out
 
 
 def _open_as_rgb(source: "str | bytes") -> "Image.Image":
@@ -665,7 +504,8 @@ def convert_image(
     3. Scale-to-cover *width* × *height*, centered (overflow cropped).
     4. Apply *rotation* (canvas rotation, e.g. 90/180/270 for frames hung
        rotated / upside down).
-    5. Fraimic-aligned enhance + Atkinson (RGBL) quantize to 6 colours.
+    5. Quantize to the 6 Spectra 6 palette colours with Floyd-Steinberg
+       dithering.
     6. Pack pixels into 4-bit nibbles (see module docstring).
 
     :param image_path: Path to the source image file.
@@ -716,18 +556,17 @@ def convert_image_bytes(
     rotation: int = 0,
     locked: bool = False,
     pack_method: str = "fast",
-    dither: str = "atkinson",
 ) -> bytes:
     """
     Convert raw image bytes to the raw Spectra 6 binary format.
 
     Accepts any image format that Pillow can decode (JPEG, PNG, WebP, GIF,
     BMP, TIFF, …). See :func:`convert_image` for parameter details and
-    :func:`_process` for *pack_method* / *dither*.
+    :func:`_process` for *pack_method*.
     """
     image = _open_as_rgb(image_data)
     bin_bytes, _quantized = _process(
-        image, width, height, rotation, locked, pack_method, dither
+        image, width, height, rotation, locked, pack_method
     )
     return bin_bytes
 
@@ -738,7 +577,6 @@ def convert_image_bytes_with_preview(
     height: int,
     rotation: int = 0,
     locked: bool = False,
-    dither: str = "atkinson",
 ) -> "Tuple[bytes, bytes]":
     """
     Like :func:`convert_image_bytes`, but also returns a small PNG preview of
@@ -749,9 +587,7 @@ def convert_image_bytes_with_preview(
     :returns: ``(bin_bytes, preview_png_bytes)``.
     """
     image = _open_as_rgb(image_data)
-    bin_bytes, quantized = _process(
-        image, width, height, rotation, locked, "fast", dither
-    )
+    bin_bytes, quantized = _process(image, width, height, rotation, locked)
     return bin_bytes, _encode_preview_png(quantized)
 
 
@@ -791,7 +627,6 @@ def _process(
     rotation: int = 0,
     locked: bool = False,
     pack_method: str = "fast",
-    dither: str = "atkinson",
 ) -> "Tuple[bytes, Image.Image]":
     """Shared implementation used by both public entry points. Returns the
     packed bytes alongside the final quantized image so preview-generating
@@ -799,11 +634,10 @@ def _process(
 
     pack_method="fast" (the default) packs through the vectorized path;
     "legacy" is the historical per-pixel path, kept temporarily as an
-    escape hatch (reachable via the panel's ?packer=legacy override).
-
-    dither="atkinson" (default) matches Fraimic's recommended path;
-    "fs" is Floyd–Steinberg (faster).
-    """
+    escape hatch (reachable via the panel's ?packer=legacy override). The
+    two produce identical bytes -- proven by scripts/verify_packing.py and
+    confirmed pixel-identical on real frames (2026-07) -- so legacy plus
+    the A/B switches can be removed in a future release."""
     if not locked:
         # The Fraimic way: a mismatched image lies sideways at full size.
         image = _auto_rotate(image, width, height)
@@ -813,9 +647,9 @@ def _process(
     if rotation:
         image = image.rotate(rotation, expand=True)
     if pack_method == "fast":
-        p_image = _quantize_to_spectra6_p(image, dither=dither)
+        p_image = _quantize_to_spectra6_p(image)
         return _pack_p_image_fast(p_image), p_image.convert("RGB")
-    image = _quantize_to_spectra6_p(image, dither=dither).convert("RGB")
+    image = _quantize_to_spectra6(image)
     return _pack_to_spectra6_bin(image), image
 
 
@@ -881,7 +715,7 @@ def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Ima
         indices = bytes(rows)
 
     image = Image.frombytes("P", (width, height), indices)
-    image.putpalette(_palette_bytes())
+    image.putpalette(_build_palette_image().getpalette())
     return image.convert("RGB")
 
 
@@ -924,17 +758,16 @@ def convert_image_bytes_cropped(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
-    dither: str = "atkinson",
 ) -> bytes:
     """
     Convert raw image bytes to Spectra 6 binary using a manually-chosen crop
     rectangle instead of the automatic letterbox path. See
     :func:`convert_image_cropped` for parameter details and :func:`_process`
-    for *pack_method* / *dither*.
+    for *pack_method*.
     """
     image = _open_as_rgb(image_data)
     bin_bytes, _quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method, dither
+        image, width, height, crop_box, rotation, pack_method
     )
     return bin_bytes
 
@@ -946,7 +779,6 @@ def convert_image_bytes_cropped_with_preview(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
-    dither: str = "atkinson",
 ) -> "Tuple[bytes, bytes]":
     """
     Like :func:`convert_image_bytes_cropped`, but also returns a small PNG
@@ -959,7 +791,7 @@ def convert_image_bytes_cropped_with_preview(
     """
     image = _open_as_rgb(image_data)
     bin_bytes, quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method, dither
+        image, width, height, crop_box, rotation, pack_method
     )
     return bin_bytes, _encode_preview_png(quantized)
 
@@ -971,7 +803,6 @@ def _process_cropped(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
-    dither: str = "atkinson",
 ) -> "Tuple[bytes, Image.Image]":
     img_w, img_h = image.width, image.height
     x0, y0, x1, y1 = crop_box
@@ -1004,7 +835,7 @@ def _process_cropped(
     if rotation:
         image = image.rotate(rotation, expand=True)
     if pack_method == "fast":
-        p_image = _quantize_to_spectra6_p(image, dither=dither)
+        p_image = _quantize_to_spectra6_p(image)
         return _pack_p_image_fast(p_image), p_image.convert("RGB")
-    image = _quantize_to_spectra6_p(image, dither=dither).convert("RGB")
+    image = _quantize_to_spectra6(image)
     return _pack_to_spectra6_bin(image), image
