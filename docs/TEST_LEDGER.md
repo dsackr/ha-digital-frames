@@ -130,3 +130,4 @@ Notes on reading it:
 | 2026-07-30 | 8faffb1 | backend-pytest | failure | 518 passed, 2 errors in 88.63s (0:01:28) | 67% | CI |
 | 2026-07-30 | 6d44f47 | panel-playwright | failure | 2 failed 165 passed | — | CI |
 | 2026-07-30 | 6d44f47 | backend-pytest | failure | 518 passed, 2 errors in 88.36s (0:01:28) | 67% | CI |
+| 2026-07-30 | dce693c | panel-playwright | failure | 2 failed 165 passed | — | CI |
