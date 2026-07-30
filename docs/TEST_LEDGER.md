@@ -126,3 +126,4 @@ Notes on reading it:
 | 2026-07-29 | 38940d1 | panel-playwright | failure | 2 failed 163 passed | — | CI |
 | 2026-07-29 | 38940d1 | backend-pytest | success | 517 passed in 84.32s (0:01:24) | 67% | CI |
 | 2026-07-30 | 994e1a0 | panel-playwright | failure | 2 failed 165 passed | — | CI |
+| 2026-07-30 | 994e1a0 | backend-pytest | success | 517 passed in 87.10s (0:01:27) | 67% | CI |
