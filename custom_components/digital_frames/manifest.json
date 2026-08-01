@@ -12,6 +12,9 @@
     "dhcp",
     "media_source"
   ],
+  "after_dependencies": [
+    "roku"
+  ],
   "dhcp": [
     {
       "macaddress": "1CDBD4*"
