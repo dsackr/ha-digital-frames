@@ -359,7 +359,15 @@ renderer — see KPF 28/29).
 ## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags, orientation lock
 Users upload photos into one shared pool; images are listed/streamed for
 the panel's grids with on-the-fly cached thumbnails, and can carry user-defined
-voice names, tags, and orientation locks (for compatibility filtering). Wire-payload (`.bin`) cache keys
+voice names, tags, and orientation locks (for compatibility filtering). The
+list endpoint (`GET /api/digital_frames/library/list`) supports `?sort=`
+(`uploaded_desc` / `uploaded_asc` / `name_asc` / `name_desc`), defaulting to
+`uploaded_desc` — last uploaded first — for every consumer of that endpoint
+(My Gallery grid, wall/schedule/pack-test/album-create pickers). The My
+Gallery grid additionally exposes a `#lib-sort-select` dropdown (in the
+album breadcrumb bar) so the user can switch to any of the other orders;
+picking a new one re-fetches the current album with that `sort` value.
+Wire-payload (`.bin`) cache keys
 include PanelCodec id (`codec_id`) under
 `bin/<WxH[variant]>/<codec_id>/` so sequential vs split-half packs never
 collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
@@ -367,8 +375,11 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `list_images` / `get_original` / `get_thumbnail` / `async_get_bin_for_send` /
   `async_set_image_voice_name` / `async_set_image_tags` / `async_set_image_orientation_lock`,
   `LocalLibraryBackend` / Dropbox / Drive `_bin_path` + `bin_file_ids`,
-  `_safe_image_id`), `library_http.py` (`DigitalFramesLibraryImageVoiceNameView`,
-  `DigitalFramesLibraryImageTagsView`, `DigitalFramesLibraryImageOrientationLockView`).
+  `_safe_image_id`), `library_http.py` (`DigitalFramesLibraryListView` sort
+  handling, `DigitalFramesLibraryImageVoiceNameView`,
+  `DigitalFramesLibraryImageTagsView`, `DigitalFramesLibraryImageOrientationLockView`),
+  `digital-frames-panel.js` (`_loadLibrary`, `#lib-sort-select` wiring in
+  `_wireLibraryToolbar`).
 - **If it silently breaks**: uploads silently fail per-file in a batch,
   thumbnails go stale/broken, voice name/tag/orientation-lock edits fail to persist, a
   7.3" send reuses 13.3"-layout bytes (wrong codec cache), or — a real bug
@@ -381,8 +392,11 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `_loadLibrary` had no staleness guard, so switching albums quickly could
   let an older, slower album load resolve after a newer one and leave the
   breadcrumb title naming a different album than the grid actually shows —
-  both now share a token that discards a superseded load's result.
-- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `lazy-thumbs.spec.js`; `crop-aspect-ratio-lock.spec.js` covers orientation lock picker dimming and sending validation).
+  both now share a token that discards a superseded load's result. An
+  unrecognized `sort` value silently falls back to `uploaded_desc` rather
+  than erroring, so a typo'd query param degrades gracefully instead of
+  breaking the grid.
+- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `library-sort.spec.js` covers the default last-uploaded-first order and switching the `#lib-sort-select` dropdown to each of the other three orders; `lazy-thumbs.spec.js`; `crop-aspect-ratio-lock.spec.js` covers orientation lock picker dimming and sending validation).
   **Backend-tested** (local backend) —
   `tests/python/library/test_library_local_backend.py` (single/multi
   upload, undecodable-bytes tolerance, thumbnail cache generation/reuse,
@@ -398,7 +412,10 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `image_id` via `_safe_image_id` before any Dropbox API request goes out,
   and `GoogleDriveLibraryBackend.async_get_bin`/`async_delete_image` treat a
   traversal id as an ordinary manifest miss with no Drive request, since
-  that backend never builds a path from `image_id` at all).
+  that backend never builds a path from `image_id` at all);
+  `tests/python/library/test_library_http_sort.py` (default `uploaded_desc`
+  order, explicit `uploaded_asc`/`name_asc`/`name_desc`, unknown `sort`
+  value falls back to the default, and `album` + `sort` combine correctly).
 
 ## 9. Library storage backend switching (Local / Dropbox / Google Drive)
 User can point the whole library at Dropbox or Google Drive instead of

@@ -464,9 +464,14 @@ test.describe('Consolidated dashboard', () => {
 
       // Album A's list request resolves slowly; Album B's resolves
       // immediately -- exactly the race: A clicked first, B clicked right
-      // after, but A's response lands last.
-      await page.route('**/api/digital_frames/library/list?album=Album%20A', async (route) => {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+      // after, but A's response lands last. Matched by the `album` query
+      // param rather than the full query string, since _loadLibrary also
+      // sends a `sort` param whose position/value isn't this test's concern.
+      await page.route('**/api/digital_frames/library/list?*', async (route) => {
+        const reqUrl = new URL(route.request().url());
+        if (reqUrl.searchParams.get('album') === 'Album A') {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
         await route.continue();
       });
 

@@ -398,7 +398,25 @@ function createMockServer({
       // The default album 'Images' includes all images.
       const album = url.searchParams.get('album');
       const filtered = (album && album !== 'Images') ? images.filter((img) => (img.albums || []).includes(album)) : images;
-      return json(res, 200, { images: filtered, backend: libraryBackend });
+      // Mirrors library_http.py's `sort` param + uploaded_desc default
+      // (last uploaded first).
+      const sortKeys = {
+        uploaded_desc: (img) => img.uploaded_at || 0,
+        uploaded_asc: (img) => img.uploaded_at || 0,
+        name_asc: (img) => (img.filename || '').toLowerCase(),
+        name_desc: (img) => (img.filename || '').toLowerCase(),
+      };
+      const requested = url.searchParams.get('sort');
+      const sort = sortKeys[requested] ? requested : 'uploaded_desc';
+      const keyFn = sortKeys[sort];
+      const sorted = [...filtered].sort((a, b) => {
+        const ka = keyFn(a);
+        const kb = keyFn(b);
+        let cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+        if (sort.endsWith('_desc')) cmp = -cmp;
+        return cmp;
+      });
+      return json(res, 200, { images: sorted, backend: libraryBackend, sort });
     }
     if (p === '/api/digital_frames/library/settings') {
       if (req.method === 'POST') {

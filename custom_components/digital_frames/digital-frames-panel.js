@@ -397,7 +397,7 @@
       flex: 1;
       min-width: 0;
     }
-    .lib-backend select, .lib-card select {
+    .lib-backend select, .lib-card select, .lib-breadcrumb select {
       padding: 6px 8px;
       border-radius: 6px;
       border: 1px solid var(--divider-color, rgba(0,0,0,.15));
@@ -2208,6 +2208,7 @@
 
       this._albums        = [];       // [{ name, count, cover_image_id }]
       this._currentAlbum  = null;     // null = album folder view; a name = viewing that album
+      this._librarySort   = 'uploaded_desc';  // matches library_http.py's default -- last uploaded first
       this._libraryLoadToken = 0;     // incremented per _loadLibrary call -- lets a stale
                                        // (superseded) fetch detect it and skip committing its result
       this._albumPickerImage = null;  // image currently open in the "Add to Album" picker
@@ -2872,7 +2873,13 @@
           <div class="lib-breadcrumb" id="lib-breadcrumb">
             <button id="lib-back-btn">← Albums</button>
             <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
-            <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
+            <select id="lib-sort-select" style="margin-left:auto;flex:0 0 auto" title="Sort photos">
+              <option value="uploaded_desc">Last uploaded first</option>
+              <option value="uploaded_asc">First uploaded first</option>
+              <option value="name_asc">Name (A-Z)</option>
+              <option value="name_desc">Name (Z-A)</option>
+            </select>
+            <button class="btn-ghost" id="lib-select-toggle" style="flex:0 0 auto">☑ Select</button>
           </div>
           <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
             <span class="lib-select-count" id="lib-select-count">0 selected</span>
@@ -5644,6 +5651,7 @@
       const selectToggleBtn = this.shadowRoot.getElementById('lib-select-toggle');
       const selectCancelBtn = this.shadowRoot.getElementById('lib-select-cancel');
       const selectDeleteBtn = this.shadowRoot.getElementById('lib-select-delete');
+      const sortSelect      = this.shadowRoot.getElementById('lib-sort-select');
 
       if (uploadBtn) uploadBtn.addEventListener('click', () => this._openUploadModal());
       if (backBtn) backBtn.addEventListener('click', () => this._openAlbumFolders());
@@ -5653,6 +5661,14 @@
       if (selectToggleBtn) selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
       if (selectCancelBtn) selectCancelBtn.addEventListener('click', () => this._setLibrarySelectMode(false));
       if (selectDeleteBtn) selectDeleteBtn.addEventListener('click', () => this._deleteSelectedFromLibrary());
+      if (sortSelect) {
+        sortSelect.value = this._librarySort;
+        sortSelect.addEventListener('change', async () => {
+          this._librarySort = sortSelect.value;
+          if (this._currentAlbum) await this._loadLibrary(this._currentAlbum);
+          this._renderLibraryGrid();
+        });
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -5992,9 +6008,9 @@
       // than this._library actually contains after two quick album switches.
       const myToken = token !== undefined ? token : (this._libraryLoadToken = (this._libraryLoadToken || 0) + 1);
       try {
-        const url = album
-          ? `/api/digital_frames/library/list?album=${encodeURIComponent(album)}`
-          : '/api/digital_frames/library/list';
+        const params = [`sort=${encodeURIComponent(this._librarySort)}`];
+        if (album) params.push(`album=${encodeURIComponent(album)}`);
+        const url = `/api/digital_frames/library/list?${params.join('&')}`;
         const resp = await fetch(url, { headers: this._authHeaders() });
         const result = await resp.json();
         if (myToken !== this._libraryLoadToken) return;
