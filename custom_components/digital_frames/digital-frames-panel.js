@@ -5042,11 +5042,13 @@
       const hasBtns = !!frame.orientationEntityId;
       orientBtns.style.display = hasBtns ? 'flex' : 'none';
 
-      // Samsung frames have no accelerometer/gsensor -- device_orientation
-      // is always null for that driver (see samsung_coordinator.py), so
-      // Rediscover would never do anything but spin and reset to "Auto".
+      // Samsung and Roku frames have no accelerometer/gsensor --
+      // device_orientation is always null for those drivers (see
+      // samsung_coordinator.py / roku_coordinator.py), so Rediscover would
+      // never do anything but spin and reset to "Auto".
       const pollBtn = this.shadowRoot.getElementById('frame-info-poll');
-      pollBtn.style.display = frame.driver === 'samsung' ? 'none' : 'flex';
+      pollBtn.style.display =
+        frame.driver === 'samsung' || frame.driver === 'roku' ? 'none' : 'flex';
 
        const state = this._hass && frame.entityId ? this._hass.states[frame.entityId] : null;
        let batteryHtml = 'N/A';

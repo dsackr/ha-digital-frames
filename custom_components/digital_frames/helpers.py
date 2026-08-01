@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
     DRIVER_FRAIMIC,
     DRIVER_MEURAL,
+    DRIVER_ROKU,
     DRIVER_SAMSUNG,
     EDGE_LEFT,
     ORIENTATION_AUTO,
@@ -137,8 +138,13 @@ def render_spec_for_entry(
     if orientation is None:
         orientation = entry.options.get(CONF_ORIENTATION, ORIENTATION_AUTO)
     edge: str = entry.options.get(CONF_ROTATION_EDGE, EDGE_LEFT)
-    # RGB postcard / MDC panels: hang-sized compose, no Spectra buffer remap.
-    hang_sized = entry.data.get(CONF_DRIVER) in (DRIVER_MEURAL, DRIVER_SAMSUNG)
+    # RGB postcard / MDC / cast panels: hang-sized compose, no Spectra
+    # buffer remap.
+    hang_sized = entry.data.get(CONF_DRIVER) in (
+        DRIVER_MEURAL,
+        DRIVER_SAMSUNG,
+        DRIVER_ROKU,
+    )
 
     eff_w, eff_h = native_w, native_h
     rotation = 0

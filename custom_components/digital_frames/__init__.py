@@ -133,6 +133,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesFramePullBinView,
         DigitalFramesFrameStatusView,
         DigitalFramesOnboardingView,
+        DigitalFramesRokuContentView,
         DigitalFramesSamsungContentView,
         DigitalFramesSendImageView,
     )
@@ -140,6 +141,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesOnboardingView())
     hass.http.register_view(DigitalFramesFrameStatusView())
     hass.http.register_view(DigitalFramesSamsungContentView())
+    hass.http.register_view(DigitalFramesRokuContentView())
     hass.http.register_view(DigitalFramesFramePullBinView())
 
     from .update_http import async_register_update_views  # noqa: PLC0415
@@ -458,7 +460,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
             _register_services(hass)
         return True
 
-    from .const import CONF_DRIVER, DRIVER_MEURAL, DRIVER_SAMSUNG  # noqa: PLC0415
+    from .const import (  # noqa: PLC0415
+        CONF_DRIVER,
+        DRIVER_MEURAL,
+        DRIVER_ROKU,
+        DRIVER_SAMSUNG,
+    )
 
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
         from .meural_coordinator import MeuralCoordinator  # noqa: PLC0415
@@ -468,6 +475,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         from .samsung_coordinator import SamsungCoordinator  # noqa: PLC0415
 
         coordinator = SamsungCoordinator(hass, entry)
+    elif entry.data.get(CONF_DRIVER) == DRIVER_ROKU:
+        from .roku_coordinator import RokuCoordinator  # noqa: PLC0415
+
+        coordinator = RokuCoordinator(hass, entry)
     else:
         coordinator = DigitalFramesCoordinator(hass, entry)
 

@@ -1371,6 +1371,63 @@ never happens.
   text rejected client-side, backend failure surfaced in the feedback
   div).
 
+## 36. Roku TV as a digital frame (cast via HA core's `roku` media_player)
+User targets an existing HA core `roku` media_player entity (set up through
+HA's own **Roku** integration, not this one) from the add-frame menu. Roku
+has no local API to receive arbitrary image bytes, so unlike Fraimic/
+Meural/Samsung this driver pushes nothing over its own protocol: it stages
+the composed PNG behind a short-lived HA-hosted token URL (same
+stage/token pattern as Samsung's MDC content-download) and calls
+`media_player.play_media` with `media_content_type: "video"` pointing at
+that URL. HA core's `roku` integration has no dedicated "image" media
+type — `video`/`url` both launch Roku's built-in "Roku Media Player" app,
+which sniffs the fetched content itself; this is the documented community
+technique for casting a still photo to a Roku, not a bug workaround unique
+to this driver.
+
+**No sleep-queue, no cloud, no battery/orientation sensors.** Reachability
+is read from the linked `media_player` entity's own state (`unavailable`/
+`unknown` → offline) rather than a probe of our own. `refresh`/`wake`
+service calls map to `media_player.turn_on`; `sleep` maps to
+`media_player.turn_off`; `restart` is unsupported (raises). Casting
+interrupts whatever the Roku is currently doing (it is not a dedicated
+frame) and the "Rediscover orientation" panel button is hidden, same as
+Samsung. **Not validated on real hardware in this repo** (Gap: live Roku).
+- **Entry points**: `const.py` (`DRIVER_ROKU`, `CONF_ROKU_ENTITY_ID`,
+  `ROKU_SIZE_LABEL`), `config_flow.py` (`async_step_add_roku` — entity
+  picker over `media_player.*` entities whose entity-registry `platform ==
+  "roku"`; `DigitalFramesOptionsFlow`'s `is_roku` branch skips
+  Fraimic-only battery/rotation-edge/frame-type fields), `roku_coordinator.py`
+  (`RokuCoordinator.stage_content` / `content_url` / `async_send_image` /
+  `async_send_command`), `__init__.py` (`async_setup_entry` driver
+  dispatch, `DigitalFramesRokuContentView` registration), `http_api.py`
+  (`DigitalFramesRokuContentView`, `_ENTITY_UNIQUE_SUFFIXES`),
+  `panel_codec.py` (`panel_codec_for_entry` → `CODEC_PNG`), `helpers.py`
+  (`render_spec_for_entry`'s `hang_sized` tuple), `sensor.py`
+  (`RokuReachableSensor`, `frame_device_info`), `library_http.py`
+  (`DigitalFramesFramesView` `is_roku`/`origin`/`platform`),
+  `manifest.json` (`after_dependencies: ["roku"]`).
+- **If it silently breaks**: add-frame shows no Roku option (HA core's
+  `roku` integration isn't set up, or every discovered Roku entity is
+  already added here); the token URL 404s because HA isn't reachable from
+  the Roku's LAN (same failure mode as Samsung's MDC pull); `play_media`
+  raises because the target `media_player.roku_*` entity was deleted/
+  renamed after this entry was created; the cast silently shows nothing
+  useful because Roku's Media Player app didn't sniff the content as an
+  image (out of this driver's control — HA core's `roku` integration has
+  no `t=i` image media type to ask for explicitly).
+- **Test status**: **Backend-tested** — `tests/python/unit/test_roku.py`
+  (`panel_codec_for_entry` → PNG, `RokuCoordinator.stage_content` /
+  `get_staged_content` round-trip + expiry, `async_send_image` calls
+  `media_player.play_media` with the staged content URL and
+  `media_content_type: video`, `async_send_command` maps
+  sleep/refresh/wake to `turn_off`/`turn_on` and rejects restart),
+  `tests/python/config_flow/test_config_flow_roku.py` (menu offers
+  `add_roku`, entity picker lists only `platform == "roku"` media_player
+  entities and excludes already-configured ones, abort when none
+  available, entry created with `DRIVER_ROKU` + chosen entity_id). Live
+  Roku hardware is manual (**Gap**).
+
 ---
 
 ## Coverage summary
@@ -1387,6 +1444,7 @@ never happens.
 | — | Panel init-load resilience, panel element lifecycle, Lovelace card (KPFs 26, 27, 29) | Done — frontend side; KPF 29's HTTP views fold into 5b |
 | — | Media Source & AI Auto-tagging (KPFs 30, 31) | Done |
 | — | Compose & send a styled text message (KPF 35) | Done |
+| — | Roku TV cast driver (KPF 36) | Done (backend; live hardware untested) |
 
 Phase 5b (plus KPF 18's widget scheduling) is scoped here but not yet
 implemented — see [TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the

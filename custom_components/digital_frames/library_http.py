@@ -687,8 +687,10 @@ class DigitalFramesFramesView(HomeAssistantView):
         from .const import (  # noqa: PLC0415
             CONF_DRIVER,
             DRIVER_MEURAL,
+            DRIVER_ROKU,
             DRIVER_SAMSUNG,
             MEURAL_SIZE_LABEL,
+            ROKU_SIZE_LABEL,
             SAMSUNG_SIZE_LABEL,
             CONF_ORIENTATION,
             CONF_ORIENTATION_FOLLOW_DEVICE,
@@ -708,6 +710,9 @@ class DigitalFramesFramesView(HomeAssistantView):
                 is_samsung = entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG or (
                     entry.data.get(CONF_SIZE) == SAMSUNG_SIZE_LABEL
                 )
+                is_roku = entry.data.get(CONF_DRIVER) == DRIVER_ROKU or (
+                    entry.data.get(CONF_SIZE) == ROKU_SIZE_LABEL
+                )
                 spec = render_spec_for_hass_entry(hass, entry)
                 coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
                 # The frame's own entity_ids, resolved server-side so
@@ -719,6 +724,7 @@ class DigitalFramesFramesView(HomeAssistantView):
                 battery_entity_id = None
                 orientation_entity_id = None
                 ip_entity_id = None
+                roku_reachable_entity_id = None
                 for reg_entry in er.async_entries_for_config_entry(
                     registry, entry.entry_id
                 ):
@@ -728,7 +734,11 @@ class DigitalFramesFramesView(HomeAssistantView):
                         orientation_entity_id = reg_entry.entity_id
                     elif reg_entry.unique_id == f"{entry.entry_id}_ip":
                         ip_entity_id = reg_entry.entity_id
-                send_entity_id = battery_entity_id or ip_entity_id
+                    elif reg_entry.unique_id == f"{entry.entry_id}_roku_reachable":
+                        roku_reachable_entity_id = reg_entry.entity_id
+                send_entity_id = (
+                    battery_entity_id or ip_entity_id or roku_reachable_entity_id
+                )
                 frames.append(
                     {
                         "entry_id": entry.entry_id,
@@ -764,7 +774,11 @@ class DigitalFramesFramesView(HomeAssistantView):
                             else (
                                 "samsung"
                                 if is_samsung
-                                else origin_for_fraimic_entry(entry)
+                                else (
+                                    "roku"
+                                    if is_roku
+                                    else origin_for_fraimic_entry(entry)
+                                )
                             )
                         ),
                         "platform": (
@@ -773,7 +787,11 @@ class DigitalFramesFramesView(HomeAssistantView):
                             else (
                                 "Samsung EM32DX"
                                 if is_samsung
-                                else (frame_type.platform if frame_type else None)
+                                else (
+                                    "Roku TV"
+                                    if is_roku
+                                    else (frame_type.platform if frame_type else None)
+                                )
                             )
                         ),
                         "battery_entity_id": send_entity_id,

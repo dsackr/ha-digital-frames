@@ -70,6 +70,7 @@ CONF_PULL_TOKEN = "pull_token"    # unguessable token for HA-hosted pull URL
 DRIVER_FRAIMIC = "fraimic"
 DRIVER_MEURAL = "meural"
 DRIVER_SAMSUNG = "samsung"  # Samsung EM32DX e-paper (experimental; MDC)
+DRIVER_ROKU = "roku"  # Cast to an existing HA core `roku` media_player entity
 
 # Meural Canvas common native resolution (landscape). User can override
 # in the Meural config flow when a panel reports differently.
@@ -88,6 +89,13 @@ SAMSUNG_SIZE_LABEL = "samsung"
 SAMSUNG_MDC_PORT = 1515
 CONF_MDC_PIN = "mdc_pin"
 DEFAULT_MDC_PIN = "000000"
+
+# Roku TV (cast via HA core's `roku` integration media_player, no push
+# protocol of our own). Landscape native; most Roku TVs are 1080p.
+ROKU_DEFAULT_WIDTH = 1920
+ROKU_DEFAULT_HEIGHT = 1080
+ROKU_SIZE_LABEL = "roku"
+CONF_ROKU_ENTITY_ID = "roku_media_player_entity_id"
 
 # Frame display modes
 MODE_MANUAL = "manual"

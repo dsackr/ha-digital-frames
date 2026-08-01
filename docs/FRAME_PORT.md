@@ -374,6 +374,7 @@ it belongs in core and must use the port.
 | **3 – Second driver** | Local Meural (`driver=meural`): config-flow menu, `MeuralCoordinator`, JPEG `jpeg_q90` codec, postcard send; walls/scenes/library. **Meural cloud is out of scope** (not deferred). | **Done** |
 | **3b – Samsung MDC** | Local Samsung EM32DX (`driver=samsung`): MDC TLS content-download + HA token PNG URL ([Joyous](https://github.com/fayep/Joyous)). | **Done** (experimental; volunteer hardware) |
 | **3c – InkJoy** | Out of scope for now (MQTT control plane). | Out of scope |
+| **3d – Roku (cast)** | `driver=roku`: no push protocol of its own — targets an existing HA core `roku` media_player entity and casts via `media_player.play_media` (HA token PNG URL, same pattern as Samsung). No cloud, no sleep-queue. | **Done** (untested on real hardware) |
 | **4 – Branding** | Product + domain **Digital Frames** / `digital_frames`; repo `dsackr/ha-digital-frames`; library `digital_frames_library`; types `DigitalFrames*`. | **Done** |
 
 **Immediate next:** Clean path on maintainer production HA; community
