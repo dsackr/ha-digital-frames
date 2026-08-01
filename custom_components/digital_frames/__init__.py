@@ -134,6 +134,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesFrameStatusView,
         DigitalFramesOnboardingView,
         DigitalFramesOpenApiView,
+        DigitalFramesRokuContentView,
         DigitalFramesSamsungContentView,
         DigitalFramesSendImageView,
     )
@@ -141,6 +142,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesOnboardingView())
     hass.http.register_view(DigitalFramesFrameStatusView())
     hass.http.register_view(DigitalFramesSamsungContentView())
+    hass.http.register_view(DigitalFramesRokuContentView())
     hass.http.register_view(DigitalFramesFramePullBinView())
     hass.http.register_view(DigitalFramesOpenApiView())
 
@@ -467,7 +469,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
             _register_services(hass)
         return True
 
-    from .const import CONF_DRIVER, CONF_SIZE, CONF_WIDTH, CONF_HEIGHT, DRIVER_MEURAL, DRIVER_SAMSUNG  # noqa: PLC0415
+    from .const import (  # noqa: PLC0415
+        CONF_DRIVER,
+        CONF_HEIGHT,
+        CONF_SIZE,
+        CONF_WIDTH,
+        DRIVER_MEURAL,
+        DRIVER_ROKU,
+        DRIVER_SAMSUNG,
+    )
 
     # Auto-migrate 31.5" frame entries created before the panel's true wire
     # geometry was reverse-engineered (2026-08-04): the panel is portrait-
@@ -493,6 +503,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         from .samsung_coordinator import SamsungCoordinator  # noqa: PLC0415
 
         coordinator = SamsungCoordinator(hass, entry)
+    elif entry.data.get(CONF_DRIVER) == DRIVER_ROKU:
+        from .roku_coordinator import RokuCoordinator  # noqa: PLC0415
+
+        coordinator = RokuCoordinator(hass, entry)
     else:
         coordinator = DigitalFramesCoordinator(hass, entry)
 
