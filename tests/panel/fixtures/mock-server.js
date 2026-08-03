@@ -654,7 +654,9 @@ function createMockServer({
       const skillId = skillSendMatch[1];
       const skill = skillList.find((s) => s.skill_id === skillId);
       if (!skill) return json(res, 404, { message: `Skill '${skillId}' not found` });
-      const parsed = await readJsonBody(req);
+      const parsed = (req.headers['content-type'] || '').includes('json')
+        ? await readJsonBody(req)
+        : await readFormBody(req);
       if (!parsed.entry_id) return json(res, 400, { message: 'Request body needs an entry_id' });
       skillSendCalls.push({ skill_id: skillId, entry_id: parsed.entry_id });
       return json(res, 200, { success: true, results: [{ entry_id: parsed.entry_id, success: true }] });

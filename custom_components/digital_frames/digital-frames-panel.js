@@ -8773,21 +8773,30 @@
       const fb  = this.shadowRoot.getElementById('wall-scene-fb');
       const btn = this.shadowRoot.getElementById('wall-send-btn');
 
-      // Skill-type mappings are excluded here: instant "Send to Frames"
-      // sends a stored library image_id directly, and a skill has no
-      // image_id to send this way -- send a skill via its own "Send Now"
-      // (Daily Content tab), Save Scene + Send, or a schedule instead.
-      const targets = this._frames
-        .map(frame => ({
-          entryId: frame.entryId,
-          frame,
-          imageId: this._wallEffectiveMapping(frame.entryId),
-        }))
-        .filter(t => t.frame && t.frame.entityId && t.imageId && typeof t.imageId === 'string');
+      // Separate handling for image and skill mappings.
+      const imageTargets = this._frames
+        .map(frame => {
+          const mapping = this._wallEffectiveMapping(frame.entryId);
+          if (mapping && typeof mapping === 'string') {
+            return { entryId: frame.entryId, frame, imageId: mapping };
+          }
+          return null;
+        })
+        .filter(t => t && t.frame && t.frame.entityId && t.imageId && typeof t.imageId === 'string');
 
-      if (!targets.length) {
+      const skillTargets = this._frames
+        .map(frame => {
+          const mapping = this._wallEffectiveMapping(frame.entryId);
+          if (mapping && typeof mapping === 'object' && mapping.type === 'skill') {
+            return { entryId: frame.entryId, frame, skillId: mapping.skill_id };
+          }
+          return null;
+        })
+        .filter(t => t && t.frame && t.frame.entityId && t.skillId);
+
+      if (!imageTargets.length && !skillTargets.length) {
         fb.className = 'feedback err';
-        fb.textContent = 'No frames have an image assigned yet.';
+        fb.textContent = 'No frames have an image or skill assigned yet.';
         fb.style.display = 'block';
         return;
       }
@@ -8796,7 +8805,7 @@
       btn.disabled = true;
       btn.textContent = '⏳ Sending…';
 
-      const results = await Promise.all(targets.map(async (t) => {
+      const imageResults = await Promise.all(imageTargets.map(async (t) => {
         try {
           const r = await this._sendLibraryImageToFrame(t.frame, t.imageId);
           if (r.queued) return { ...t, success: false, queued: true };
@@ -8805,6 +8814,18 @@
           return { ...t, success: false, message: err.message };
         }
       }));
+
+      const skillResults = await Promise.all(skillTargets.map(async (t) => {
+        try {
+          const r = await this._sendSkillToFrame(t.frame, t.skillId);
+          if (r.queued) return { ...t, success: false, queued: true };
+          return { ...t, success: true };
+        } catch (err) {
+          return { ...t, success: false, message: err.message };
+        }
+      }));
+
+      const results = [...imageResults, ...skillResults];
 
       const ok     = results.filter(r => r.success);
       // Queued frames haven't actually received the image yet -- don't
@@ -8816,10 +8837,13 @@
       if (ok.length) {
         for (const r of ok) {
           this._clearFrameOnDeck(r.frame);
-          r.frame.lastImageId = r.imageId;
+          // Update lastImageId for image targets; for skills we keep as is.
+          if (r.imageId) {
+            r.frame.lastImageId = r.imageId;
+          }
         }
       }
-      // Queued frames already marked on-deck inside _sendLibraryImageToFrame.
+      // Queued frames already marked on-deck inside _sendLibraryImageToFrame or _sendSkillToFrame.
       if (ok.length || queued.length) {
         this._renderFrames();
       }
@@ -8839,6 +8863,25 @@
 
       btn.disabled = false;
       btn.textContent = prevText;
+    }
+
+    async _sendSkillToFrame(frame, skillId) {
+      const form = new FormData();
+      if (frame.entryId) form.append('entry_id', frame.entryId);
+      if (frame.entityId) form.append('entity_id', frame.entityId);
+      const resp = await fetch(`/api/digital_frames/skills/${encodeURIComponent(skillId)}/send`, {
+        method: 'POST', headers: this._authHeaders(), body: form,
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (result.queued) {
+        this._markFrameOnDeck(frame, null);
+        return { queued: true };
+      }
+      if (!resp.ok || !result.success) {
+        throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+      }
+      this._clearFrameOnDeck(frame);
+      return { queued: false };
     }
 
     // Keeps the Save Scene button (and the explanatory hint above it) in
@@ -9831,9 +9874,9 @@
         return;
       }
       if (isSkillMapping) {
-        btn.disabled = true;
-        btn.title = 'Save the scene, or use the Live tab\'s "Send Now", to send live content';
-        btn.textContent = '▶ Send';
+        btn.disabled = false;
+        btn.title = 'Send live content to this frame now';
+        btn.textContent = `▶ Send live content to ${frame.title}`;
         return;
       }
       btn.title = '';
@@ -9842,18 +9885,17 @@
     }
 
     // The picker's one transmit action: sends whatever is staged (a library
-    // selection, or an uploaded file) to this frame, then closes. Skill
-    // mappings are never staged as sendable here (see
-    // _updateWallPickerSendButton) -- the button stays disabled, but this
-    // guards defensively too.
+    // selection, an uploaded file, or a live skill) to this frame, then closes.
     async _sendFromWallPicker() {
       const entryId = this._wallImagePickerEntryId;
       const frame = entryId && this._frames.find(f => f.entryId === entryId);
       if (!frame || !frame.entityId) return;
       const file = this._wallPickerSelectedFile;
       const mapping = this._wallEffectiveMapping(entryId);
+      const isSkillMapping = !!mapping && typeof mapping === 'object' && mapping.type === 'skill';
+      const skillId = isSkillMapping ? mapping.skill_id : null;
       const imageId = typeof mapping === 'string' ? mapping : null;
-      if (!file && !imageId) return;
+      if (!file && !imageId && !skillId) return;
       this._closeWallImagePicker();
 
       const fb = this.shadowRoot.getElementById('wall-scene-fb');
@@ -9879,14 +9921,17 @@
           } else {
             this._clearFrameOnDeck(frame);
           }
+        } else if (isSkillMapping && skillId) {
+          const r = await this._sendSkillToFrame(frame, skillId);
+          queued = r.queued;
         } else {
           const r = await this._sendLibraryImageToFrame(frame, imageId);
           queued = r.queued;
           if (!queued) frame.lastImageId = imageId;
         }
-        if (queued || imageId) this._renderFrames();
+        if (queued || imageId || skillId) this._renderFrames();
         fb.textContent = queued
-          ? `⏳ ${frame.title} is asleep — image is on deck; will send on wake.`
+          ? `⏳ ${frame.title} is asleep — content is on deck; will send on wake.`
           : `✓ Sent to ${frame.title}.`;
       } catch (err) {
         fb.className = 'feedback err';

@@ -996,7 +996,7 @@ into the library first) and use the normal library codec path.
   same way CODEC_JPEG_Q90 already was; a malformed bin with a nonzero
   rotation raises rather than silently returning un-rotated bytes).
   Panel-tested — `skills.spec.js` (Live tab; internal id still `xotd`),
-  `walls-skill-picker.spec.js` (staging into scenes),
+  `walls-skill-picker.spec.js` (staging into scenes + sending live skill content directly to frame),
   `fraimic-card.spec.js` (card Daily picker send).
 
 ## 29. Lovelace card: per-frame dashboard management + last-image preview

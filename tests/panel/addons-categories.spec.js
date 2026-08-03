@@ -43,14 +43,18 @@ const SCENE_PACKS = [
 
 async function openAddons(page) {
   await page.evaluate(() => {
-    document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="expansion_packs"]').click();
+    const panel = document.getElementById('panel');
+    panel._setTab('expansion_packs');
+    panel._packCategoryView = 'curated_art';
+    panel._packCategory = null;
+    panel._renderScenePacks();
   });
 }
 
 function categoryTitles(page) {
   return page.evaluate(() => {
     const root = document.getElementById('panel').shadowRoot;
-    return [...root.querySelectorAll('#art-categories-grid .category-tile-title')]
+    return [...root.querySelectorAll('#pack-grid .category-tile-title')]
       .map((el) => el.textContent.trim());
   });
 }
@@ -58,7 +62,7 @@ function categoryTitles(page) {
 async function openCategory(page, title) {
   await page.evaluate((categoryTitle) => {
     const root = document.getElementById('panel').shadowRoot;
-    const tile = [...root.querySelectorAll('#art-categories-grid .category-tile')]
+    const tile = [...root.querySelectorAll('#pack-grid .category-tile')]
       .find((el) => el.querySelector('.category-tile-title').textContent.trim() === categoryTitle);
     tile.click();
   }, title);
