@@ -1298,34 +1298,32 @@ def _layout_movie_poster(width: int, height: int, message_text: str) -> Image.Im
     return img
 
 def _layout_neon_noir(width: int, height: int, message_text: str) -> Image.Image:
-    """Neon sign style: black canvas with a glowing cyan/blue border and yellow/cyan 3D neon tube typography."""
+    """Neon sign style: black canvas with a glowing cyan/blue double border and multi-pass neon tube typography."""
     img = Image.new("RGB", (width, height), COLOR_BLACK)
     draw = ImageDraw.Draw(img)
 
-    margin = int(min(width, height) * 0.08)
-    draw.rectangle(
-        (margin, margin, width - margin, height - margin),
-        outline=COLOR_BLUE, width=4,
-    )
-    draw.rectangle(
-        (margin + 4, margin + 4, width - margin - 4, height - margin - 4),
-        outline=COLOR_WHITE, width=1,
-    )
+    margin = int(min(width, height) * 0.07)
+    # Double neon border (outer blue glow tube, inner red accent, white core)
+    draw.rectangle((margin, margin, width - margin, height - margin), outline=COLOR_BLUE, width=6)
+    draw.rectangle((margin + 4, margin + 4, width - margin - 4, height - margin - 4), outline=COLOR_RED, width=3)
+    draw.rectangle((margin + 6, margin + 6, width - margin - 6, height - margin - 6), outline=COLOR_WHITE, width=1)
 
-    content_top = margin + 20
-    content_bottom = height - margin - 20
+    content_top = margin + 25
+    content_bottom = height - margin - 25
     wrap_width = width - 2 * margin - 30
 
     font, lines, heights, line_spacing, total_height = fit_text_to_box(
-        draw, message_text, wrap_width, content_bottom - content_top,
-        font_loader=lambda size: load_font("Bungee", "Regular", size),
-        max_size=int(min(width, height) * 0.4), min_size=18,
+        draw, message_text.upper(), wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("BebasNeue", "Regular", size),
+        max_size=int(min(width, height) * 0.45), min_size=20,
     )
     start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
 
-    # Offset glow layer in Blue, main text in Yellow
-    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_BLUE, width + 3, start_y + 3)
+    # 3-pass neon tube rendering: thick blue outer aura, vibrant yellow tube, crisp white core filament
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_BLUE, width + 4, start_y + 4)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_RED, width - 2, start_y - 2)
     draw_text_block(draw, lines, heights, line_spacing, font, COLOR_YELLOW, width, start_y)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_WHITE, width, start_y)
     return img
 
 def _layout_chalkboard(width: int, height: int, message_text: str) -> Image.Image:

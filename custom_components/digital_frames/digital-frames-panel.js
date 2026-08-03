@@ -10761,8 +10761,21 @@
 
       const cfg = skill.config || {};
       let subLabel = '';
-      if (skill.content_mode === 'image_album') subLabel = `Album: ${this._esc(cfg.album || '')}`;
-      if (skill.content_mode === 'image_feed') subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
+      if (skill.content_mode === 'image_album') {
+        subLabel = `Album: ${this._esc(cfg.album || '')}`;
+      } else if (skill.content_mode === 'image_feed') {
+        subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
+      } else if (skill.content_mode !== 'agenda') {
+        const styleLabels = {
+          plain: 'Plain', ad_50s: '1950s Diner Ad', movie_poster: 'Movie Poster',
+          neon_noir: 'Neon Sign', chalkboard: 'Cafe Chalkboard', gothic_gold: 'Gold Foil',
+          pop_art: '60s Pop Art', nature_zen: 'Botanical Zen',
+        };
+        const sStyle = cfg.style || 'plain';
+        const sLabel = styleLabels[sStyle] || sStyle;
+        const aiBadge = cfg.use_ai_enhancement !== false ? ' ✨ AI' : '';
+        subLabel = `Style: ${this._esc(sLabel)}${aiBadge}`;
+      }
 
       const frameOptions = (this._frames || []).map(f =>
         `<option value="${f.entryId}">${this._esc(f.title)}</option>`
@@ -11166,6 +11179,27 @@
       ];
     }
 
+    _xotdStyleFields() {
+      return [
+        {
+          name: 'style', type: 'select', label: 'Visual Style', default: 'neon_noir',
+          options: [
+            { value: 'plain', label: 'Plain (Classic Minimalist)' },
+            { value: 'ad_50s', label: '1950s Diner Ad' },
+            { value: 'movie_poster', label: 'Movie Poster' },
+            { value: 'neon_noir', label: 'Neon Sign (Cyberpunk)' },
+            { value: 'chalkboard', label: 'Cafe Chalkboard' },
+            { value: 'gothic_gold', label: 'Gold Foil & Velvet' },
+            { value: 'pop_art', label: '60s Pop Art' },
+            { value: 'nature_zen', label: 'Botanical Zen' },
+          ],
+        },
+        {
+          name: 'use_ai_enhancement', type: 'boolean', label: '✨ AI Visual Enhancement (Uses HA AI Image Generator when available)', default: true,
+        },
+      ];
+    }
+
     _openXotdModal(instance, presetMode) {
       const overlay = this.shadowRoot.getElementById('xotd-modal-overlay');
       const title = this.shadowRoot.getElementById('xotd-modal-title');
@@ -11184,9 +11218,10 @@
       const catalogSchema = (xotdPack && xotdPack.config_schema || []).filter(f => f.name !== 'content_mode');
       const contentModeField = this._xotdContentModeField();
       if (!instance && presetMode) contentModeField.default = presetMode;
+      const styleFields = this._xotdStyleFields();
       const imageFields = this._xotdImageFields();
       const agendaFields = this._xotdAgendaFields();
-      const allFields = [contentModeField, ...catalogSchema, ...imageFields, ...agendaFields];
+      const allFields = [contentModeField, ...catalogSchema, ...styleFields, ...imageFields, ...agendaFields];
 
       let html = `
         <div class="modal-row">
@@ -11206,6 +11241,7 @@
       // for an image skill too.
       html += `<div id="xotd-text-fields-wrap">`;
       for (const field of catalogSchema) html += this._renderConfigField(field, 'xotd');
+      for (const field of styleFields) html += this._renderConfigField(field, 'xotd');
       html += `</div>`;
       html += `<div id="xotd-image-fields-wrap">`;
       for (const field of imageFields) html += this._renderConfigField(field, 'xotd');
@@ -11354,6 +11390,9 @@
               }
             }
             config[field.name] = val;
+          }
+          for (const field of styleFields) {
+            config[field.name] = values[field.name];
           }
         }
 

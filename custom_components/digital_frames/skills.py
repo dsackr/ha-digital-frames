@@ -100,25 +100,25 @@ _BUILTIN_SKILLS: tuple[dict[str, Any], ...] = (
         "skill_id": "word_of_the_day",
         "name": "Word of the Day",
         "content_mode": "word",
-        "config": {"word_feed": "random_word"},
+        "config": {"word_feed": "random_word", "style": "neon_noir", "use_ai_enhancement": True},
     },
     {
         "skill_id": "joke_of_the_day",
         "name": "Joke of the Day",
         "content_mode": "joke",
-        "config": {"joke_feed": "icanhazdadjoke"},
+        "config": {"joke_feed": "icanhazdadjoke", "style": "pop_art", "use_ai_enhancement": True},
     },
     {
         "skill_id": "quote_of_the_day",
         "name": "Quote of the Day",
         "content_mode": "quote",
-        "config": {"quote_feed": "zenquotes"},
+        "config": {"quote_feed": "zenquotes", "style": "movie_poster", "use_ai_enhancement": True},
     },
     {
         "skill_id": "scripture_of_the_day",
         "name": "Scripture of the Day",
         "content_mode": "scripture",
-        "config": {"bible_translation": "niv", "scripture_source": "daily_api"},
+        "config": {"bible_translation": "niv", "scripture_source": "daily_api", "style": "gothic_gold", "use_ai_enhancement": True},
     },
     {
         "skill_id": "daily_agenda",
@@ -522,7 +522,7 @@ class SkillManager:
             layout = "split_half"
 
         style = (skill.config or {}).get("style", "plain")
-        use_ai = (skill.config or {}).get("use_ai_enhancement", False)
+        use_ai = (skill.config or {}).get("use_ai_enhancement", True)
 
         # If AI enhancement is enabled for this skill, try AI generation first
         if use_ai:
