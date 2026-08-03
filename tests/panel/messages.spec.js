@@ -85,7 +85,7 @@ test.describe('Compose message', () => {
     }
   });
 
-  test('all three styles are selectable', async ({ page }) => {
+  test('all eight styles are selectable', async ({ page }) => {
     const mock = createMockServer({ frames: frames() });
     const baseUrl = await mock.start();
     try {
@@ -96,7 +96,16 @@ test.describe('Compose message', () => {
         ...document.getElementById('panel').shadowRoot
           .getElementById('message-style-select').options,
       ].map((o) => o.value));
-      expect(options).toEqual(['plain', 'ad_50s', 'movie_poster']);
+      expect(options).toEqual([
+        'plain',
+        'ad_50s',
+        'movie_poster',
+        'neon_noir',
+        'chalkboard',
+        'gothic_gold',
+        'pop_art',
+        'nature_zen',
+      ]);
     } finally {
       await mock.stop();
     }

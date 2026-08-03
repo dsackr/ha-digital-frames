@@ -1297,14 +1297,178 @@ def _layout_movie_poster(width: int, height: int, message_text: str) -> Image.Im
     draw.line((margin, height - margin, width - margin, height - margin), fill=COLOR_RED, width=3)
     return img
 
+def _layout_neon_noir(width: int, height: int, message_text: str) -> Image.Image:
+    """Neon sign style: black canvas with a glowing cyan/blue border and yellow/cyan 3D neon tube typography."""
+    img = Image.new("RGB", (width, height), COLOR_BLACK)
+    draw = ImageDraw.Draw(img)
+
+    margin = int(min(width, height) * 0.08)
+    draw.rectangle(
+        (margin, margin, width - margin, height - margin),
+        outline=COLOR_BLUE, width=4,
+    )
+    draw.rectangle(
+        (margin + 4, margin + 4, width - margin - 4, height - margin - 4),
+        outline=COLOR_WHITE, width=1,
+    )
+
+    content_top = margin + 20
+    content_bottom = height - margin - 20
+    wrap_width = width - 2 * margin - 30
+
+    font, lines, heights, line_spacing, total_height = fit_text_to_box(
+        draw, message_text, wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("Bungee", "Regular", size),
+        max_size=int(min(width, height) * 0.4), min_size=18,
+    )
+    start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
+
+    # Offset glow layer in Blue, main text in Yellow
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_BLUE, width + 3, start_y + 3)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_YELLOW, width, start_y)
+    return img
+
+def _layout_chalkboard(width: int, height: int, message_text: str) -> Image.Image:
+    """Cafe chalkboard style: dark slate canvas, white dashed border, yellow accent header."""
+    slate_black = (30, 32, 35)
+    img = Image.new("RGB", (width, height), slate_black)
+    draw = ImageDraw.Draw(img)
+
+    margin = int(min(width, height) * 0.06)
+    draw.rectangle(
+        (margin, margin, width - margin, height - margin),
+        outline=COLOR_WHITE, width=2,
+    )
+
+    header_font = load_font("Outfit", "Bold", max(int(min(width, height) * 0.04), 14))
+    draw.text(
+        (width // 2, margin + 15), "✦ DAILY SPECIAL ✦",
+        fill=COLOR_YELLOW, font=header_font, anchor="mm",
+    )
+
+    content_top = margin + 40
+    content_bottom = height - margin - 20
+    wrap_width = width - 2 * margin - 30
+
+    font, lines, heights, line_spacing, total_height = fit_text_to_box(
+        draw, message_text, wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("Outfit", "Regular", size),
+        max_size=int(min(width, height) * 0.35), min_size=18,
+    )
+    start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_WHITE, width, start_y)
+    return img
+
+def _layout_gothic_gold(width: int, height: int, message_text: str) -> Image.Image:
+    """Illuminated manuscript style: royal blue background, golden yellow text and ornate border."""
+    img = Image.new("RGB", (width, height), COLOR_BLUE)
+    draw = ImageDraw.Draw(img)
+
+    margin = int(min(width, height) * 0.07)
+    draw.rectangle(
+        (margin, margin, width - margin, height - margin),
+        outline=COLOR_YELLOW, width=4,
+    )
+    draw.rectangle(
+        (margin + 6, margin + 6, width - margin - 6, height - margin - 6),
+        outline=COLOR_WHITE, width=1,
+    )
+
+    content_top = margin + 20
+    content_bottom = height - margin - 20
+    wrap_width = width - 2 * margin - 30
+
+    font, lines, heights, line_spacing, total_height = fit_text_to_box(
+        draw, message_text, wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("Outfit", "Bold", size),
+        max_size=int(min(width, height) * 0.4), min_size=18,
+    )
+    start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_YELLOW, width, start_y)
+    return img
+
+def _layout_pop_art(width: int, height: int, message_text: str) -> Image.Image:
+    """60s comic pop art style: yellow background, thick black borders, red drop-shadow text."""
+    img = Image.new("RGB", (width, height), COLOR_YELLOW)
+    draw = ImageDraw.Draw(img)
+
+    margin = int(min(width, height) * 0.06)
+    draw.rectangle(
+        (margin, margin, width - margin, height - margin),
+        outline=COLOR_BLACK, width=6,
+    )
+    draw.rectangle(
+        (margin + 8, margin + 8, width - margin - 8, height - margin - 8),
+        outline=COLOR_RED, width=3,
+    )
+
+    content_top = margin + 20
+    content_bottom = height - margin - 20
+    wrap_width = width - 2 * margin - 40
+
+    font, lines, heights, line_spacing, total_height = fit_text_to_box(
+        draw, message_text.upper(), wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("Bungee", "Regular", size),
+        max_size=int(min(width, height) * 0.4), min_size=18,
+    )
+    start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
+
+    # Red drop shadow, Black text
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_RED, width + 4, start_y + 4)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_BLACK, width, start_y)
+    return img
+
+def _layout_nature_zen(width: int, height: int, message_text: str) -> Image.Image:
+    """Botanical zen style: crisp white background, emerald green double border, black text."""
+    img = Image.new("RGB", (width, height), COLOR_WHITE)
+    draw = ImageDraw.Draw(img)
+
+    margin = int(min(width, height) * 0.07)
+    draw.rectangle(
+        (margin, margin, width - margin, height - margin),
+        outline=COLOR_GREEN, width=4,
+    )
+    draw.rectangle(
+        (margin + 6, margin + 6, width - margin - 6, height - margin - 6),
+        outline=COLOR_GREEN, width=1,
+    )
+
+    header_font = load_font("Outfit", "Regular", max(int(min(width, height) * 0.035), 12))
+    draw.text(
+        (width // 2, margin + 15), "🌿 ESSENCE 🌿",
+        fill=COLOR_GREEN, font=header_font, anchor="mm",
+    )
+
+    content_top = margin + 35
+    content_bottom = height - margin - 20
+    wrap_width = width - 2 * margin - 30
+
+    font, lines, heights, line_spacing, total_height = fit_text_to_box(
+        draw, message_text, wrap_width, content_bottom - content_top,
+        font_loader=lambda size: load_font("Outfit", "SemiBold", size),
+        max_size=int(min(width, height) * 0.38), min_size=18,
+    )
+    start_y = content_top + max(0, (content_bottom - content_top - total_height) // 2)
+    draw_text_block(draw, lines, heights, line_spacing, font, COLOR_BLACK, width, start_y)
+    return img
+
 def render_message_image(width: int, height: int, message_text: str, style: str = "plain") -> Image.Image:
-    """Compose a user-typed message in one of the three fixed visual
-    styles above, falling back to "plain" for an unknown/missing value --
-    same defensive fallback convention as get_theme."""
+    """Compose a user-typed message or quote in one of the 8 visual
+    styles above, falling back to "plain" for an unknown/missing value."""
     if style == "ad_50s":
         return _layout_ad_50s(width, height, message_text)
     if style == "movie_poster":
         return _layout_movie_poster(width, height, message_text)
+    if style == "neon_noir":
+        return _layout_neon_noir(width, height, message_text)
+    if style == "chalkboard":
+        return _layout_chalkboard(width, height, message_text)
+    if style == "gothic_gold":
+        return _layout_gothic_gold(width, height, message_text)
+    if style == "pop_art":
+        return _layout_pop_art(width, height, message_text)
+    if style == "nature_zen":
+        return _layout_nature_zen(width, height, message_text)
     return _layout_plain(width, height, message_text)
 
 # ---------------------------------------------------------------------------

@@ -923,9 +923,7 @@ picker), staged into a scene via the wall picker, or on a schedule.
 **Quick setup (Phase 3):** each Live card has frame + time + "Schedule daily"
 which calls `POST /api/digital_frames/live/quick_setup` to create one daily
 recurring schedule per selected frame (does not clone the skill).
-Text modes render through the pinned remote `xotd_renderer.py` subprocess
-at the target frame's composition size. The script writes Spectra
-`xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
+Text modes render through `ai_enhancer.py` (optional AI prompt injection with E-Ink Spectra 6 palette optimization + soft local PIL fallback) or the pinned local `xotd_renderer.py` subprocess (8 visual styles: plain, ad_50s, movie_poster, neon_noir, chalkboard, gothic_gold, pop_art, nature_zen) at the target frame's composition size. The script writes Spectra `xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
 **Agenda mode (Phase 4):** pinned `agenda_renderer.py --render-only` writes
 `agenda.bin` + `agenda_preview.png`; HA calendar events are prefetched
 into `ha_events.json` before the subprocess. Both prefetching and parsing
@@ -936,7 +934,8 @@ Image modes resolve to a library image_id (feeds upload the fetched photo
 into the library first) and use the normal library codec path.
 - **Entry points**: `skills.py` (`SkillManager.async_save_skill` /
   `async_render_for_entry` / `_async_render_text` / `_async_render_agenda` /
-  `_async_fetch_image_feed` / `_async_pick_image_album`),
+  `_async_fetch_image_feed` / `_async_pick_image_album`), `ai_enhancer.py`
+  (`async_generate_ai_enhanced_image`, `build_ai_prompt`, `has_ai_image_service`),
   `const.py` (`AGENDA_RENDERER_PINNED_BASE`),
   `panel_codec.py` (`text_skill_payload_for_codec`),
   `skills_http.py` (CRUD + `DigitalFramesSkillSendView` +
@@ -995,6 +994,8 @@ into the library first) and use the normal library codec path.
   CODEC_PNG gets its own compose/rotate/encode branch and is exercised the
   same way CODEC_JPEG_Q90 already was; a malformed bin with a nonzero
   rotation raises rather than silently returning un-rotated bytes).
+  `tests/python/unit/test_ai_enhancer.py` (AI prompt injection & soft fallback),
+  `tests/python/unit/test_message_styles.py` (all 8 visual styles PIL render),
   Panel-tested — `skills.spec.js` (Live tab; internal id still `xotd`),
   `walls-skill-picker.spec.js` (staging into scenes + sending live skill content directly to frame),
   `fraimic-card.spec.js` (card Daily picker send).

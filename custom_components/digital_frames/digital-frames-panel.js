@@ -3534,6 +3534,11 @@
                 <option value="plain">Plain</option>
                 <option value="ad_50s">1950s Diner Ad</option>
                 <option value="movie_poster">Movie Poster</option>
+                <option value="neon_noir">Neon Sign</option>
+                <option value="chalkboard">Cafe Chalkboard</option>
+                <option value="gothic_gold">Gold Foil & Velvet</option>
+                <option value="pop_art">60s Pop Art</option>
+                <option value="nature_zen">Botanical Zen</option>
               </select>
             </div>
             <div class="modal-row">
