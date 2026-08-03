@@ -128,9 +128,19 @@ def frame_device_info(
     # to. Falls back to internal_url if no external_url is configured.
     base_url = hass.config.external_url or hass.config.internal_url
     if base_url:
-        info["configuration_url"] = (
-            f"{base_url.rstrip('/')}/fraimic?entry={entry.entry_id}"
-        )
+        # Preferred: direct link to the device's local UI if IP known
+        ip = None
+        # Try to get the IP from the latest coordinator data
+        if coordinator.data:
+            wifi = coordinator.data.get("wifi", {})
+            ip = wifi.get("ip") or coordinator.data.get("ip_address")
+        if ip:
+            info["configuration_url"] = f"http://{ip}/setup"
+        else:
+            # Fallback to the generic HA configuration page
+            info["configuration_url"] = (
+                f"{base_url.rstrip('/')}/fraimic?entry={entry.entry_id}"
+            )
 
     return DeviceInfo(**info)
 
