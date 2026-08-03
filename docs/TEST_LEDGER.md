@@ -149,3 +149,4 @@ Notes on reading it:
 | 2026-08-03 | 964d47e | panel-playwright | success | 172 passed | — | CI |
 | 2026-08-03 | 964d47e | backend-pytest | failure | 539 passed, 1 error in 88.98s (0:01:28) | 63% | CI |
 | 2026-08-03 | f0d04c1 | panel-playwright | success | 172 passed | — | CI |
+| 2026-08-03 | f0d04c1 | backend-pytest | failure | 539 passed, 1 error in 79.64s (0:01:19) | 63% | CI |
