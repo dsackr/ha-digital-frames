@@ -45,11 +45,11 @@ _LAYOUT_TO_CODEC: dict[str, str] = {
 ORIGIN_OFFICIAL = "official"
 ORIGIN_CLONE = "clone"
 
-# Default image-upload HTTP timeout (seconds). ESP32 sequential panels need
-# this headroom because they accept the body then block the response on the
-# e-ink redraw; official panels keep the same budget so behaviour stays
-# uniform unless a profile overrides it.
-DEFAULT_SEND_TIMEOUT_S = 240
+# Default image-upload HTTP timeout (seconds). Large panels (31.5" 2.3MB) and
+# slow ESP32 sequential panels need ample headroom (up to 10 minutes) because
+# the frame receives the body then blocks the HTTP response on the multi-stage
+# e-ink redraw cycle.
+DEFAULT_SEND_TIMEOUT_S = 600
 
 
 @dataclass(frozen=True)
@@ -89,6 +89,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         resolution=(1200, 1600),
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_OFFICIAL,
+        send_timeout_s=600,
     ),
     "31.5": FrameType(
         id="31.5",
@@ -96,6 +97,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         resolution=(2560, 1800),
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_OFFICIAL,
+        send_timeout_s=600,
     ),
     "13.3_clone": FrameType(
         id="13.3_clone",
@@ -104,6 +106,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_CLONE,
         platform="Raspberry Pi Zero",
+        send_timeout_s=600,
     ),
     "7.3": FrameType(
         id="7.3",
@@ -113,7 +116,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         origin=ORIGIN_CLONE,
         platform="ESP32-C6",
         # Redraw blocks the HTTP response; see coordinator.async_send_image.
-        send_timeout_s=DEFAULT_SEND_TIMEOUT_S,
+        send_timeout_s=600,
     ),
 }
 
