@@ -79,6 +79,7 @@ except ImportError:  # pragma: no cover
     _np = None
 
 from .frame_types import (
+    LAYOUT_SPLIT_8_ROWS,
     LAYOUT_SPLIT_HALF,
     LAYOUT_SPLIT_TOP_BOTTOM,
     frame_type_for_resolution,
@@ -332,7 +333,28 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
         return _pack_split_halves(quantized_image)
     if layout == LAYOUT_SPLIT_TOP_BOTTOM:
         return _pack_split_top_bottom(quantized_image)
+    if layout == LAYOUT_SPLIT_8_ROWS:
+        return _pack_split_8_rows(quantized_image)
     return _pack_sequential(quantized_image)
+
+
+def _pack_split_8_rows(quantized_image: "Image.Image") -> bytes:
+    """
+    Pack a quantized image for a panel divided into 8 equal row blocks
+    of 320 rows each, emitted in reverse order (Block 8 down to Block 1).
+    """
+    width = quantized_image.width
+    height = quantized_image.height
+    block_h = height // 8
+    blocks = []
+    for i in range(8):
+        y0 = i * block_h
+        y1 = (i + 1) * block_h if i < 7 else height
+        out = bytearray()
+        for y in range(y0, y1):
+            out.extend(_pack_row_half(quantized_image, y, 0, width))
+        blocks.append(bytes(out))
+    return b"".join(reversed(blocks))
 
 
 def _pack_split_top_bottom(quantized_image: "Image.Image") -> bytes:
@@ -470,8 +492,6 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
         )
     if layout == LAYOUT_SPLIT_TOP_BOTTOM:
         half_h = height // 2
-        # Bottom half rows (half_h..height) come first in the binary file,
-        # followed by top half rows (0..half_h)
         bot_bytes = _pack_segments_fast(
             nibbles, width, height, 0, width, start_y=half_h, end_y=height
         )
@@ -479,6 +499,18 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
             nibbles, width, height, 0, width, start_y=0, end_y=half_h
         )
         return bot_bytes + top_bytes
+    if layout == LAYOUT_SPLIT_8_ROWS:
+        block_h = height // 8
+        blocks = []
+        for i in range(8):
+            y0 = i * block_h
+            y1 = (i + 1) * block_h if i < 7 else height
+            blocks.append(
+                _pack_segments_fast(
+                    nibbles, width, height, 0, width, start_y=y0, end_y=y1
+                )
+            )
+        return b"".join(reversed(blocks))
     return _pack_segments_fast(nibbles, width, height, 0, width)
 
 

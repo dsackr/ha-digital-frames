@@ -31,10 +31,12 @@ from .const import (
 )
 from .frame_types import (
     CODEC_SPECTRA6_SEQUENTIAL,
+    CODEC_SPECTRA6_SPLIT_8_ROWS,
     CODEC_SPECTRA6_SPLIT_HALF,
     CODEC_SPECTRA6_SPLIT_TOP_BOTTOM,
     FRAME_TYPES,
     LAYOUT_SEQUENTIAL,
+    LAYOUT_SPLIT_8_ROWS,
     LAYOUT_SPLIT_HALF,
     LAYOUT_SPLIT_TOP_BOTTOM,
     codec_id_for_resolution,
@@ -74,6 +76,10 @@ CODECS: dict[str, PanelCodec] = {
     CODEC_SPECTRA6_SPLIT_TOP_BOTTOM: PanelCodec(
         id=CODEC_SPECTRA6_SPLIT_TOP_BOTTOM,
         byte_layout=LAYOUT_SPLIT_TOP_BOTTOM,
+    ),
+    CODEC_SPECTRA6_SPLIT_8_ROWS: PanelCodec(
+        id=CODEC_SPECTRA6_SPLIT_8_ROWS,
+        byte_layout=LAYOUT_SPLIT_8_ROWS,
     ),
     CODEC_JPEG_Q90: PanelCodec(
         id=CODEC_JPEG_Q90,
