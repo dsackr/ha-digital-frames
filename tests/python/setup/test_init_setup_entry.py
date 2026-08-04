@@ -222,7 +222,7 @@ async def test_offline_fraimic_frame_keeps_coordinator_for_send(
 
 
 async def test_31_5_entry_auto_migrates_resolution(hass, make_frame_entry):
-    """31.5" entries created at 2560x1440 before resolution fix auto-migrate to 2560x1800."""
+    """31.5" entries created at 2560x1440 before resolution fix auto-migrate to 1800x2560."""
     from custom_components.digital_frames.const import CONF_HEIGHT, CONF_SIZE, CONF_WIDTH
 
     entry = make_frame_entry(size="31.5", width=2560, height=1440)
@@ -232,6 +232,6 @@ async def test_31_5_entry_auto_migrates_resolution(hass, make_frame_entry):
     await hass.async_block_till_done()
 
     migrated_entry = hass.config_entries.async_get_entry(entry.entry_id)
-    assert migrated_entry.data[CONF_WIDTH] == 2560
-    assert migrated_entry.data[CONF_HEIGHT] == 1800
+    assert migrated_entry.data[CONF_WIDTH] == 1800
+    assert migrated_entry.data[CONF_HEIGHT] == 2560
 
