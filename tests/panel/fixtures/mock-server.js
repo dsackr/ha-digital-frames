@@ -398,7 +398,25 @@ function createMockServer({
       // The default album 'Images' includes all images.
       const album = url.searchParams.get('album');
       const filtered = (album && album !== 'Images') ? images.filter((img) => (img.albums || []).includes(album)) : images;
-      return json(res, 200, { images: filtered, backend: libraryBackend });
+      // Mirrors library_http.py's `sort` param + uploaded_desc default
+      // (last uploaded first).
+      const sortKeys = {
+        uploaded_desc: (img) => img.uploaded_at || 0,
+        uploaded_asc: (img) => img.uploaded_at || 0,
+        name_asc: (img) => (img.filename || '').toLowerCase(),
+        name_desc: (img) => (img.filename || '').toLowerCase(),
+      };
+      const requested = url.searchParams.get('sort');
+      const sort = sortKeys[requested] ? requested : 'uploaded_desc';
+      const keyFn = sortKeys[sort];
+      const sorted = [...filtered].sort((a, b) => {
+        const ka = keyFn(a);
+        const kb = keyFn(b);
+        let cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+        if (sort.endsWith('_desc')) cmp = -cmp;
+        return cmp;
+      });
+      return json(res, 200, { images: sorted, backend: libraryBackend, sort });
     }
     if (p === '/api/digital_frames/library/settings') {
       if (req.method === 'POST') {
@@ -636,7 +654,9 @@ function createMockServer({
       const skillId = skillSendMatch[1];
       const skill = skillList.find((s) => s.skill_id === skillId);
       if (!skill) return json(res, 404, { message: `Skill '${skillId}' not found` });
-      const parsed = await readJsonBody(req);
+      const parsed = (req.headers['content-type'] || '').includes('json')
+        ? await readJsonBody(req)
+        : await readFormBody(req);
       if (!parsed.entry_id) return json(res, 400, { message: 'Request body needs an entry_id' });
       skillSendCalls.push({ skill_id: skillId, entry_id: parsed.entry_id });
       return json(res, 200, { success: true, results: [{ entry_id: parsed.entry_id, success: true }] });

@@ -100,25 +100,25 @@ _BUILTIN_SKILLS: tuple[dict[str, Any], ...] = (
         "skill_id": "word_of_the_day",
         "name": "Word of the Day",
         "content_mode": "word",
-        "config": {"word_feed": "random_word"},
+        "config": {"word_feed": "random_word", "style": "neon_noir", "use_ai_enhancement": True},
     },
     {
         "skill_id": "joke_of_the_day",
         "name": "Joke of the Day",
         "content_mode": "joke",
-        "config": {"joke_feed": "icanhazdadjoke"},
+        "config": {"joke_feed": "icanhazdadjoke", "style": "pop_art", "use_ai_enhancement": True},
     },
     {
         "skill_id": "quote_of_the_day",
         "name": "Quote of the Day",
         "content_mode": "quote",
-        "config": {"quote_feed": "zenquotes"},
+        "config": {"quote_feed": "zenquotes", "style": "movie_poster", "use_ai_enhancement": True},
     },
     {
         "skill_id": "scripture_of_the_day",
         "name": "Scripture of the Day",
         "content_mode": "scripture",
-        "config": {"bible_translation": "niv", "scripture_source": "daily_api"},
+        "config": {"bible_translation": "niv", "scripture_source": "daily_api", "style": "gothic_gold", "use_ai_enhancement": True},
     },
     {
         "skill_id": "daily_agenda",
@@ -521,6 +521,35 @@ class SkillManager:
         except ValueError:
             layout = "split_half"
 
+        style = (skill.config or {}).get("style", "plain")
+        use_ai = (skill.config or {}).get("use_ai_enhancement", True)
+
+        # If AI enhancement is enabled for this skill, try AI generation first
+        if use_ai:
+            from .ai_enhancer import async_generate_ai_enhanced_image  # noqa: PLC0415
+            mode = skill.content_mode
+            text = content_fields.get("quote") or content_fields.get("scripture") or content_fields.get("joke") or content_fields.get("word") or content_fields.get("message_text") or ""
+            attribution = content_fields.get("author") or content_fields.get("reference") or content_fields.get("punchline") or None
+
+            if text:
+                ai_bytes = await async_generate_ai_enhanced_image(
+                    self.hass, text, attribution=attribution, style=style, content_mode=mode
+                )
+                if ai_bytes:
+                    try:
+                        import io  # noqa: PLC0415
+                        from PIL import Image  # noqa: PLC0415
+                        from .image_converter import pack_image_to_spectra6_bin  # noqa: PLC0415
+
+                        img = Image.open(io.BytesIO(ai_bytes)).convert("RGB")
+                        img = img.resize((spec.width, spec.height), Image.Resampling.LANCZOS)
+                        bin_bytes, _ = pack_image_to_spectra6_bin(img)
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG")
+                        return bin_bytes, buf.getvalue()
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.warning("Failed to format AI image for skill render: %s", err)
+
         script_config: dict[str, Any] = {
             "frame": {"resolution": [spec.width, spec.height], "layout": layout},
             **content_fields,
@@ -538,15 +567,31 @@ class SkillManager:
         )
 
     async def _async_render_message(
-        self, message_text: str, style: str, width: int, height: int
+        self, message_text: str, style: str, width: int, height: int, use_ai: bool = False
     ) -> tuple[bytes, bytes | None]:
         """Run the local xOTD renderer's "message" content_mode for a
         user-typed message -- never a stored Skill, so no content cache and
-        no skill_id involved. *width*/*height* may be a real frame's own
-        resolution (single-frame/scene send) or a synthesized wall-banner
-        canvas size, in which case only the returned rgb_png matters to the
-        caller -- the .bin is packed for that canvas as a whole and is
-        never sent to any one frame as-is."""
+        no skill_id involved."""
+        if use_ai:
+            from .ai_enhancer import async_generate_ai_enhanced_image  # noqa: PLC0415
+            ai_bytes = await async_generate_ai_enhanced_image(
+                self.hass, message_text, style=style, content_mode="message"
+            )
+            if ai_bytes:
+                try:
+                    import io  # noqa: PLC0415
+                    from PIL import Image  # noqa: PLC0415
+                    from .image_converter import pack_image_to_spectra6_bin  # noqa: PLC0415
+
+                    img = Image.open(io.BytesIO(ai_bytes)).convert("RGB")
+                    img = img.resize((width, height), Image.Resampling.LANCZOS)
+                    bin_bytes, _ = pack_image_to_spectra6_bin(img)
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    return bin_bytes, buf.getvalue()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning("Failed to format AI image for message render: %s", err)
+
         script_path = os.path.join(
             os.path.dirname(__file__), XOTD_RENDERER_RELATIVE_PATH
         )

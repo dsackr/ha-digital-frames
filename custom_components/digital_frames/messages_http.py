@@ -39,7 +39,8 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-_STYLES = ("plain", "ad_50s", "movie_poster")
+from .ai_enhancer import STYLES as _STYLES
+
 _DEFAULT_STYLE = "plain"
 _MESSAGE_ALBUM = "Messages"
 

@@ -462,10 +462,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
 
     from .const import (  # noqa: PLC0415
         CONF_DRIVER,
+        CONF_HEIGHT,
+        CONF_SIZE,
+        CONF_WIDTH,
         DRIVER_MEURAL,
         DRIVER_ROKU,
         DRIVER_SAMSUNG,
     )
+
+    # Auto-migrate 31.5" frame entries set up before resolution fix
+    if entry.data.get(CONF_SIZE) == "31.5":
+        curr_w = entry.data.get(CONF_WIDTH)
+        curr_h = entry.data.get(CONF_HEIGHT)
+        if (curr_w, curr_h) not in ((2560, 1800), (1800, 2560)):
+            _LOGGER.info("Migrating 31.5\" frame entry %s resolution to 2560x1800", entry.title)
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_WIDTH: 2560, CONF_HEIGHT: 1800}
+            )
 
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
         from .meural_coordinator import MeuralCoordinator  # noqa: PLC0415

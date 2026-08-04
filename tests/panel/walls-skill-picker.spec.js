@@ -130,7 +130,7 @@ test.describe('Wall picker: Skills', () => {
     });
   });
 
-  test('a skill mapping cannot be sent via the picker\'s instant Send button', async ({ page }) => {
+  test('a skill mapping can be sent via the picker\'s instant Send button', async ({ page }) => {
     await gotoPanel(page, baseUrl, { frames: FRAMES });
     await openPickerOnFirstTile(page);
     await selectPickerAlbum(page, '__skills__');
@@ -148,6 +148,12 @@ test.describe('Wall picker: Skills', () => {
     const sendDisabled = await page.evaluate(
       () => document.getElementById('panel').shadowRoot.getElementById('wall-picker-send-btn').disabled
     );
-    expect(sendDisabled).toBe(true);
+    expect(sendDisabled).toBe(false);
+
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('wall-picker-send-btn').click();
+    });
+
+    await expect.poll(() => mockServer.requestLog.filter(r => r.startsWith('POST /api/digital_frames/skills/skill_word/send')).length).toBe(1);
   });
 });

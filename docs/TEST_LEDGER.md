@@ -142,3 +142,15 @@ Notes on reading it:
 | 2026-07-30 | 83c905d | backend-pytest | failure | 2 failed, 527 passed, 2 errors in 1767.16s (0:29:27) | 67% | CI |
 | 2026-07-30 | 6d17f95 | backend-pytest | failure | 2 failed, 531 passed, 3 errors in 1810.38s (0:30:10) | 67% | CI |
 | 2026-07-30 | 185c654 | backend-pytest | failure | 527 passed, 3 errors in 90.04s (0:01:30) | 67% | CI |
+| 2026-08-01 | 5b7b1da | panel-playwright | failure | 2 failed 170 passed | — | CI |
+| 2026-08-01 | 5b7b1da | backend-pytest | failure | 532 passed, 3 errors in 90.45s (0:01:30) | 67% | CI |
+| 2026-08-03 | 8b8e873 | panel-playwright | success | 172 passed | — | CI |
+| 2026-08-03 | 8b8e873 | backend-pytest | failure | 532 passed, 1 error in 88.59s (0:01:28) | 67% | CI |
+| 2026-08-03 | 964d47e | panel-playwright | success | 172 passed | — | CI |
+| 2026-08-03 | 964d47e | backend-pytest | failure | 539 passed, 1 error in 88.98s (0:01:28) | 63% | CI |
+| 2026-08-03 | f0d04c1 | panel-playwright | success | 172 passed | — | CI |
+| 2026-08-03 | f0d04c1 | backend-pytest | failure | 539 passed, 1 error in 79.64s (0:01:19) | 63% | CI |
+| 2026-08-04 | b545745 | backend-pytest | failure | 541 passed, 1 error in 92.03s (0:01:32) | 63% | CI |
+| 2026-08-04 | f1d6328 | backend-pytest | failure | 542 passed, 1 error in 95.41s (0:01:35) | 63% | CI |
+| 2026-08-04 | eb5ca32 | backend-pytest | failure | 543 passed, 1 error in 93.28s (0:01:33) | 63% | CI |
+| 2026-08-04 | e86c10d | backend-pytest | failure | 543 passed, 1 error in 92.81s (0:01:32) | 63% | CI |

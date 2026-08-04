@@ -40,12 +40,17 @@ test.describe('Add-ons catalog refresh', () => {
     try {
       await gotoPanel(page, baseUrl, { frames: [] });
       await openAddons(page);
+      await page.evaluate(() => {
+        const panel = document.getElementById('panel');
+        panel._packCategoryView = 'curated_art';
+        panel._renderScenePacks();
+      });
 
       // Category-tile view first for scene packs -- open the "nature" tile
       // to reach the flat grid where pack titles are listed.
       await page.evaluate(() => {
         const root = document.getElementById('panel').shadowRoot;
-        const tile = [...root.querySelectorAll('#art-categories-grid .category-tile')]
+        const tile = [...root.querySelectorAll('#pack-grid .category-tile')]
           .find((el) => el.querySelector('.category-tile-title').textContent.trim() === 'Nature');
         tile.click();
       });

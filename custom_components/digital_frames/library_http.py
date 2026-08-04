@@ -2,7 +2,10 @@
 
 Endpoints:
     GET  /api/digital_frames/library/list                       list images + active backend
-                                                            (optional ?album=<name> filter)
+                                                            (optional ?album=<name> filter,
+                                                            ?sort=uploaded_desc|uploaded_asc|
+                                                            name_asc|name_desc -- default
+                                                            uploaded_desc, i.e. last uploaded first)
     POST /api/digital_frames/library/upload                      upload one or more originals (multipart
                                                             "image", repeatable) into an album
                                                             (optional "album" / "new_album" fields)
@@ -99,6 +102,15 @@ def _pending_deck_fields(coordinator) -> dict:
     }
 
 
+_DEFAULT_LIBRARY_SORT = "uploaded_desc"
+_LIBRARY_SORT_KEYS = {
+    "uploaded_desc": lambda img: img.get("uploaded_at") or 0,
+    "uploaded_asc": lambda img: img.get("uploaded_at") or 0,
+    "name_asc": lambda img: (img.get("filename") or "").lower(),
+    "name_desc": lambda img: (img.get("filename") or "").lower(),
+}
+
+
 class DigitalFramesLibraryListView(HomeAssistantView):
     """List every image currently in the library."""
 
@@ -113,7 +125,15 @@ class DigitalFramesLibraryListView(HomeAssistantView):
         album = request.query.get("album")
         if album:
             images = [img for img in images if album in (img.get("albums") or [])]
-        return self.json({"images": images, "backend": manager.backend_name})
+        sort = request.query.get("sort")
+        if sort not in _LIBRARY_SORT_KEYS:
+            sort = _DEFAULT_LIBRARY_SORT
+        images = sorted(
+            images, key=_LIBRARY_SORT_KEYS[sort], reverse=sort.endswith("_desc")
+        )
+        return self.json(
+            {"images": images, "backend": manager.backend_name, "sort": sort}
+        )
 
 
 class DigitalFramesLibraryUploadView(HomeAssistantView):

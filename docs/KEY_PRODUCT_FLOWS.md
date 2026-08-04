@@ -94,7 +94,9 @@ actions (Reconnect Frame, Remove from HA) are under expandable Advanced Settings
 ## 3. Coordinator polling & IP self-healing
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
 it goes silent for 3 polls, a subnet rescan finds its new IP (a DHCP-moved
-frame).
+frame). Status polls use permissive JSON parsing (`content_type=None`) so
+frames returning `text/plain` or missing Content-Type headers do not trigger
+`ContentTypeError` or drop into false "asleep" states.
 
 **Setup soft-fail:** if the first poll fails (frame asleep / off-network),
 the config entry still loads and the coordinator stays in `hass.data` so
@@ -138,7 +140,10 @@ to "catch" it awake.
 
 **Secondary (immediate update if the frame is already online):**
 HA still `POST /api/image` after staging so an awake panel updates without
-waiting for the next sleep cycle. If push fails because the frame is
+waiting for the next sleep cycle. Official Fraimic frames (13.3" / 31.5") do not
+support local pull URLs; `async_send_image_or_queue` always attempts direct
+`POST /api/image` push for official frames even if `last_update_success` is False,
+so an awake frame immediately receives its send. If push fails because the frame is
 asleep, the staged pull payload is enough — success is reported as
 `delivery: pull` / `queued: true` rather than "lost send".
 
@@ -359,7 +364,15 @@ renderer — see KPF 28/29).
 ## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags, orientation lock
 Users upload photos into one shared pool; images are listed/streamed for
 the panel's grids with on-the-fly cached thumbnails, and can carry user-defined
-voice names, tags, and orientation locks (for compatibility filtering). Wire-payload (`.bin`) cache keys
+voice names, tags, and orientation locks (for compatibility filtering). The
+list endpoint (`GET /api/digital_frames/library/list`) supports `?sort=`
+(`uploaded_desc` / `uploaded_asc` / `name_asc` / `name_desc`), defaulting to
+`uploaded_desc` — last uploaded first — for every consumer of that endpoint
+(My Gallery grid, wall/schedule/pack-test/album-create pickers). The My
+Gallery grid additionally exposes a `#lib-sort-select` dropdown (in the
+album breadcrumb bar) so the user can switch to any of the other orders;
+picking a new one re-fetches the current album with that `sort` value.
+Wire-payload (`.bin`) cache keys
 include PanelCodec id (`codec_id`) under
 `bin/<WxH[variant]>/<codec_id>/` so sequential vs split-half packs never
 collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
@@ -367,8 +380,11 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `list_images` / `get_original` / `get_thumbnail` / `async_get_bin_for_send` /
   `async_set_image_voice_name` / `async_set_image_tags` / `async_set_image_orientation_lock`,
   `LocalLibraryBackend` / Dropbox / Drive `_bin_path` + `bin_file_ids`,
-  `_safe_image_id`), `library_http.py` (`DigitalFramesLibraryImageVoiceNameView`,
-  `DigitalFramesLibraryImageTagsView`, `DigitalFramesLibraryImageOrientationLockView`).
+  `_safe_image_id`), `library_http.py` (`DigitalFramesLibraryListView` sort
+  handling, `DigitalFramesLibraryImageVoiceNameView`,
+  `DigitalFramesLibraryImageTagsView`, `DigitalFramesLibraryImageOrientationLockView`),
+  `digital-frames-panel.js` (`_loadLibrary`, `#lib-sort-select` wiring in
+  `_wireLibraryToolbar`).
 - **If it silently breaks**: uploads silently fail per-file in a batch,
   thumbnails go stale/broken, voice name/tag/orientation-lock edits fail to persist, a
   7.3" send reuses 13.3"-layout bytes (wrong codec cache), or — a real bug
@@ -381,8 +397,11 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `_loadLibrary` had no staleness guard, so switching albums quickly could
   let an older, slower album load resolve after a newer one and leave the
   breadcrumb title naming a different album than the grid actually shows —
-  both now share a token that discards a superseded load's result.
-- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `lazy-thumbs.spec.js`; `crop-aspect-ratio-lock.spec.js` covers orientation lock picker dimming and sending validation).
+  both now share a token that discards a superseded load's result. An
+  unrecognized `sort` value silently falls back to `uploaded_desc` rather
+  than erroring, so a typo'd query param degrades gracefully instead of
+  breaking the grid.
+- **Test status**: Panel-tested (`dashboard.spec.js` covers grid rendering, album navigation, voice name, and tags configuration/clearing, and switching albums quickly renders the last-picked one even when its response resolves out of order; `library-sort.spec.js` covers the default last-uploaded-first order and switching the `#lib-sort-select` dropdown to each of the other three orders; `lazy-thumbs.spec.js`; `crop-aspect-ratio-lock.spec.js` covers orientation lock picker dimming and sending validation).
   **Backend-tested** (local backend) —
   `tests/python/library/test_library_local_backend.py` (single/multi
   upload, undecodable-bytes tolerance, thumbnail cache generation/reuse,
@@ -398,7 +417,10 @@ collide; pre-Phase-2 resolution-only bins still serve as a read fallback.
   `image_id` via `_safe_image_id` before any Dropbox API request goes out,
   and `GoogleDriveLibraryBackend.async_get_bin`/`async_delete_image` treat a
   traversal id as an ordinary manifest miss with no Drive request, since
-  that backend never builds a path from `image_id` at all).
+  that backend never builds a path from `image_id` at all);
+  `tests/python/library/test_library_http_sort.py` (default `uploaded_desc`
+  order, explicit `uploaded_asc`/`name_asc`/`name_desc`, unknown `sort`
+  value falls back to the default, and `album` + `sort` combine correctly).
 
 ## 9. Library storage backend switching (Local / Dropbox / Google Drive)
 User can point the whole library at Dropbox or Google Drive instead of
@@ -906,9 +928,7 @@ picker), staged into a scene via the wall picker, or on a schedule.
 **Quick setup (Phase 3):** each Live card has frame + time + "Schedule daily"
 which calls `POST /api/digital_frames/live/quick_setup` to create one daily
 recurring schedule per selected frame (does not clone the skill).
-Text modes render through the pinned remote `xotd_renderer.py` subprocess
-at the target frame's composition size. The script writes Spectra
-`xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
+Text modes render through `ai_enhancer.py` (optional AI prompt injection with E-Ink Spectra 6 palette optimization + soft local PIL fallback) or the pinned local `xotd_renderer.py` subprocess (8 visual styles: plain, ad_50s, movie_poster, neon_noir, chalkboard, gothic_gold, pop_art, nature_zen) at the target frame's composition size. The script writes Spectra `xotd.bin` **and** full RGB `xotd_preview.png` (before pack).
 **Agenda mode (Phase 4):** pinned `agenda_renderer.py --render-only` writes
 `agenda.bin` + `agenda_preview.png`; HA calendar events are prefetched
 into `ha_events.json` before the subprocess. Both prefetching and parsing
@@ -919,7 +939,8 @@ Image modes resolve to a library image_id (feeds upload the fetched photo
 into the library first) and use the normal library codec path.
 - **Entry points**: `skills.py` (`SkillManager.async_save_skill` /
   `async_render_for_entry` / `_async_render_text` / `_async_render_agenda` /
-  `_async_fetch_image_feed` / `_async_pick_image_album`),
+  `_async_fetch_image_feed` / `_async_pick_image_album`), `ai_enhancer.py`
+  (`async_generate_ai_enhanced_image`, `build_ai_prompt`, `has_ai_image_service`),
   `const.py` (`AGENDA_RENDERER_PINNED_BASE`),
   `panel_codec.py` (`text_skill_payload_for_codec`),
   `skills_http.py` (CRUD + `DigitalFramesSkillSendView` +
@@ -978,8 +999,10 @@ into the library first) and use the normal library codec path.
   CODEC_PNG gets its own compose/rotate/encode branch and is exercised the
   same way CODEC_JPEG_Q90 already was; a malformed bin with a nonzero
   rotation raises rather than silently returning un-rotated bytes).
+  `tests/python/unit/test_ai_enhancer.py` (AI prompt injection & soft fallback),
+  `tests/python/unit/test_message_styles.py` (all 8 visual styles PIL render),
   Panel-tested — `skills.spec.js` (Live tab; internal id still `xotd`),
-  `walls-skill-picker.spec.js` (staging into scenes),
+  `walls-skill-picker.spec.js` (staging into scenes + sending live skill content directly to frame),
   `fraimic-card.spec.js` (card Daily picker send).
 
 ## 29. Lovelace card: per-frame dashboard management + last-image preview

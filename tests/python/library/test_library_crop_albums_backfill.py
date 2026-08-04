@@ -59,15 +59,15 @@ async def test_save_fallback_orientation_crop_invalidates_matching_resolutions(
 ):
     record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
     image_id = record["image_id"]
-    # 13.3" (1200x1600) and 31.5" (2560x1440, used sideways as 1440x2560)
+    # 13.3" (1200x1600) and 31.5" (2560x1800, used sideways as 1800x2560)
     # are both portrait-oriented at these dimensions.
     await library_manager._backend.async_save_bin(image_id, 1200, 1600, b"stale-1")
-    await library_manager._backend.async_save_bin(image_id, 1440, 2560, b"stale-2")
+    await library_manager._backend.async_save_bin(image_id, 1800, 2560, b"stale-2")
 
     await library_manager.async_set_crop(image_id, "portrait", 0, [0.0, 0.0, 1.0, 1.0])
 
     assert await library_manager._backend.async_get_bin(image_id, 1200, 1600) is None
-    assert await library_manager._backend.async_get_bin(image_id, 1440, 2560) is None
+    assert await library_manager._backend.async_get_bin(image_id, 1800, 2560) is None
 
 
 async def test_clear_crop_reverts_and_invalidates(library_manager, sample_image_bytes):

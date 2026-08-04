@@ -397,7 +397,7 @@
       flex: 1;
       min-width: 0;
     }
-    .lib-backend select, .lib-card select {
+    .lib-backend select, .lib-card select, .lib-breadcrumb select {
       padding: 6px 8px;
       border-radius: 6px;
       border: 1px solid var(--divider-color, rgba(0,0,0,.15));
@@ -2208,6 +2208,7 @@
 
       this._albums        = [];       // [{ name, count, cover_image_id }]
       this._currentAlbum  = null;     // null = album folder view; a name = viewing that album
+      this._librarySort   = 'uploaded_desc';  // matches library_http.py's default -- last uploaded first
       this._libraryLoadToken = 0;     // incremented per _loadLibrary call -- lets a stale
                                        // (superseded) fetch detect it and skip committing its result
       this._albumPickerImage = null;  // image currently open in the "Add to Album" picker
@@ -2872,7 +2873,13 @@
           <div class="lib-breadcrumb" id="lib-breadcrumb">
             <button id="lib-back-btn">← Albums</button>
             <span class="lib-breadcrumb-title" id="lib-breadcrumb-title"></span>
-            <button class="btn-ghost" id="lib-select-toggle" style="margin-left:auto;flex:0 0 auto">☑ Select</button>
+            <select id="lib-sort-select" style="margin-left:auto;flex:0 0 auto" title="Sort photos">
+              <option value="uploaded_desc">Last uploaded first</option>
+              <option value="uploaded_asc">First uploaded first</option>
+              <option value="name_asc">Name (A-Z)</option>
+              <option value="name_desc">Name (Z-A)</option>
+            </select>
+            <button class="btn-ghost" id="lib-select-toggle" style="flex:0 0 auto">☑ Select</button>
           </div>
           <div class="lib-toolbar" id="lib-select-toolbar" style="display:none">
             <span class="lib-select-count" id="lib-select-count">0 selected</span>
@@ -3527,6 +3534,11 @@
                 <option value="plain">Plain</option>
                 <option value="ad_50s">1950s Diner Ad</option>
                 <option value="movie_poster">Movie Poster</option>
+                <option value="neon_noir">Neon Sign</option>
+                <option value="chalkboard">Cafe Chalkboard</option>
+                <option value="gothic_gold">Gold Foil & Velvet</option>
+                <option value="pop_art">60s Pop Art</option>
+                <option value="nature_zen">Botanical Zen</option>
               </select>
             </div>
             <div class="modal-row">
@@ -5646,6 +5658,7 @@
       const selectToggleBtn = this.shadowRoot.getElementById('lib-select-toggle');
       const selectCancelBtn = this.shadowRoot.getElementById('lib-select-cancel');
       const selectDeleteBtn = this.shadowRoot.getElementById('lib-select-delete');
+      const sortSelect      = this.shadowRoot.getElementById('lib-sort-select');
 
       if (uploadBtn) uploadBtn.addEventListener('click', () => this._openUploadModal());
       if (backBtn) backBtn.addEventListener('click', () => this._openAlbumFolders());
@@ -5655,6 +5668,14 @@
       if (selectToggleBtn) selectToggleBtn.addEventListener('click', () => this._setLibrarySelectMode(true));
       if (selectCancelBtn) selectCancelBtn.addEventListener('click', () => this._setLibrarySelectMode(false));
       if (selectDeleteBtn) selectDeleteBtn.addEventListener('click', () => this._deleteSelectedFromLibrary());
+      if (sortSelect) {
+        sortSelect.value = this._librarySort;
+        sortSelect.addEventListener('change', async () => {
+          this._librarySort = sortSelect.value;
+          if (this._currentAlbum) await this._loadLibrary(this._currentAlbum);
+          this._renderLibraryGrid();
+        });
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -5994,9 +6015,9 @@
       // than this._library actually contains after two quick album switches.
       const myToken = token !== undefined ? token : (this._libraryLoadToken = (this._libraryLoadToken || 0) + 1);
       try {
-        const url = album
-          ? `/api/digital_frames/library/list?album=${encodeURIComponent(album)}`
-          : '/api/digital_frames/library/list';
+        const params = [`sort=${encodeURIComponent(this._librarySort)}`];
+        if (album) params.push(`album=${encodeURIComponent(album)}`);
+        const url = `/api/digital_frames/library/list?${params.join('&')}`;
         const resp = await fetch(url, { headers: this._authHeaders() });
         const result = await resp.json();
         if (myToken !== this._libraryLoadToken) return;
@@ -8759,21 +8780,30 @@
       const fb  = this.shadowRoot.getElementById('wall-scene-fb');
       const btn = this.shadowRoot.getElementById('wall-send-btn');
 
-      // Skill-type mappings are excluded here: instant "Send to Frames"
-      // sends a stored library image_id directly, and a skill has no
-      // image_id to send this way -- send a skill via its own "Send Now"
-      // (Daily Content tab), Save Scene + Send, or a schedule instead.
-      const targets = this._frames
-        .map(frame => ({
-          entryId: frame.entryId,
-          frame,
-          imageId: this._wallEffectiveMapping(frame.entryId),
-        }))
-        .filter(t => t.frame && t.frame.entityId && t.imageId && typeof t.imageId === 'string');
+      // Separate handling for image and skill mappings.
+      const imageTargets = this._frames
+        .map(frame => {
+          const mapping = this._wallEffectiveMapping(frame.entryId);
+          if (mapping && typeof mapping === 'string') {
+            return { entryId: frame.entryId, frame, imageId: mapping };
+          }
+          return null;
+        })
+        .filter(t => t && t.frame && t.frame.entityId && t.imageId && typeof t.imageId === 'string');
 
-      if (!targets.length) {
+      const skillTargets = this._frames
+        .map(frame => {
+          const mapping = this._wallEffectiveMapping(frame.entryId);
+          if (mapping && typeof mapping === 'object' && mapping.type === 'skill') {
+            return { entryId: frame.entryId, frame, skillId: mapping.skill_id };
+          }
+          return null;
+        })
+        .filter(t => t && t.frame && t.frame.entityId && t.skillId);
+
+      if (!imageTargets.length && !skillTargets.length) {
         fb.className = 'feedback err';
-        fb.textContent = 'No frames have an image assigned yet.';
+        fb.textContent = 'No frames have an image or skill assigned yet.';
         fb.style.display = 'block';
         return;
       }
@@ -8782,7 +8812,7 @@
       btn.disabled = true;
       btn.textContent = '⏳ Sending…';
 
-      const results = await Promise.all(targets.map(async (t) => {
+      const imageResults = await Promise.all(imageTargets.map(async (t) => {
         try {
           const r = await this._sendLibraryImageToFrame(t.frame, t.imageId);
           if (r.queued) return { ...t, success: false, queued: true };
@@ -8791,6 +8821,18 @@
           return { ...t, success: false, message: err.message };
         }
       }));
+
+      const skillResults = await Promise.all(skillTargets.map(async (t) => {
+        try {
+          const r = await this._sendSkillToFrame(t.frame, t.skillId);
+          if (r.queued) return { ...t, success: false, queued: true };
+          return { ...t, success: true };
+        } catch (err) {
+          return { ...t, success: false, message: err.message };
+        }
+      }));
+
+      const results = [...imageResults, ...skillResults];
 
       const ok     = results.filter(r => r.success);
       // Queued frames haven't actually received the image yet -- don't
@@ -8802,10 +8844,13 @@
       if (ok.length) {
         for (const r of ok) {
           this._clearFrameOnDeck(r.frame);
-          r.frame.lastImageId = r.imageId;
+          // Update lastImageId for image targets; for skills we keep as is.
+          if (r.imageId) {
+            r.frame.lastImageId = r.imageId;
+          }
         }
       }
-      // Queued frames already marked on-deck inside _sendLibraryImageToFrame.
+      // Queued frames already marked on-deck inside _sendLibraryImageToFrame or _sendSkillToFrame.
       if (ok.length || queued.length) {
         this._renderFrames();
       }
@@ -8825,6 +8870,25 @@
 
       btn.disabled = false;
       btn.textContent = prevText;
+    }
+
+    async _sendSkillToFrame(frame, skillId) {
+      const form = new FormData();
+      if (frame.entryId) form.append('entry_id', frame.entryId);
+      if (frame.entityId) form.append('entity_id', frame.entityId);
+      const resp = await fetch(`/api/digital_frames/skills/${encodeURIComponent(skillId)}/send`, {
+        method: 'POST', headers: this._authHeaders(), body: form,
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (result.queued) {
+        this._markFrameOnDeck(frame, null);
+        return { queued: true };
+      }
+      if (!resp.ok || !result.success) {
+        throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+      }
+      this._clearFrameOnDeck(frame);
+      return { queued: false };
     }
 
     // Keeps the Save Scene button (and the explanatory hint above it) in
@@ -9817,9 +9881,9 @@
         return;
       }
       if (isSkillMapping) {
-        btn.disabled = true;
-        btn.title = 'Save the scene, or use the Live tab\'s "Send Now", to send live content';
-        btn.textContent = '▶ Send';
+        btn.disabled = false;
+        btn.title = 'Send live content to this frame now';
+        btn.textContent = `▶ Send live content to ${frame.title}`;
         return;
       }
       btn.title = '';
@@ -9828,18 +9892,17 @@
     }
 
     // The picker's one transmit action: sends whatever is staged (a library
-    // selection, or an uploaded file) to this frame, then closes. Skill
-    // mappings are never staged as sendable here (see
-    // _updateWallPickerSendButton) -- the button stays disabled, but this
-    // guards defensively too.
+    // selection, an uploaded file, or a live skill) to this frame, then closes.
     async _sendFromWallPicker() {
       const entryId = this._wallImagePickerEntryId;
       const frame = entryId && this._frames.find(f => f.entryId === entryId);
       if (!frame || !frame.entityId) return;
       const file = this._wallPickerSelectedFile;
       const mapping = this._wallEffectiveMapping(entryId);
+      const isSkillMapping = !!mapping && typeof mapping === 'object' && mapping.type === 'skill';
+      const skillId = isSkillMapping ? mapping.skill_id : null;
       const imageId = typeof mapping === 'string' ? mapping : null;
-      if (!file && !imageId) return;
+      if (!file && !imageId && !skillId) return;
       this._closeWallImagePicker();
 
       const fb = this.shadowRoot.getElementById('wall-scene-fb');
@@ -9865,14 +9928,17 @@
           } else {
             this._clearFrameOnDeck(frame);
           }
+        } else if (isSkillMapping && skillId) {
+          const r = await this._sendSkillToFrame(frame, skillId);
+          queued = r.queued;
         } else {
           const r = await this._sendLibraryImageToFrame(frame, imageId);
           queued = r.queued;
           if (!queued) frame.lastImageId = imageId;
         }
-        if (queued || imageId) this._renderFrames();
+        if (queued || imageId || skillId) this._renderFrames();
         fb.textContent = queued
-          ? `⏳ ${frame.title} is asleep — image is on deck; will send on wake.`
+          ? `⏳ ${frame.title} is asleep — content is on deck; will send on wake.`
           : `✓ Sent to ${frame.title}.`;
       } catch (err) {
         fb.className = 'feedback err';
@@ -10697,8 +10763,21 @@
 
       const cfg = skill.config || {};
       let subLabel = '';
-      if (skill.content_mode === 'image_album') subLabel = `Album: ${this._esc(cfg.album || '')}`;
-      if (skill.content_mode === 'image_feed') subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
+      if (skill.content_mode === 'image_album') {
+        subLabel = `Album: ${this._esc(cfg.album || '')}`;
+      } else if (skill.content_mode === 'image_feed') {
+        subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
+      } else if (skill.content_mode !== 'agenda') {
+        const styleLabels = {
+          plain: 'Plain', ad_50s: '1950s Diner Ad', movie_poster: 'Movie Poster',
+          neon_noir: 'Neon Sign', chalkboard: 'Cafe Chalkboard', gothic_gold: 'Gold Foil',
+          pop_art: '60s Pop Art', nature_zen: 'Botanical Zen',
+        };
+        const sStyle = cfg.style || 'plain';
+        const sLabel = styleLabels[sStyle] || sStyle;
+        const aiBadge = cfg.use_ai_enhancement !== false ? ' ✨ AI' : '';
+        subLabel = `Style: ${this._esc(sLabel)}${aiBadge}`;
+      }
 
       const frameOptions = (this._frames || []).map(f =>
         `<option value="${f.entryId}">${this._esc(f.title)}</option>`
@@ -11102,6 +11181,27 @@
       ];
     }
 
+    _xotdStyleFields() {
+      return [
+        {
+          name: 'style', type: 'select', label: 'Visual Style', default: 'neon_noir',
+          options: [
+            { value: 'plain', label: 'Plain (Classic Minimalist)' },
+            { value: 'ad_50s', label: '1950s Diner Ad' },
+            { value: 'movie_poster', label: 'Movie Poster' },
+            { value: 'neon_noir', label: 'Neon Sign (Cyberpunk)' },
+            { value: 'chalkboard', label: 'Cafe Chalkboard' },
+            { value: 'gothic_gold', label: 'Gold Foil & Velvet' },
+            { value: 'pop_art', label: '60s Pop Art' },
+            { value: 'nature_zen', label: 'Botanical Zen' },
+          ],
+        },
+        {
+          name: 'use_ai_enhancement', type: 'boolean', label: '✨ AI Visual Enhancement (Uses HA AI Image Generator when available)', default: true,
+        },
+      ];
+    }
+
     _openXotdModal(instance, presetMode) {
       const overlay = this.shadowRoot.getElementById('xotd-modal-overlay');
       const title = this.shadowRoot.getElementById('xotd-modal-title');
@@ -11120,9 +11220,10 @@
       const catalogSchema = (xotdPack && xotdPack.config_schema || []).filter(f => f.name !== 'content_mode');
       const contentModeField = this._xotdContentModeField();
       if (!instance && presetMode) contentModeField.default = presetMode;
+      const styleFields = this._xotdStyleFields();
       const imageFields = this._xotdImageFields();
       const agendaFields = this._xotdAgendaFields();
-      const allFields = [contentModeField, ...catalogSchema, ...imageFields, ...agendaFields];
+      const allFields = [contentModeField, ...catalogSchema, ...styleFields, ...imageFields, ...agendaFields];
 
       let html = `
         <div class="modal-row">
@@ -11142,6 +11243,7 @@
       // for an image skill too.
       html += `<div id="xotd-text-fields-wrap">`;
       for (const field of catalogSchema) html += this._renderConfigField(field, 'xotd');
+      for (const field of styleFields) html += this._renderConfigField(field, 'xotd');
       html += `</div>`;
       html += `<div id="xotd-image-fields-wrap">`;
       for (const field of imageFields) html += this._renderConfigField(field, 'xotd');
@@ -11290,6 +11392,9 @@
               }
             }
             config[field.name] = val;
+          }
+          for (const field of styleFields) {
+            config[field.name] = values[field.name];
           }
         }
 

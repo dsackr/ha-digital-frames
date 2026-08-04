@@ -42,6 +42,14 @@ def _no_real_network(monkeypatch):
         "custom_components.digital_frames.config_flow.get_local_ip", lambda: "192.168.1.2"
     )
 
+    async def _async_provision(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(
+        "custom_components.digital_frames.coordinator.DigitalFramesCoordinator.async_provision_frame_pull",
+        _async_provision,
+    )
+
 
 async def _start_fraimic_path(hass):
     """User source now opens a driver menu; choose Fraimic / clone."""
