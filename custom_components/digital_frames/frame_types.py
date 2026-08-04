@@ -31,15 +31,18 @@ if TYPE_CHECKING:
 # module docstring for what these mean on the wire.
 LAYOUT_SPLIT_HALF = "split_half"
 LAYOUT_SEQUENTIAL = "sequential"
+LAYOUT_SPLIT_TOP_BOTTOM = "split_top_bottom"
 
 # Stable codec ids (cache keys / FramePort preferred_payload family).
 # These name *how* pixels become wire bytes — not marketing origin.
 CODEC_SPECTRA6_SPLIT_HALF = "spectra6_split_half"
 CODEC_SPECTRA6_SEQUENTIAL = "spectra6_sequential"
+CODEC_SPECTRA6_SPLIT_TOP_BOTTOM = "spectra6_split_top_bottom"
 
 _LAYOUT_TO_CODEC: dict[str, str] = {
     LAYOUT_SPLIT_HALF: CODEC_SPECTRA6_SPLIT_HALF,
     LAYOUT_SEQUENTIAL: CODEC_SPECTRA6_SEQUENTIAL,
+    LAYOUT_SPLIT_TOP_BOTTOM: CODEC_SPECTRA6_SPLIT_TOP_BOTTOM,
 }
 
 ORIGIN_OFFICIAL = "official"
@@ -95,7 +98,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         id="31.5",
         display_name='Fraimic Canvas 31.5"',
         resolution=(1800, 2560),
-        byte_layout=LAYOUT_SPLIT_HALF,
+        byte_layout=LAYOUT_SPLIT_TOP_BOTTOM,
         origin=ORIGIN_OFFICIAL,
         send_timeout_s=600,
     ),

@@ -78,7 +78,11 @@ try:  # Optional: makes the "fast" packer fully vectorized. Not required.
 except ImportError:  # pragma: no cover
     _np = None
 
-from .frame_types import LAYOUT_SPLIT_HALF, frame_type_for_resolution
+from .frame_types import (
+    LAYOUT_SPLIT_HALF,
+    LAYOUT_SPLIT_TOP_BOTTOM,
+    frame_type_for_resolution,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +330,25 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
     ).byte_layout
     if layout == LAYOUT_SPLIT_HALF:
         return _pack_split_halves(quantized_image)
+    if layout == LAYOUT_SPLIT_TOP_BOTTOM:
+        return _pack_split_top_bottom(quantized_image)
     return _pack_sequential(quantized_image)
+
+
+def _pack_split_top_bottom(quantized_image: "Image.Image") -> bytes:
+    """
+    Pack a quantized image for a panel where the bottom half rows come first
+    in the binary file, followed by the top half rows.
+    """
+    width = quantized_image.width
+    height = quantized_image.height
+    half = height // 2
+    out = bytearray()
+    for y in range(half, height):
+        out.extend(_pack_row_half(quantized_image, y, 0, width))
+    for y in range(0, half):
+        out.extend(_pack_row_half(quantized_image, y, 0, width))
+    return bytes(out)
 
 
 def _pack_split_halves(quantized_image: "Image.Image") -> bytes:
@@ -408,19 +430,27 @@ def _pack_nibble_pairs(nibbles: bytes) -> bytes:
 
 
 def _pack_segments_fast(
-    nibbles: bytes, width: int, height: int, start_x: int, end_x: int
+    nibbles: bytes,
+    width: int,
+    height: int,
+    start_x: int,
+    end_x: int,
+    start_y: int = 0,
+    end_y: int | None = None,
 ) -> bytes:
     """Fast equivalent of running _pack_row_half over every row for columns
     [start_x, end_x): rows are sliced out of the row-major nibble buffer,
     odd-width segments padded with white, then pair-packed in one pass."""
+    if end_y is None:
+        end_y = height
     seg_w = end_x - start_x
-    if seg_w == width and seg_w % 2 == 0:
-        # Full-width, even: the buffer is already one contiguous even run.
+    if seg_w == width and seg_w % 2 == 0 and start_y == 0 and end_y == height:
+        # Full-width, full-height, even: the buffer is already one contiguous even run.
         return _pack_nibble_pairs(nibbles)
     pad = bytes([_WHITE_NIBBLE]) if seg_w % 2 else b""
     rows = [
         nibbles[y * width + start_x : y * width + end_x] + pad
-        for y in range(height)
+        for y in range(start_y, end_y)
     ]
     return _pack_nibble_pairs(b"".join(rows))
 
@@ -438,6 +468,17 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
             _pack_segments_fast(nibbles, width, height, 0, half)
             + _pack_segments_fast(nibbles, width, height, half, width)
         )
+    if layout == LAYOUT_SPLIT_TOP_BOTTOM:
+        half_h = height // 2
+        # Bottom half rows (half_h..height) come first in the binary file,
+        # followed by top half rows (0..half_h)
+        bot_bytes = _pack_segments_fast(
+            nibbles, width, height, 0, width, start_y=half_h, end_y=height
+        )
+        top_bytes = _pack_segments_fast(
+            nibbles, width, height, 0, width, start_y=0, end_y=half_h
+        )
+        return bot_bytes + top_bytes
     return _pack_segments_fast(nibbles, width, height, 0, width)
 
 
