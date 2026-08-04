@@ -79,6 +79,7 @@ except ImportError:  # pragma: no cover
     _np = None
 
 from .frame_types import (
+    LAYOUT_SPLIT_16_GRID,
     LAYOUT_SPLIT_8_ROWS,
     LAYOUT_SPLIT_HALF,
     LAYOUT_SPLIT_TOP_BOTTOM,
@@ -335,7 +336,34 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
         return _pack_split_top_bottom(quantized_image)
     if layout == LAYOUT_SPLIT_8_ROWS:
         return _pack_split_8_rows(quantized_image)
+    if layout == LAYOUT_SPLIT_16_GRID:
+        return _pack_split_16_grid(quantized_image)
     return _pack_sequential(quantized_image)
+
+
+def _pack_split_16_grid(quantized_image: "Image.Image") -> bytes:
+    """
+    Pack a quantized image for the 31.5" EL315 panel (1800x2560):
+    Divided into 8 row blocks of 320 rows each. Within each block,
+    the left half (cols 0..899, 144k bytes) is emitted first, followed
+    by the right half (cols 900..1799, 144k bytes). The 8 row blocks
+    are emitted in reverse hardware order (Block 8 down to Block 1).
+    """
+    width = quantized_image.width
+    height = quantized_image.height
+    half_w = width // 2
+    block_h = height // 8
+    blocks = []
+    for i in range(8):
+        y0 = i * block_h
+        y1 = (i + 1) * block_h if i < 7 else height
+        left_bytes = bytearray()
+        right_bytes = bytearray()
+        for y in range(y0, y1):
+            left_bytes.extend(_pack_row_half(quantized_image, y, 0, half_w))
+            right_bytes.extend(_pack_row_half(quantized_image, y, half_w, width))
+        blocks.append(bytes(left_bytes) + bytes(right_bytes))
+    return b"".join(reversed(blocks))
 
 
 def _pack_split_8_rows(quantized_image: "Image.Image") -> bytes:
@@ -510,6 +538,21 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
                     nibbles, width, height, 0, width, start_y=y0, end_y=y1
                 )
             )
+        return b"".join(reversed(blocks))
+    if layout == LAYOUT_SPLIT_16_GRID:
+        half_w = width // 2
+        block_h = height // 8
+        blocks = []
+        for i in range(8):
+            y0 = i * block_h
+            y1 = (i + 1) * block_h if i < 7 else height
+            left_bytes = _pack_segments_fast(
+                nibbles, width, height, 0, half_w, start_y=y0, end_y=y1
+            )
+            right_bytes = _pack_segments_fast(
+                nibbles, width, height, half_w, width, start_y=y0, end_y=y1
+            )
+            blocks.append(left_bytes + right_bytes)
         return b"".join(reversed(blocks))
     return _pack_segments_fast(nibbles, width, height, 0, width)
 

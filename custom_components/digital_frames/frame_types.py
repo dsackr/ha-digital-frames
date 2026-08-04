@@ -33,6 +33,7 @@ LAYOUT_SPLIT_HALF = "split_half"
 LAYOUT_SEQUENTIAL = "sequential"
 LAYOUT_SPLIT_TOP_BOTTOM = "split_top_bottom"
 LAYOUT_SPLIT_8_ROWS = "split_8_rows"
+LAYOUT_SPLIT_16_GRID = "split_16_grid"
 
 # Stable codec ids (cache keys / FramePort preferred_payload family).
 # These name *how* pixels become wire bytes — not marketing origin.
@@ -40,12 +41,14 @@ CODEC_SPECTRA6_SPLIT_HALF = "spectra6_split_half"
 CODEC_SPECTRA6_SEQUENTIAL = "spectra6_sequential"
 CODEC_SPECTRA6_SPLIT_TOP_BOTTOM = "spectra6_split_top_bottom"
 CODEC_SPECTRA6_SPLIT_8_ROWS = "spectra6_split_8_rows"
+CODEC_SPECTRA6_SPLIT_16_GRID = "spectra6_split_16_grid"
 
 _LAYOUT_TO_CODEC: dict[str, str] = {
     LAYOUT_SPLIT_HALF: CODEC_SPECTRA6_SPLIT_HALF,
     LAYOUT_SEQUENTIAL: CODEC_SPECTRA6_SEQUENTIAL,
     LAYOUT_SPLIT_TOP_BOTTOM: CODEC_SPECTRA6_SPLIT_TOP_BOTTOM,
     LAYOUT_SPLIT_8_ROWS: CODEC_SPECTRA6_SPLIT_8_ROWS,
+    LAYOUT_SPLIT_16_GRID: CODEC_SPECTRA6_SPLIT_16_GRID,
 }
 
 ORIGIN_OFFICIAL = "official"
@@ -101,7 +104,7 @@ FRAME_TYPES: dict[str, FrameType] = {
         id="31.5",
         display_name='Fraimic Canvas 31.5"',
         resolution=(1800, 2560),
-        byte_layout=LAYOUT_SPLIT_8_ROWS,
+        byte_layout=LAYOUT_SPLIT_16_GRID,
         origin=ORIGIN_OFFICIAL,
         send_timeout_s=600,
     ),
