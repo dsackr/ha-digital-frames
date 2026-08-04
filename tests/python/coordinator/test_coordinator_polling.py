@@ -237,6 +237,34 @@ async def test_accelerometer_polling_rotated_90_degrees(hass, coordinator, aiocl
     assert data["device_orientation"] == "landscape"
 
 
+async def test_accelerometer_polling_landscape_native_panel(
+    hass, make_coordinator, make_frame_entry, aioclient_mock
+):
+    """Landscape-native panels (31.5") return landscape when |y| > |x| and portrait when |x| >= |y|."""
+    entry = make_frame_entry(size="31.5", width=2560, height=1800)
+    coordinator = make_coordinator(entry)
+
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        json={"width": 2560, "height": 1800},
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_start",
+        json={"status": "ok"},
+    )
+    aioclient_mock.get(
+        f"http://{coordinator.host}/test?action=accel",
+        json={"x": 0.01, "y": -0.99, "z": 0.18},
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/test?action=accel_stop",
+        json={"status": "ok"},
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["device_orientation"] == "landscape"
+
+
 async def test_accelerometer_polling_sensor_not_available(hass, coordinator, aioclient_mock):
     # Mock /api/info
     aioclient_mock.get(

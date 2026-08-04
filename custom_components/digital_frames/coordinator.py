@@ -898,22 +898,13 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if x is None or y is None:
             return None
 
-        # Compare gravity axes to determine landscape / portrait. Per the
-        # real hardware reading in ACCELEROMETER_FINDINGS.md (x ~= -0.99,
-        # y ~= 0.00 while the frame sat in its normal/native resting
-        # position), gravity is dominant on X -- not Y -- when the frame is
-        # in its native orientation. A previous version of this check had
-        # that backwards (assumed Y vertical = native), which made every
-        # native-orientation frame report the opposite of its true physical
-        # orientation.
-        native_w = self.config_entry.data.get(CONF_WIDTH, 1200)
-        native_h = self.config_entry.data.get(CONF_HEIGHT, 1600)
-        native_is_landscape = native_w > native_h
-
+        # On Fraimic frame PCBs, gravity is dominant on X (|x| >= |y|) when
+        # the frame is positioned vertically (portrait, long edge up).
+        # Gravity is dominant on Y (|y| > |x|) when the frame is positioned
+        # horizontally (landscape, short edge up).
         if abs(x) >= abs(y):
-            return "landscape" if native_is_landscape else "portrait"
-        else:
-            return "portrait" if native_is_landscape else "landscape"
+            return "portrait"
+        return "landscape"
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch latest data from the frame's /api/info endpoint."""
