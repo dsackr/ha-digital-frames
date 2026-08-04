@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import secrets
@@ -659,9 +660,17 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         provisioned = await self.async_provision_frame_pull()
 
         token = uuid.uuid4().hex
+        from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
+        from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
+
+        is_official = (
+            origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
+        )
         # Keep a lightweight pending record only for UI "queued" sensor when
         # we couldn't push — delivery is pull, not a re-POST of bin_b64.
-        if not provisioned and not self.last_update_success:
+        # Official Fraimic frames do not support local pull, so we always
+        # fall through to attempt a direct push via /api/image.
+        if not provisioned and not self.last_update_success and not is_official:
             # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
             payload: dict[str, Any] = {
                 "schema": _PENDING_SCHEMA,
@@ -854,7 +863,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) as resp:
                 if resp.status != 200:
                     return None
-                res = await resp.json()
+                res = await resp.json(content_type=None)
                 if res.get("status") != "ok":
                     return None
         except Exception:
@@ -869,7 +878,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) as resp:
                 if resp.status != 200:
                     return None
-                res = await resp.json()
+                res = await resp.json(content_type=None)
                 if "error" not in res:
                     x = res.get("x")
                     y = res.get("y")
@@ -915,7 +924,11 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._base_url(API_INFO), timeout=_REQUEST_TIMEOUT
             ) as response:
                 response.raise_for_status()
-                data: dict[str, Any] = await response.json()
+                try:
+                    data_raw = await response.json(content_type=None)
+                except Exception:  # noqa: BLE001
+                    data_raw = {}
+                data = data_raw if isinstance(data_raw, dict) else {}
 
             # Opportunistic accelerometer poll
             device_orientation = await self._async_poll_accelerometer(session)

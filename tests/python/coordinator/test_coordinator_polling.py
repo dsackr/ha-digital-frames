@@ -295,3 +295,17 @@ async def test_successful_poll_handles_info_page_failure(hass, coordinator, aioc
     data = await coordinator._async_update_data()
     assert data["keep_awake_actual"] is None
     assert data["sleep_minutes_actual"] is None
+
+
+async def test_poll_parses_text_plain_json_response(hass, coordinator, aioclient_mock):
+    """Firmware returning text/plain Content-Type for JSON must not trigger ContentTypeError."""
+    aioclient_mock.get(
+        f"http://{coordinator.host}/api/info",
+        text='{"battery": 92, "width": 2560, "height": 1800}',
+        headers={"Content-Type": "text/plain"},
+    )
+
+    data = await coordinator._async_update_data()
+    assert data["online"] is True
+    assert data["battery"] == 92
+

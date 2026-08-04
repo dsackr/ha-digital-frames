@@ -94,7 +94,9 @@ actions (Reconnect Frame, Remove from HA) are under expandable Advanced Settings
 ## 3. Coordinator polling & IP self-healing
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
 it goes silent for 3 polls, a subnet rescan finds its new IP (a DHCP-moved
-frame).
+frame). Status polls use permissive JSON parsing (`content_type=None`) so
+frames returning `text/plain` or missing Content-Type headers do not trigger
+`ContentTypeError` or drop into false "asleep" states.
 
 **Setup soft-fail:** if the first poll fails (frame asleep / off-network),
 the config entry still loads and the coordinator stays in `hass.data` so
@@ -138,7 +140,10 @@ to "catch" it awake.
 
 **Secondary (immediate update if the frame is already online):**
 HA still `POST /api/image` after staging so an awake panel updates without
-waiting for the next sleep cycle. If push fails because the frame is
+waiting for the next sleep cycle. Official Fraimic frames (13.3" / 31.5") do not
+support local pull URLs; `async_send_image_or_queue` always attempts direct
+`POST /api/image` push for official frames even if `last_update_success` is False,
+so an awake frame immediately receives its send. If push fails because the frame is
 asleep, the staged pull payload is enough — success is reported as
 `delivery: pull` / `queued: true` rather than "lost send".
 

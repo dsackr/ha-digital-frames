@@ -317,3 +317,29 @@ async def test_pull_bin_view_clears_bin_on_get(coordinator, hass):
 
     # 5. Verify it is now cleared
     assert coordinator.get_pull_bin(token) is None
+
+
+async def test_official_fraimic_frame_attempts_push_even_when_last_update_success_false(
+    make_coordinator, make_frame_entry, aioclient_mock
+):
+    """Official Fraimic frames reject /sleepconfig, but must still attempt /api/image push when online."""
+    coordinator = make_coordinator(make_frame_entry(mac="1cdbd4112233"))
+    aioclient_mock.post(
+        f"http://{coordinator.host}/pullurl", status=404
+    )
+    aioclient_mock.post(
+        f"http://{coordinator.host}/sleepconfig", status=404
+    )
+    aioclient_mock.post(f"http://{coordinator.host}/api/image", status=200)
+
+    coordinator.last_update_success = False
+
+    result = await coordinator.async_send_image_or_queue(
+        b"binary-image-data", image_id="img_official"
+    )
+
+    assert result["success"] is True
+    assert result["queued"] is False
+    assert result.get("delivery") == "push+pull"
+
+

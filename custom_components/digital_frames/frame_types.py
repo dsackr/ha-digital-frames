@@ -93,7 +93,7 @@ FRAME_TYPES: dict[str, FrameType] = {
     "31.5": FrameType(
         id="31.5",
         display_name='Fraimic Canvas 31.5"',
-        resolution=(2560, 1440),
+        resolution=(2560, 1800),
         byte_layout=LAYOUT_SPLIT_HALF,
         origin=ORIGIN_OFFICIAL,
     ),
