@@ -159,3 +159,5 @@ Notes on reading it:
 | 2026-08-04 | d63ed25 | backend-pytest | failure | 543 passed, 1 error in 94.58s (0:01:34) | 64% | CI |
 | 2026-08-04 | 07beb8e | backend-pytest | failure | 543 passed, 1 error in 92.94s (0:01:32) | 64% | CI |
 | 2026-08-04 | 7662457 | backend-pytest | failure | 543 passed, 1 error in 95.58s (0:01:35) | 63% | CI |
+| 2026-08-04 | 2c3c42e | backend-pytest | success | 549 passed in 27.52s | local | local |
+| 2026-08-04 | 2c3c42e | verify-packing | success | 33 checks, 0 failures (incl. 31.5 banded layout); on-glass photo verified on physical 31.5 panel | n/a | local |
