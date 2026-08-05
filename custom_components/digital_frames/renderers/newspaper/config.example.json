@@ -1,0 +1,15 @@
+{
+  "frame": {
+    "ip_address": "fraimic.local",
+    "resolution": [1200, 1600],
+    "layout": "split_half"
+  },
+  "timezone": "America/Los_Angeles",
+  "paper_name": "The Daily Frame",
+  "edition": "Morning Edition",
+  "news_mix": "general",
+  "topics": "",
+  "sources": "",
+  "custom_rss_url": "",
+  "max_stories": 10
+}

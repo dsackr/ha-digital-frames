@@ -10652,6 +10652,7 @@
         image_feed: 'Image Feed',
         image_album: 'Image Album',
         agenda: 'Daily Agenda',
+        newspaper: 'Daily Newspaper',
       }[mode] || mode;
     }
 
@@ -10667,6 +10668,7 @@
         image_feed: '🖼',
         image_album: '🖼',
         agenda: '📅',
+        newspaper: '🗞',
       }[contentMode] || '◈';
     }
 
@@ -10682,6 +10684,7 @@
         { mode: 'scripture', icon: this._skillIcon('scripture'), desc: 'A daily Bible verse and reference.' },
         { mode: 'word', icon: this._skillIcon('word'), desc: 'A word, definition, and example.' },
         { mode: 'agenda', icon: this._skillIcon('agenda'), desc: 'Today’s calendar + weather on the frame.' },
+        { mode: 'newspaper', icon: this._skillIcon('newspaper'), desc: 'Front-page newspaper from live headlines (portrait + landscape).' },
         { mode: 'image_feed', icon: this._skillIcon('image_feed'), desc: 'A daily web feed photo (NASA, Wikimedia, Bing).' },
         { mode: 'image_album', icon: this._skillIcon('image_album'), desc: 'A random pick from one of your albums.' },
       ];
@@ -10765,6 +10768,10 @@
         subLabel = `Album: ${this._esc(cfg.album || '')}`;
       } else if (skill.content_mode === 'image_feed') {
         subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
+      } else if (skill.content_mode === 'newspaper') {
+        const mix = cfg.news_mix || 'general';
+        const paper = cfg.paper_name || 'The Daily Frame';
+        subLabel = `${this._esc(paper)} · ${this._esc(mix)}`;
       } else if (skill.content_mode !== 'agenda') {
         const styleLabels = {
           plain: 'Plain', ad_50s: '1950s Diner Ad', movie_poster: 'Movie Poster',
@@ -11110,10 +11117,63 @@
           { value: 'scripture', label: 'Scripture of the Day' },
           { value: 'word', label: 'Word of the Day' },
           { value: 'agenda', label: 'Daily Agenda' },
+          { value: 'newspaper', label: 'Daily Newspaper' },
           { value: 'image_feed', label: 'Image Feed' },
           { value: 'image_album', label: 'Image Album' },
         ],
       };
+    }
+
+    _xotdNewspaperFields() {
+      return [
+        {
+          name: 'paper_name', type: 'string', label: 'Paper name (masthead)',
+          default: 'The Daily Frame',
+          placeholder: 'The Daily Frame',
+        },
+        {
+          name: 'edition', type: 'string', label: 'Edition line',
+          default: 'Morning Edition',
+          placeholder: 'Morning Edition',
+        },
+        {
+          name: 'news_mix', type: 'select', label: 'News mix (topics)', default: 'general',
+          options: [
+            { value: 'general', label: 'General (world + national + politics + tech)' },
+            { value: 'tech', label: 'Tech focus' },
+            { value: 'politics', label: 'Politics focus' },
+            { value: 'gossip', label: 'Gossip / TMZ style' },
+            { value: 'world', label: 'World news' },
+            { value: 'business', label: 'Business' },
+            { value: 'science', label: 'Science' },
+            { value: 'sports', label: 'Sports' },
+            { value: 'entertainment', label: 'Entertainment' },
+          ],
+          help: 'Chooses which free RSS desks to pull. No API keys required.',
+        },
+        {
+          name: 'topics', type: 'string', label: 'Topics override (optional)',
+          required: false,
+          placeholder: 'tech,politics,gossip',
+          help: 'Comma-separated: world, national, politics, tech, business, science, sports, entertainment, gossip, health. Overrides the mix when set.',
+        },
+        {
+          name: 'sources', type: 'string', label: 'Sources override (optional)',
+          required: false,
+          placeholder: 'bbc,npr,techcrunch,tmz',
+          help: 'Comma-separated feed ids (bbc, npr, nyt, guardian, politico, techcrunch, wired, ars, hn, tmz, espn, reuters, ap, …).',
+        },
+        {
+          name: 'custom_rss_url', type: 'string', label: 'Custom RSS/Atom URL (optional)',
+          required: false,
+          placeholder: 'https://example.com/feed.xml',
+        },
+        {
+          name: 'max_stories', type: 'string', label: 'Max stories (3–14)',
+          default: '10',
+          placeholder: '10',
+        },
+      ];
     }
 
     _xotdAgendaFields() {
@@ -11221,7 +11281,8 @@
       const styleFields = this._xotdStyleFields();
       const imageFields = this._xotdImageFields();
       const agendaFields = this._xotdAgendaFields();
-      const allFields = [contentModeField, ...catalogSchema, ...styleFields, ...imageFields, ...agendaFields];
+      const newspaperFields = this._xotdNewspaperFields();
+      const allFields = [contentModeField, ...catalogSchema, ...styleFields, ...imageFields, ...agendaFields, ...newspaperFields];
 
       let html = `
         <div class="modal-row">
@@ -11248,6 +11309,9 @@
       html += `</div>`;
       html += `<div id="xotd-agenda-fields-wrap">`;
       for (const field of agendaFields) html += this._renderConfigField(field, 'xotd');
+      html += `</div>`;
+      html += `<div id="xotd-newspaper-fields-wrap">`;
+      for (const field of newspaperFields) html += this._renderConfigField(field, 'xotd');
       html += `</div>`;
 
       fieldsContainer.innerHTML = html;
@@ -11277,9 +11341,11 @@
       const textFieldsWrap = this.shadowRoot.getElementById('xotd-text-fields-wrap');
       const imageFieldsWrap = this.shadowRoot.getElementById('xotd-image-fields-wrap');
       const agendaFieldsWrap = this.shadowRoot.getElementById('xotd-agenda-fields-wrap');
+      const newspaperFieldsWrap = this.shadowRoot.getElementById('xotd-newspaper-fields-wrap');
       const isImageMode = (mode) => mode === 'image_feed' || mode === 'image_album';
       const isAgendaMode = (mode) => mode === 'agenda';
-      const isTextMode = (mode) => !isImageMode(mode) && !isAgendaMode(mode);
+      const isNewspaperMode = (mode) => mode === 'newspaper';
+      const isTextMode = (mode) => !isImageMode(mode) && !isAgendaMode(mode) && !isNewspaperMode(mode);
 
       const updateConditionalRows = () => {
         const values = {};
@@ -11288,6 +11354,7 @@
         textFieldsWrap.style.display = isTextMode(mode) ? 'block' : 'none';
         imageFieldsWrap.style.display = isImageMode(mode) ? 'block' : 'none';
         if (agendaFieldsWrap) agendaFieldsWrap.style.display = isAgendaMode(mode) ? 'block' : 'none';
+        if (newspaperFieldsWrap) newspaperFieldsWrap.style.display = isNewspaperMode(mode) ? 'block' : 'none';
         for (const field of allFields) {
           if (!field.show_if) continue;
           const row = this.shadowRoot.getElementById(`xotd-row-${field.name}`);
@@ -11369,6 +11436,12 @@
             config[field.name] = values[field.name];
           }
           config.weather_enabled = true;
+        } else if (isNewspaperMode(contentMode)) {
+          for (const field of newspaperFields) {
+            const visible = !field.show_if || values[field.show_if.field] === field.show_if.equals;
+            if (!visible) continue;
+            config[field.name] = values[field.name];
+          }
         } else {
           for (const field of catalogSchema) {
             const visible = !field.show_if || values[field.show_if.field] === field.show_if.equals;

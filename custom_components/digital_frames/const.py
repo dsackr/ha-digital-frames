@@ -144,6 +144,7 @@ GALLERY_CATALOG_SCHEMA_VERSION = 1
 # The local relative paths of the renderers inside this integration
 XOTD_RENDERER_RELATIVE_PATH = "renderers/xotd/xotd_renderer.py"
 AGENDA_RENDERER_RELATIVE_PATH = "renderers/daily_agenda/agenda_renderer.py"
+NEWSPAPER_RENDERER_RELATIVE_PATH = "renderers/newspaper/newspaper_renderer.py"
 
 # Orientation config options.
 #

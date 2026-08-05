@@ -62,6 +62,7 @@ from .const import (
     SIGNAL_SKILLS_UPDATED,
     XOTD_RENDERER_RELATIVE_PATH,
     AGENDA_RENDERER_RELATIVE_PATH,
+    NEWSPAPER_RENDERER_RELATIVE_PATH,
 )
 from .panel_codec import panel_codec_for_resolution
 
@@ -84,13 +85,18 @@ _RENDER_TIMEOUT = 45  # seconds -- one hung subprocess fails just its own mappin
 _TEXT_CONTENT_MODES = ("joke", "quote", "scripture", "word")
 _IMAGE_SUB_MODES = ("image_feed", "image_album")
 _AGENDA_MODE = "agenda"
-_CONTENT_MODES = _TEXT_CONTENT_MODES + _IMAGE_SUB_MODES + (_AGENDA_MODE,)
+_NEWSPAPER_MODE = "newspaper"
+_CONTENT_MODES = _TEXT_CONTENT_MODES + _IMAGE_SUB_MODES + (
+    _AGENDA_MODE,
+    _NEWSPAPER_MODE,
+)
 _IMAGE_FEED_PROVIDERS = ("nasa_apod", "wikimedia_potd", "bing_wallpaper")
 _IMAGE_OTD_ALBUM = "Image of the Day"
 
 _SCRIPT_CACHE_TTL = 3600  # seconds -- the renderer script changes far less often than the pack catalog
 _CONTENT_CACHE_TTL = 1800  # seconds -- a fan-out to N frames within this window reuses one fetch
 _AGENDA_RENDER_TIMEOUT = 90  # calendar + weather + pillow pack can exceed text-mode budget
+_NEWSPAPER_RENDER_TIMEOUT = 90  # multi-feed RSS + newspaper layout pack
 
 # Seeded once, on first load, before any XotdInstance migration runs -- so a
 # migrated instance's name never collides silently with one of these (see
@@ -129,6 +135,20 @@ _BUILTIN_SKILLS: tuple[dict[str, Any], ...] = (
             "ha_calendar_entities": "",
             "temp_unit": "fahrenheit",
             "weather_enabled": True,
+        },
+    },
+    {
+        "skill_id": "daily_newspaper",
+        "name": "Daily Newspaper",
+        "content_mode": _NEWSPAPER_MODE,
+        "config": {
+            "paper_name": "The Daily Frame",
+            "edition": "Morning Edition",
+            "news_mix": "general",
+            "topics": "",
+            "sources": "",
+            "custom_rss_url": "",
+            "max_stories": 10,
         },
     },
 )
@@ -236,9 +256,10 @@ class SkillManager:
             self._skills[skill.skill_id] = skill
 
         # Fresh install: seed every built-in not tombstoned. Upgrades that
-        # already have skills only gain *new* built-in ids (e.g. daily_agenda)
-        # when the user has never deleted that id.
+        # already have skills only gain *new* built-in ids (e.g. daily_agenda,
+        # daily_newspaper) when the user has never deleted that id.
         seeded = False
+        _upgrade_seed_ids = {"daily_agenda", "daily_newspaper"}
         if not self._skills:
             to_seed = [
                 b
@@ -249,7 +270,7 @@ class SkillManager:
             to_seed = [
                 b
                 for b in _BUILTIN_SKILLS
-                if b["skill_id"] == "daily_agenda"
+                if b["skill_id"] in _upgrade_seed_ids
                 and b["skill_id"] not in self._skills
                 and b["skill_id"] not in self._deleted_builtins
             ]
@@ -826,6 +847,116 @@ class SkillManager:
         finally:
             await self.hass.async_add_executor_job(shutil.rmtree, run_dir, True)
 
+    def _newspaper_script_config(
+        self, skill: Skill, entry: "ConfigEntry"
+    ) -> dict[str, Any]:
+        from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
+
+        spec = render_spec_for_hass_entry(self.hass, entry)
+        try:
+            layout = panel_codec_for_resolution(spec.width, spec.height).byte_layout
+        except ValueError:
+            layout = "split_half"
+
+        cfg = dict(skill.config or {})
+        max_stories = cfg.get("max_stories", 8)
+        try:
+            max_stories = int(max_stories)
+        except (TypeError, ValueError):
+            max_stories = 8
+        max_stories = max(3, min(12, max_stories))
+
+        return {
+            "frame": {
+                "resolution": [spec.width, spec.height],
+                "layout": layout,
+            },
+            "timezone": self.hass.config.time_zone or "UTC",
+            "paper_name": (cfg.get("paper_name") or "The Daily Frame").strip()
+            or "The Daily Frame",
+            "edition": (cfg.get("edition") or "Morning Edition").strip()
+            or "Morning Edition",
+            "news_mix": (cfg.get("news_mix") or "general").strip().lower()
+            or "general",
+            "topics": cfg.get("topics") or "",
+            "sources": cfg.get("sources") or "",
+            "custom_rss_url": (cfg.get("custom_rss_url") or "").strip(),
+            "max_stories": max_stories,
+        }
+
+    async def _async_render_newspaper(
+        self, skill: Skill, entry: "ConfigEntry"
+    ) -> tuple[bytes, bytes | None]:
+        """Run local newspaper_renderer --render-only; return (bin, rgb_png)."""
+        script_path = os.path.join(
+            os.path.dirname(__file__), NEWSPAPER_RENDERER_RELATIVE_PATH
+        )
+        script_config = self._newspaper_script_config(skill, entry)
+
+        run_dir = self.hass.config.path(
+            ADDONS_DIRNAME, f"skill_{skill.skill_id}", f"run_{uuid.uuid4().hex[:8]}"
+        )
+
+        def _write_inputs() -> str:
+            os.makedirs(run_dir, exist_ok=True)
+            config_path = os.path.join(run_dir, "config.json")
+            with open(config_path, "w") as f:
+                json.dump(script_config, f)
+            return config_path
+
+        try:
+            config_path = await self.hass.async_add_executor_job(_write_inputs)
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    script_path,
+                    "--render-only",
+                    "--config",
+                    config_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=run_dir,
+                )
+            except Exception as err:  # noqa: BLE001
+                raise SkillError(
+                    f"Failed to start newspaper renderer: {err}"
+                ) from err
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=_NEWSPAPER_RENDER_TIMEOUT
+                )
+            except asyncio.TimeoutError as err:
+                process.kill()
+                await process.communicate()
+                raise SkillError(f"Rendering '{skill.name}' timed out") from err
+
+            if process.returncode != 0:
+                raise SkillError(
+                    f"Rendering '{skill.name}' failed: {stderr.decode().strip()}"
+                )
+            _LOGGER.debug(
+                "Newspaper skill '%s' rendered: %s",
+                skill.name,
+                stdout.decode().strip(),
+            )
+
+            bin_path = os.path.join(run_dir, "newspaper.bin")
+            rgb_path = os.path.join(run_dir, "newspaper_preview.png")
+
+            def _read_outputs() -> tuple[bytes, bytes | None]:
+                with open(bin_path, "rb") as f:
+                    bin_bytes = f.read()
+                rgb_png: bytes | None = None
+                if os.path.isfile(rgb_path):
+                    with open(rgb_path, "rb") as f:
+                        rgb_png = f.read()
+                return bin_bytes, rgb_png
+
+            return await self.hass.async_add_executor_job(_read_outputs)
+        finally:
+            await self.hass.async_add_executor_job(shutil.rmtree, run_dir, True)
+
     async def _async_fetch_image_feed(self, skill: Skill) -> str:
         provider = skill.config.get("feed_provider")
         session = async_get_clientsession(self.hass)
@@ -958,6 +1089,8 @@ class SkillManager:
             return {"kind": "image_id", "image_id": image_id}
         if skill.content_mode == _AGENDA_MODE:
             bin_bytes, rgb_png = await self._async_render_agenda(skill, entry)
+        elif skill.content_mode == _NEWSPAPER_MODE:
+            bin_bytes, rgb_png = await self._async_render_newspaper(skill, entry)
         else:
             bin_bytes, rgb_png = await self._async_render_text(skill, entry)
 
