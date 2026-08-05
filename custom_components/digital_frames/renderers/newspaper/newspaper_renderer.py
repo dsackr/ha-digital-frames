@@ -125,9 +125,20 @@ except ImportError:
         return bytes(out)
 
     def encode_spectra6_bin(image: Image.Image, layout: str) -> bytes:
+        """Pack for common layouts. The 31.5\" banded layout
+        (split_8_bands_vchunks) is *not* implemented here — Live skill
+        delivery re-packs from newspaper_preview.png in panel_codec when
+        the subprocess .bin size does not match the panel wire size.
+        Standalone upload to a 31.5\" frame should go through HA Send Now."""
         print(f"Encoding image buffer using layout: {layout}...")
         if layout == "split_half":
             return pack_split_halves(image)
+        if layout == "split_8_bands_vchunks":
+            print(
+                "Warning: layout split_8_bands_vchunks is not packed in this "
+                "script; emitting plain 4bpp. Digital Frames will re-pack "
+                "from the RGB preview on Send Now."
+            )
         return pack_sequential(image)
 
 

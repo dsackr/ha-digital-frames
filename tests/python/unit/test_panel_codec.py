@@ -218,6 +218,48 @@ def test_text_skill_payload_spectra_prefers_rgb_preview(sample_image_bytes):
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_text_skill_payload_spectra_repacks_31_5_wrong_bin_size():
+    """Live renderers only pack plain 4bpp (w*h/2). The 31.5\" panel needs
+    split_8_bands_vchunks with 25% wire padding (2,304,000 bytes). When the
+    subprocess .bin is the wrong length, core must re-pack from the RGB
+    preview so the frame accepts the payload."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    from custom_components.digital_frames.image_converter import (
+        split_8_bands_vchunks_wire_size,
+    )
+    from custom_components.digital_frames.panel_codec import (
+        CODEC_SPECTRA6_SPLIT_8_BANDS_VCHUNKS,
+    )
+
+    w, h = 1440, 2560
+    img = Image.new("RGB", (w, h), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((40, 40, 400, 600), fill=(178, 19, 24))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    rgb_png = buf.getvalue()
+
+    wrong_bin = bytes((w * h) // 2)  # plain 4bpp — Live renderer output
+    assert len(wrong_bin) == 1_843_200
+    expected = split_8_bands_vchunks_wire_size(1440)
+    assert expected == 2_304_000
+
+    wire, preview = text_skill_payload_for_codec(
+        wrong_bin,
+        w,
+        h,
+        0,
+        CODEC_SPECTRA6_SPLIT_8_BANDS_VCHUNKS,
+        rgb_png,
+    )
+    assert len(wire) == expected
+    assert preview is not None
+    assert preview[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def _exact_palette_marker_png(width: int, height: int) -> bytes:
     """A composition image built only from exact Spectra 6 palette colours
     (black background, a red quadrant) -- quantization is then dither-free

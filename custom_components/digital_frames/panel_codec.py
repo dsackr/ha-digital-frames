@@ -403,8 +403,11 @@ def text_skill_payload_for_codec(
     - **JPEG panels (Meural):** encode JPEG from the RGB PNG (not unpack of
       ``.bin``), so anti-aliased text is not posterized through Spectra 6.
     - **PNG panels (Samsung):** encode PNG from the RGB PNG the same way.
-    - **Spectra panels:** wire stays ``.bin``; preview prefers RGB PNG for a
-      sharper last-image thumbnail.
+    - **Spectra panels:** use the subprocess ``.bin`` when its length already
+      matches the panel's wire size; otherwise re-pack from *rgb_png* via
+      the integration's layout-aware packer (critical for the 31.5"
+      ``split_8_bands_vchunks`` layout -- Live renderers only emit plain
+      4bpp split_half/sequential, which is 25% too small for that panel).
 
     Fallback when *rgb_png* is missing: Spectra pass-through + unpack-based
     preview; JPEG/PNG unpack ``.bin`` (6-color posterized).
@@ -422,6 +425,7 @@ def text_skill_payload_for_codec(
 
     Positional-friendly for ``async_add_executor_job``.
     """
+    from .frame_types import frame_type_for_resolution  # noqa: PLC0415
     from .image_converter import (  # noqa: PLC0415
         _encode_preview_png,
         _open_as_rgb,
@@ -429,6 +433,7 @@ def text_skill_payload_for_codec(
         _quantize_to_spectra6_p,
         preview_png_from_bin,
         unpack_spectra6_bin,
+        wire_size_for_layout,
     )
 
     def _image_from_rgb_png() -> Any:
@@ -458,26 +463,45 @@ def text_skill_payload_for_codec(
             image.save(buf, format="PNG")
         return buf.getvalue(), _encode_preview_png(image)
 
-    # Spectra wire payload. If the panel's native buffer disagrees with the
-    # composition canvas, rotate to native orientation and repack -- reusing
-    # whichever source image we already decoded for both the repack and the
-    # preview so a rotated frame's preview always matches what was sent.
-    rotated_image: Any | None = None
-    if rotation:
-        rotated_image = _decode_and_rotate()
-        p_image = _quantize_to_spectra6_p(rotated_image)
-        spectra_bin = _pack_p_image_fast(p_image)
-
-    preview: bytes | None = None
-    if rotated_image is not None:
-        # spectra_bin is now packed at the rotated (native) size, not
-        # width x height -- the preview_png_from_bin fallback below assumes
-        # its bin matches width x height, so it must not be used here.
+    # Spectra wire payload. Re-pack when:
+    #   * rotation is required (composition size ≠ native buffer), or
+    #   * the subprocess .bin length is wrong for this panel's layout
+    #     (e.g. 31.5" expects 2,304,000 bytes with padding; Live renderers
+    #     only know plain 4bpp and emit width*height/2 = 1,843,200).
+    need_repack = bool(rotation)
+    if not need_repack and rgb_png is not None:
         try:
-            preview = _encode_preview_png(rotated_image)
+            frame_type = frame_type_for_resolution(width, height)
+            native_w, native_h = frame_type.resolution
+            expected = wire_size_for_layout(
+                frame_type.byte_layout, native_w, native_h
+            )
+            if len(spectra_bin) != expected:
+                need_repack = True
+                _LOGGER.debug(
+                    "Spectra skill bin size %s != expected %s for %sx%s "
+                    "(layout=%s); re-packing from RGB preview",
+                    len(spectra_bin),
+                    expected,
+                    width,
+                    height,
+                    frame_type.byte_layout,
+                )
+        except ValueError:
+            # Unknown resolution: leave pass-through (legacy / test paths).
+            pass
+
+    if need_repack:
+        image = _decode_and_rotate()
+        p_image = _quantize_to_spectra6_p(image)
+        spectra_bin = _pack_p_image_fast(p_image)
+        try:
+            preview = _encode_preview_png(image)
         except Exception:  # noqa: BLE001
             preview = None
         return spectra_bin, preview
+
+    preview: bytes | None = None
     if rgb_png:
         try:
             preview = _encode_preview_png(_image_from_rgb_png())
