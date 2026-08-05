@@ -305,7 +305,29 @@ Custom Assist/LLM intents to generate an AI image, display a specific library im
 ## 7. Image conversion pipeline (Spectra 6 .bin encoding + decoding)
 Converts any Pillow-readable image into the frame's proprietary packed-
 nibble binary format: auto-rotate, cover-crop, manual crop, canvas
-rotation, dithering, and two PanelCodecs (split-half vs. sequential).
+rotation, dithering, and three PanelCodecs (split-half, sequential, and
+the 31.5" banded vertical-chunk layout).
+
+**2026-08-04: 31.5" wire format reverse-engineered on glass and shipped.**
+The panel is portrait-native 1440x2560 (Good Display GDEP315C01 markets it
+landscape 2560x1440); earlier releases guessed 1800x2560 with row-major
+packings (`split_8_rows`, `split_16_grid`) that rendered solids fine but
+garbled every real photo. The true format (`split_8_bands_vchunks`,
+verified with a real photo on the physical panel): fixed 2,304,000-byte
+payload = eight 288,000-byte blocks, block 0 = bottom band; gate-line
+heights bottom-up 400,400,400,80,400,400,400,80 (the two 80-line bands
+carry 320 padding lines each on the wire — the panel discards them, which
+is why the wire is 25% larger than width*height/2); each block = left half
+(720 cols) then right half; each half = 360 vertical chunks of 400 bytes,
+chunk q = columns (2q, 2q+1), byte p = gate line p counting up from the
+band bottom. `wire_size_for_layout` is the size law; anything assuming
+`(w*h)//2` for this panel is wrong. 31.5" entries auto-migrate stored
+dimensions to exactly 1440x2560 at setup (`__init__.async_setup_entry`) —
+the packer rejects any other canvas rather than garble the glass.
+**Gap:** the in-repo text-skill renderers (xOTD / daily-agenda) only pack
+split-half and sequential, so a rotation-free text send to a 31.5" frame
+would produce wrong-layout bytes; the rotation-repack branch in
+`panel_codec.text_skill_payload_for_codec` covers rotated sends only.
 
 **2026-07-29/30 "cp2"/"cp3" color pipeline experiment, reverted 2026-07-30:**
 two commits tried to make the packed colors match Fraimic's own reference
@@ -336,8 +358,10 @@ renderer — see KPF 28/29).
 - **Entry points**: `panel_codec.py` (`encode_for_panel`,
   `encode_for_panel_with_preview`, `encode_path_for_panel_with_preview`),
   `image_converter.py` (`convert_image*`, `_process`, `_process_cropped`,
-  `_pack_to_spectra6_bin` / `_pack_p_image_fast`, `default_cover_crop_box`,
-  `unpack_spectra6_bin`, `preview_png_from_bin`).
+  `_pack_to_spectra6_bin` / `_pack_p_image_fast`,
+  `_pack_split_8_bands_vchunks` (+ `_fast`), `wire_size_for_layout`,
+  `default_cover_crop_box`, `unpack_spectra6_bin`, `preview_png_from_bin`),
+  `__init__.async_setup_entry` (31.5" stored-resolution migration).
 - **If it silently breaks**: this is the "garbled/duplicated image on the
   physical frame" failure the module's own docstring calls out — no
   exception, just a wrong picture on real hardware. A broken unpacker is
@@ -354,12 +378,18 @@ renderer — see KPF 28/29).
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_image_converter.py` (including the cover-crop
   resize fully covering its canvas with no unfilled edge gap, reproduced
-  against a known-affected source size and registered resolution),
-  `tests/python/unit/test_panel_codec.py`, including pack→unpack
-  byte-exact round-trips against both byte layouts. Flagged as the riskiest
-  silent-failure surface in the codebase in the initial gap analysis; also
-  has a standalone byte-identity script (`scripts/verify_packing.py`) run
-  manually against real photos when touching either packer.
+  against a known-affected source size and registered resolution; plus the
+  31.5" banded layout: wire size, single-pixel probes cross-checked against
+  an independently derived byte-index formula, thin-band padding, and a
+  pack→unpack round-trip), `tests/python/unit/test_panel_codec.py`,
+  including pack→unpack byte-exact round-trips against the byte layouts,
+  and `tests/python/setup/test_init_setup_entry.py` for the 31.5"
+  resolution migration. Flagged as the riskiest silent-failure surface in
+  the codebase in the initial gap analysis; also has a standalone
+  byte-identity script (`scripts/verify_packing.py`) run manually against
+  real photos when touching either packer — run 2026-08-04 for the 31.5"
+  layout (33 checks, 0 failures) alongside an on-glass photo verification
+  on the physical panel.
 
 ## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags, orientation lock
 Users upload photos into one shared pool; images are listed/streamed for

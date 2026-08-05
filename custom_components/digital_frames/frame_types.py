@@ -32,23 +32,23 @@ if TYPE_CHECKING:
 LAYOUT_SPLIT_HALF = "split_half"
 LAYOUT_SEQUENTIAL = "sequential"
 LAYOUT_SPLIT_TOP_BOTTOM = "split_top_bottom"
-LAYOUT_SPLIT_8_ROWS = "split_8_rows"
-LAYOUT_SPLIT_16_GRID = "split_16_grid"
+# 31.5" EL315: 8 gate bands bottom-up (two of them thin), left/right halves,
+# vertical chunk transpose, 25% gate-line padding on the wire. Reverse-
+# engineered on glass 2026-08-04; see image_converter._pack_split_8_bands_vchunks.
+LAYOUT_SPLIT_8_BANDS_VCHUNKS = "split_8_bands_vchunks"
 
 # Stable codec ids (cache keys / FramePort preferred_payload family).
 # These name *how* pixels become wire bytes — not marketing origin.
 CODEC_SPECTRA6_SPLIT_HALF = "spectra6_split_half"
 CODEC_SPECTRA6_SEQUENTIAL = "spectra6_sequential"
 CODEC_SPECTRA6_SPLIT_TOP_BOTTOM = "spectra6_split_top_bottom"
-CODEC_SPECTRA6_SPLIT_8_ROWS = "spectra6_split_8_rows"
-CODEC_SPECTRA6_SPLIT_16_GRID = "spectra6_split_16_grid"
+CODEC_SPECTRA6_SPLIT_8_BANDS_VCHUNKS = "spectra6_split_8_bands_vchunks"
 
 _LAYOUT_TO_CODEC: dict[str, str] = {
     LAYOUT_SPLIT_HALF: CODEC_SPECTRA6_SPLIT_HALF,
     LAYOUT_SEQUENTIAL: CODEC_SPECTRA6_SEQUENTIAL,
     LAYOUT_SPLIT_TOP_BOTTOM: CODEC_SPECTRA6_SPLIT_TOP_BOTTOM,
-    LAYOUT_SPLIT_8_ROWS: CODEC_SPECTRA6_SPLIT_8_ROWS,
-    LAYOUT_SPLIT_16_GRID: CODEC_SPECTRA6_SPLIT_16_GRID,
+    LAYOUT_SPLIT_8_BANDS_VCHUNKS: CODEC_SPECTRA6_SPLIT_8_BANDS_VCHUNKS,
 }
 
 ORIGIN_OFFICIAL = "official"
@@ -85,12 +85,16 @@ class FrameType:
             ) from err
 
 
-# Verified against E Ink's EL133UF1 (13.3", portrait-native) and the 31.5"
-# Spectra 6 panel spec sheet (landscape-native) for the official panels --
-# these are real hardware pixel counts, not placeholders. Community entries
-# include API-compatible builds; the 7.3" uses sequential packing (Waveshare
-# E6 / epd7in3e-style), not Fraimic split-half — same transport family,
-# different codec (see docs/FRAME_PORT.md §1.1).
+# Verified against E Ink's EL133UF1 (13.3", portrait-native) for the 13.3"
+# panels, and against on-glass reverse engineering (2026-08-04) for the
+# 31.5": that panel is portrait-native 1440x2560 as mounted (Good Display
+# GDEP315C01 markets it landscape 2560x1440) and uses the banded
+# vertical-chunk wire format with a fixed 2,304,000-byte payload -- 25%
+# larger than width*height/2 because two of its eight gate bands carry 320
+# padding lines each. Community entries include API-compatible builds; the
+# 7.3" uses sequential packing (Waveshare E6 / epd7in3e-style), not Fraimic
+# split-half — same transport family, different codec (see
+# docs/FRAME_PORT.md §1.1).
 FRAME_TYPES: dict[str, FrameType] = {
     "13.3": FrameType(
         id="13.3",
@@ -103,8 +107,8 @@ FRAME_TYPES: dict[str, FrameType] = {
     "31.5": FrameType(
         id="31.5",
         display_name='Fraimic Canvas 31.5"',
-        resolution=(1800, 2560),
-        byte_layout=LAYOUT_SPLIT_16_GRID,
+        resolution=(1440, 2560),
+        byte_layout=LAYOUT_SPLIT_8_BANDS_VCHUNKS,
         origin=ORIGIN_OFFICIAL,
         send_timeout_s=600,
     ),

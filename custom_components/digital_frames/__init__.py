@@ -460,14 +460,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
 
     from .const import CONF_DRIVER, CONF_SIZE, CONF_WIDTH, CONF_HEIGHT, DRIVER_MEURAL, DRIVER_SAMSUNG  # noqa: PLC0415
 
-    # Auto-migrate 31.5" frame entries set up before resolution fix
+    # Auto-migrate 31.5" frame entries created before the panel's true wire
+    # geometry was reverse-engineered (2026-08-04): the panel is portrait-
+    # native 1440x2560, not the 2560x1440 marketing resolution nor the
+    # 1800x2560 guess earlier releases stored.
     if entry.data.get(CONF_SIZE) == "31.5":
         curr_w = entry.data.get(CONF_WIDTH)
         curr_h = entry.data.get(CONF_HEIGHT)
-        if (curr_w, curr_h) not in ((1800, 2560), (2560, 1800)):
-            _LOGGER.info("Migrating 31.5\" frame entry %s resolution to 1800x2560", entry.title)
+        # Exactly portrait-native, never orientation-swapped: the banded
+        # vertical-chunk packer only accepts a 1440x2560 canvas (orientation
+        # lock is applied at render time via rotation, not swapped dims).
+        if (curr_w, curr_h) != (1440, 2560):
+            _LOGGER.info("Migrating 31.5\" frame entry %s resolution to 1440x2560", entry.title)
             hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_WIDTH: 1800, CONF_HEIGHT: 2560}
+                entry, data={**entry.data, CONF_WIDTH: 1440, CONF_HEIGHT: 2560}
             )
 
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:

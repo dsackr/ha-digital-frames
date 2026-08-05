@@ -73,11 +73,14 @@ def test_unknown_codec_id_raises():
 
 
 def test_encode_for_panel_uses_registered_resolution(sample_image_bytes):
-    # Smoke: both codecs produce the expected 4bpp length.
+    # Smoke: every codec produces its layout's wire size -- (w*h)//2 for
+    # plain 4bpp layouts; the 31.5" banded layout carries 25% padding.
+    from custom_components.digital_frames.image_converter import wire_size_for_layout
+
     for ft in FRAME_TYPES.values():
         w, h = ft.resolution
         out = encode_for_panel(sample_image_bytes(200, 150), w, h)
-        assert len(out) == (w * h) // 2
+        assert len(out) == wire_size_for_layout(ft.byte_layout, w, h)
 
 
 def test_encode_for_panel_rejects_unknown_resolution(sample_image_bytes):

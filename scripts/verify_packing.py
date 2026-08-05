@@ -97,12 +97,15 @@ def main() -> int:
     legacy_total = 0.0
     fast_total = 0.0
 
-    # Every registered panel resolution (deduped), both orientations.
+    # Every registered panel resolution (deduped), both orientations --
+    # except the 31.5" banded layout, whose wire format only exists at its
+    # native portrait geometry (the packer rejects a swapped canvas).
     resolutions = set()
     for ft in frame_types.FRAME_TYPES.values():
         w, h = ft.resolution
         resolutions.add((w, h))
-        resolutions.add((h, w))
+        if ft.byte_layout != frame_types.LAYOUT_SPLIT_8_BANDS_VCHUNKS:
+            resolutions.add((h, w))
 
     for (width, height) in sorted(resolutions):
         layout = frame_types.byte_layout_for_resolution(width, height)
@@ -121,7 +124,7 @@ def main() -> int:
             fast_total += t2 - t1
 
             checks += 1
-            expected_len = (width * height) // 2
+            expected_len = ic.wire_size_for_layout(layout, width, height)
             ok = legacy == fast and len(legacy) == expected_len
             status = "OK " if ok else "FAIL"
             if not ok:

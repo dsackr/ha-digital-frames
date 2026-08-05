@@ -221,17 +221,28 @@ async def test_offline_fraimic_frame_keeps_coordinator_for_send(
     assert coordinator.last_update_success is False
 
 
-async def test_31_5_entry_auto_migrates_resolution(hass, make_frame_entry):
-    """31.5" entries created at 2560x1440 before resolution fix auto-migrate to 1800x2560."""
+@pytest.mark.parametrize(
+    "old_width,old_height",
+    [
+        (2560, 1440),  # marketing resolution, pre-any-fix entries
+        (1800, 2560),  # earlier releases' wrong guess at the wire geometry
+    ],
+)
+async def test_31_5_entry_auto_migrates_resolution(
+    hass, make_frame_entry, old_width, old_height
+):
+    """31.5" entries created before the wire geometry was reverse-engineered
+    (marketing 2560x1440 or the earlier 1800x2560 guess) auto-migrate to the
+    panel's true portrait-native 1440x2560 (KPF 7)."""
     from custom_components.digital_frames.const import CONF_HEIGHT, CONF_SIZE, CONF_WIDTH
 
-    entry = make_frame_entry(size="31.5", width=2560, height=1440)
+    entry = make_frame_entry(size="31.5", width=old_width, height=old_height)
     entry.add_to_hass(hass)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     migrated_entry = hass.config_entries.async_get_entry(entry.entry_id)
-    assert migrated_entry.data[CONF_WIDTH] == 1800
+    assert migrated_entry.data[CONF_WIDTH] == 1440
     assert migrated_entry.data[CONF_HEIGHT] == 2560
 

@@ -240,13 +240,14 @@ async def test_accelerometer_polling_rotated_90_degrees(hass, coordinator, aiocl
 async def test_accelerometer_polling_landscape_native_panel(
     hass, make_coordinator, make_frame_entry, aioclient_mock
 ):
-    """Landscape-native panels (31.5") return landscape when |y| > |x| and portrait when |x| >= |y|."""
-    entry = make_frame_entry(size="31.5", width=2560, height=1800)
+    """The 31.5" panel maps accelerometer axes the same way as every Fraimic
+    PCB: landscape when |y| > |x|, portrait when |x| >= |y|."""
+    entry = make_frame_entry(size="31.5", width=1440, height=2560)
     coordinator = make_coordinator(entry)
 
     aioclient_mock.get(
         f"http://{coordinator.host}/api/info",
-        json={"width": 2560, "height": 1800},
+        json={"width": 1440, "height": 2560},
     )
     aioclient_mock.post(
         f"http://{coordinator.host}/test?action=accel_start",
@@ -329,7 +330,7 @@ async def test_poll_parses_text_plain_json_response(hass, coordinator, aioclient
     """Firmware returning text/plain Content-Type for JSON must not trigger ContentTypeError."""
     aioclient_mock.get(
         f"http://{coordinator.host}/api/info",
-        text='{"battery": 92, "width": 2560, "height": 1800}',
+        text='{"battery": 92, "width": 1440, "height": 2560}',
         headers={"Content-Type": "text/plain"},
     )
 

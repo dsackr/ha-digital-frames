@@ -35,12 +35,23 @@ type in frame_types.py (FrameType.byte_layout) rather than inferred:
   image come first (every row, top to bottom), followed by ALL right-half
   bytes (every row, top to bottom) -- matching a panel physically built from
   two side-by-side half-width e-ink halves, each driven from its own
-  contiguous block of the buffer. Used by the 13.3" (EL133UF1) and
-  31.5" panels.
+  contiguous block of the buffer. Used by the 13.3" (EL133UF1) panels.
 - **Sequential** (confirmed against Waveshare's own epd7in3e.py reference
   driver for the 7.3" E6 panel): one single contiguous buffer, pixel pairs
   packed in plain left-to-right, top-to-bottom order with no half-split.
   Used by the 7.3" panel.
+- **Split 8 bands / vertical chunks** (31.5" EL315, reverse-engineered on
+  glass 2026-08-04 -- no public reference converter exists): panel is
+  portrait-native 1440x2560. The wire payload is a fixed 2,304,000 bytes,
+  NOT width*height/2 (1,843,200): eight 288,000-byte blocks, block 0 =
+  BOTTOM band of the glass, block 7 = top. Gate-line heights bottom-up are
+  400,400,400,80,400,400,400,80 -- the two 80-line bands (blocks 3 and 7,
+  one per gate-driver half of the panel) still carry a full 400 bytes per
+  chunk on the wire; their last 320 bytes are padding the panel discards.
+  Each block is the LEFT half (720 columns) then the RIGHT half. Each half
+  is 360 vertical chunks of 400 bytes; chunk q covers columns (2q, 2q+1)
+  left to right, and byte p within a chunk is gate line p counting UP from
+  the band's bottom edge (a 90-degree transpose of ordinary raster order).
 
 Conversion pipeline
 --------------------
@@ -79,8 +90,7 @@ except ImportError:  # pragma: no cover
     _np = None
 
 from .frame_types import (
-    LAYOUT_SPLIT_16_GRID,
-    LAYOUT_SPLIT_8_ROWS,
+    LAYOUT_SPLIT_8_BANDS_VCHUNKS,
     LAYOUT_SPLIT_HALF,
     LAYOUT_SPLIT_TOP_BOTTOM,
     frame_type_for_resolution,
@@ -334,55 +344,74 @@ def _pack_to_spectra6_bin(quantized_image: "Image.Image") -> bytes:
         return _pack_split_halves(quantized_image)
     if layout == LAYOUT_SPLIT_TOP_BOTTOM:
         return _pack_split_top_bottom(quantized_image)
-    if layout == LAYOUT_SPLIT_8_ROWS:
-        return _pack_split_8_rows(quantized_image)
-    if layout == LAYOUT_SPLIT_16_GRID:
-        return _pack_split_16_grid(quantized_image)
+    if layout == LAYOUT_SPLIT_8_BANDS_VCHUNKS:
+        return _pack_split_8_bands_vchunks(quantized_image)
     return _pack_sequential(quantized_image)
 
 
-def _pack_split_16_grid(quantized_image: "Image.Image") -> bytes:
+# 31.5" EL315 band geometry: gate-line height of each of the 8 wire blocks,
+# block 0 (first on the wire) = BOTTOM band of the glass. Blocks 3 and 7 are
+# the thin 80-line bands (one per gate-driver half: 3*400 + 80 = 1280 lines
+# per half, 2560 total). Every block still carries CHUNK bytes per chunk on
+# the wire; a thin block's bytes beyond its height are padding.
+_VCHUNK_BAND_GATES: Tuple[int, ...] = (400, 400, 400, 80, 400, 400, 400, 80)
+_VCHUNK_CHUNK_BYTES = 400
+_VCHUNK_HEIGHT = 2560  # sum of _VCHUNK_BAND_GATES
+
+
+def split_8_bands_vchunks_wire_size(width: int) -> int:
+    """Wire payload size for the banded vertical-chunk layout: every block
+    carries 8 * 400 = 3200 gate-lines' worth of bytes for *width* pixels,
+    including the discarded padding lines (2,304,000 bytes at 1440 wide)."""
+    return 8 * _VCHUNK_CHUNK_BYTES * width // 2
+
+
+def wire_size_for_layout(layout: str, width: int, height: int) -> int:
+    """Expected .bin byte length for *layout* at *width* x *height*. All
+    layouts are plain 4bpp (width*height/2) except the 31.5" banded layout,
+    whose wire carries 25% padding."""
+    if layout == LAYOUT_SPLIT_8_BANDS_VCHUNKS:
+        return split_8_bands_vchunks_wire_size(width)
+    return (width * height) // 2
+
+
+def _pack_split_8_bands_vchunks(quantized_image: "Image.Image") -> bytes:
     """
-    Pack a quantized image for the 31.5" EL315 panel (1800x2560):
-    Divided into 8 row blocks of 320 rows each. Within each block,
-    the left half (cols 0..899, 144k bytes) is emitted first, followed
-    by the right half (cols 900..1799, 144k bytes). The 8 row blocks
-    are emitted in reverse hardware order (Block 8 down to Block 1).
+    Pack a quantized image for the 31.5" EL315 panel (1440x2560 portrait
+    native) -- see the module docstring "Split 8 bands / vertical chunks"
+    for the wire format, reverse-engineered on glass 2026-08-04.
+
+    Per-pixel reference implementation; byte-identity with the fast path is
+    asserted by scripts/verify_packing.py and tests/python/unit.
     """
     width = quantized_image.width
     height = quantized_image.height
+    if (width, height) != (1440, _VCHUNK_HEIGHT):
+        raise ValueError(
+            f"split_8_bands_vchunks expects a 1440x{_VCHUNK_HEIGHT} portrait "
+            f"canvas, got {width}x{height}"
+        )
     half_w = width // 2
-    block_h = height // 8
-    blocks = []
-    for i in range(8):
-        y0 = i * block_h
-        y1 = (i + 1) * block_h if i < 7 else height
-        left_bytes = bytearray()
-        right_bytes = bytearray()
-        for y in range(y0, y1):
-            left_bytes.extend(_pack_row_half(quantized_image, y, 0, half_w))
-            right_bytes.extend(_pack_row_half(quantized_image, y, half_w, width))
-        blocks.append(bytes(left_bytes) + bytes(right_bytes))
-    return b"".join(reversed(blocks))
-
-
-def _pack_split_8_rows(quantized_image: "Image.Image") -> bytes:
-    """
-    Pack a quantized image for a panel divided into 8 equal row blocks
-    of 320 rows each, emitted in reverse order (Block 8 down to Block 1).
-    """
-    width = quantized_image.width
-    height = quantized_image.height
-    block_h = height // 8
-    blocks = []
-    for i in range(8):
-        y0 = i * block_h
-        y1 = (i + 1) * block_h if i < 7 else height
-        out = bytearray()
-        for y in range(y0, y1):
-            out.extend(_pack_row_half(quantized_image, y, 0, width))
-        blocks.append(bytes(out))
-    return b"".join(reversed(blocks))
+    out = bytearray()
+    base = 0
+    for band_gates in _VCHUNK_BAND_GATES:
+        for x0 in (0, half_w):
+            for q in range(half_w // 2):
+                x = x0 + 2 * q
+                for p in range(_VCHUNK_CHUNK_BYTES):
+                    if p < band_gates:
+                        # Gate p counts up from the band bottom; image rows
+                        # count down from the top.
+                        y = height - 1 - (base + p)
+                        high = _nibble_for_pixel(quantized_image, x, y)
+                        low = _nibble_for_pixel(quantized_image, x + 1, y)
+                        out.append((high << 4) | low)
+                    else:
+                        # Padding lines of a thin band -- discarded by the
+                        # panel; white keeps them harmless.
+                        out.append((_WHITE_NIBBLE << 4) | _WHITE_NIBBLE)
+        base += band_gates
+    return bytes(out)
 
 
 def _pack_split_top_bottom(quantized_image: "Image.Image") -> bytes:
@@ -527,34 +556,55 @@ def _pack_p_image_fast(p_image: "Image.Image") -> bytes:
             nibbles, width, height, 0, width, start_y=0, end_y=half_h
         )
         return bot_bytes + top_bytes
-    if layout == LAYOUT_SPLIT_8_ROWS:
-        block_h = height // 8
-        blocks = []
-        for i in range(8):
-            y0 = i * block_h
-            y1 = (i + 1) * block_h if i < 7 else height
-            blocks.append(
-                _pack_segments_fast(
-                    nibbles, width, height, 0, width, start_y=y0, end_y=y1
-                )
-            )
-        return b"".join(reversed(blocks))
-    if layout == LAYOUT_SPLIT_16_GRID:
-        half_w = width // 2
-        block_h = height // 8
-        blocks = []
-        for i in range(8):
-            y0 = i * block_h
-            y1 = (i + 1) * block_h if i < 7 else height
-            left_bytes = _pack_segments_fast(
-                nibbles, width, height, 0, half_w, start_y=y0, end_y=y1
-            )
-            right_bytes = _pack_segments_fast(
-                nibbles, width, height, half_w, width, start_y=y0, end_y=y1
-            )
-            blocks.append(left_bytes + right_bytes)
-        return b"".join(reversed(blocks))
+    if layout == LAYOUT_SPLIT_8_BANDS_VCHUNKS:
+        return _pack_split_8_bands_vchunks_fast(nibbles, width, height)
     return _pack_segments_fast(nibbles, width, height, 0, width)
+
+
+def _pack_split_8_bands_vchunks_fast(nibbles: bytes, width: int, height: int) -> bytes:
+    """Fast equivalent of _pack_split_8_bands_vchunks, from the row-major
+    nibble buffer. Numpy path builds each half-block as a (chunk_bytes x
+    half_w) gate-major matrix, pairs columns into bytes, and transposes to
+    chunk-major order; the fallback assembles chunks via strided slices."""
+    if (width, height) != (1440, _VCHUNK_HEIGHT):
+        raise ValueError(
+            f"split_8_bands_vchunks expects a 1440x{_VCHUNK_HEIGHT} portrait "
+            f"canvas, got {width}x{height}"
+        )
+    half_w = width // 2
+    out = bytearray()
+    base = 0
+    if _np is not None:
+        arr = _np.frombuffer(nibbles, dtype=_np.uint8).reshape(height, width)
+        for band_gates in _VCHUNK_BAND_GATES:
+            for x0 in (0, half_w):
+                m = _np.full(
+                    (_VCHUNK_CHUNK_BYTES, half_w), _WHITE_NIBBLE, dtype=_np.uint8
+                )
+                # Row p of m = gate line p of this band (up from the bottom)
+                # = image row height-1-(base+p): a reversed row slice.
+                m[:band_gates] = arr[
+                    height - base - band_gates : height - base, x0 : x0 + half_w
+                ][::-1]
+                out += ((m[:, 0::2] << 4) | m[:, 1::2]).T.tobytes()
+            base += band_gates
+        return bytes(out)
+    for band_gates in _VCHUNK_BAND_GATES:
+        pad = bytes([(_WHITE_NIBBLE << 4) | _WHITE_NIBBLE]) * (
+            _VCHUNK_CHUNK_BYTES - band_gates
+        )
+        for x0 in (0, half_w):
+            for q in range(half_w // 2):
+                x = x0 + 2 * q
+                chunk = bytearray()
+                for p in range(band_gates):
+                    row_off = (height - 1 - (base + p)) * width
+                    chunk.append(
+                        (nibbles[row_off + x] << 4) | nibbles[row_off + x + 1]
+                    )
+                out += chunk + pad
+        base += band_gates
+    return bytes(out)
 
 
 def _quantize_to_spectra6_p(image: "Image.Image") -> "Image.Image":
@@ -634,7 +684,9 @@ def convert_image(
         mismatched-orientation images are auto-cropped upright instead of
         being rotated sideways.
     :returns: Raw bytes in Spectra 6 ``.bin`` format, ready for the Fraimic
-        API.  The length will be ``(width * height) // 2`` bytes.
+        API. The length is the layout's wire size -- ``(width * height) // 2``
+        for plain 4bpp layouts; the 31.5" banded layout carries 25% padding
+        (see :func:`wire_size_for_layout`).
     :raises FileNotFoundError: If *image_path* does not exist.
     :raises ImportError: If Pillow is not installed.
     """
@@ -805,17 +857,20 @@ def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Ima
     falls back to split-half, matching the renderer fallback in
     skills.SkillManager._async_render_text.
 
-    :raises ValueError: If *bin_bytes* isn't exactly ``width*height//2`` long.
+    :raises ValueError: If *bin_bytes* isn't exactly the layout's wire size
+        (``width*height//2`` for plain 4bpp layouts; the 31.5" banded layout
+        carries 25% padding -- see :func:`wire_size_for_layout`).
     """
-    expected = (width * height) // 2
-    if len(bin_bytes) != expected:
-        raise ValueError(
-            f"bin is {len(bin_bytes)} bytes, expected {expected} for {width}x{height}"
-        )
     try:
         layout = frame_type_for_resolution(width, height).byte_layout
     except ValueError:
         layout = LAYOUT_SPLIT_HALF
+
+    expected = wire_size_for_layout(layout, width, height)
+    if len(bin_bytes) != expected:
+        raise ValueError(
+            f"bin is {len(bin_bytes)} bytes, expected {expected} for {width}x{height}"
+        )
 
     indices = _unpack_nibble_pairs(bin_bytes)
 
@@ -828,6 +883,32 @@ def unpack_spectra6_bin(bin_bytes: bytes, width: int, height: int) -> "Image.Ima
         for y in range(height):
             rows[y * width : y * width + half] = left[y * half : (y + 1) * half]
             rows[y * width + half : (y + 1) * width] = right[y * half : (y + 1) * half]
+        indices = bytes(rows)
+    elif layout == LAYOUT_SPLIT_8_BANDS_VCHUNKS:
+        # Inverse of _pack_split_8_bands_vchunks: walk blocks bottom-up and
+        # reassemble each display row from strided chunk slices. `indices`
+        # here is one palette-index byte per WIRE nibble, i.e. per half it is
+        # chunk-major: chunk q's pixels sit at [q*2*CB + 2p, q*2*CB + 2p + 1].
+        half = width // 2
+        cb = _VCHUNK_CHUNK_BYTES
+        half_px = half // 2 * cb * 2  # pixels per half-block on the wire
+        rows = bytearray(width * height)
+        base = 0
+        block_px = 2 * half_px
+        for b, band_gates in enumerate(_VCHUNK_BAND_GATES):
+            for h_i, x0 in enumerate((0, half)):
+                off = b * block_px + h_i * half_px
+                for p in range(band_gates):
+                    y = height - 1 - (base + p)
+                    # Pixel pair of chunk q at gate p: wire pixel offsets
+                    # off+q*2*cb+2p and +1 -> strided slices across chunks.
+                    rows[y * width + x0 : y * width + x0 + half : 2] = indices[
+                        off + 2 * p : off + half_px : 2 * cb
+                    ]
+                    rows[y * width + x0 + 1 : y * width + x0 + half : 2] = indices[
+                        off + 2 * p + 1 : off + half_px : 2 * cb
+                    ]
+            base += band_gates
         indices = bytes(rows)
 
     image = Image.frombytes("P", (width, height), indices)

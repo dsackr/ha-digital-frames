@@ -182,6 +182,109 @@ def test_quantized_pixels_are_restricted_to_spectra6_palette(sample_image_bytes)
 
 
 # ---------------------------------------------------------------------------
+# 31.5" banded vertical-chunk layout (KPF 7) -- wire format reverse-engineered
+# on glass 2026-08-04 and verified with a real photo on the physical panel.
+# These tests pin the byte geometry so a refactor can't silently regress it:
+# a wrong layout doesn't error, it garbles the glass.
+# ---------------------------------------------------------------------------
+
+OFFICIAL_31_5 = FRAME_TYPES["31.5"].resolution  # (1440, 2560) split_8_bands_vchunks
+
+_VC_BAND_GATES = (400, 400, 400, 80, 400, 400, 400, 80)  # blocks 0..7, bottom-up
+_VC_BLOCK_BYTES = 288_000
+_VC_HALF_BYTES = 144_000
+_VC_CHUNK = 400
+
+
+def _vc_byte_index(x: int, y: int) -> tuple[int, bool]:
+    """Wire (byte_index, is_high_nibble) for pixel (x, y) of the 1440x2560
+    canvas -- an independent re-derivation of the packing rule used to
+    cross-check the packer."""
+    gate = 2560 - 1 - y  # gate lines count up from the glass bottom
+    base = 0
+    for block, band_gates in enumerate(_VC_BAND_GATES):
+        if gate < base + band_gates:
+            p = gate - base
+            break
+        base += band_gates
+    half = 0 if x < 720 else 1
+    q, sub = divmod(x - half * 720, 2)
+    return (
+        block * _VC_BLOCK_BYTES + half * _VC_HALF_BYTES + q * _VC_CHUNK + p,
+        sub == 0,
+    )
+
+
+def test_31_5_wire_size_is_2304000_not_4bpp(sample_image_bytes):
+    """The 31.5" wire carries 25% padding: 2,304,000 bytes, NOT w*h/2."""
+    width, height = OFFICIAL_31_5
+    out = convert_image_bytes(sample_image_bytes(400, 300), width, height)
+    assert len(out) == 2_304_000
+    assert len(out) != (width * height) // 2
+
+
+@pytest.mark.parametrize("pack_method", ["fast", "legacy"])
+def test_31_5_single_pixel_lands_at_derived_wire_position(pack_method):
+    """Pack single-red-pixel canvases and assert the red nibble lands exactly
+    where the independently derived byte-index formula says it must -- one
+    probe pixel per structural feature (corners, both halves, a thin band)."""
+    from PIL import Image
+    import io
+
+    width, height = OFFICIAL_31_5
+    red, white = (178, 19, 24), (232, 232, 232)
+    probes = [
+        (0, height - 1),  # bottom-left: block 0, left half, chunk 0, p=0
+        (width - 1, 0),   # top-right: block 7 (thin), right half, last chunk
+        (720, 1000),      # first column of the right half
+        (719, 1360),      # last column of the left half, in thin block 3
+    ]
+    for x, y in probes:
+        img = Image.new("RGB", (width, height), white)
+        img.putpixel((x, y), red)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        out = convert_image_bytes(buf.getvalue(), width, height, pack_method=pack_method)
+        idx, is_high = _vc_byte_index(x, y)
+        nibble = (out[idx] >> 4) if is_high else (out[idx] & 0xF)
+        assert nibble == 3, f"probe ({x},{y}): red nibble not at byte {idx}"
+        # Everything else must be white (0x11) -- exactly one red nibble.
+        assert out.count(0x11) == len(out) - 1
+
+
+def test_31_5_thin_band_padding_is_white(sample_image_bytes):
+    """Blocks 3 and 7 display only chunk bytes 0..79; bytes 80..399 of every
+    chunk are padding and must be emitted white regardless of image content."""
+    width, height = OFFICIAL_31_5
+    out = convert_image_bytes(
+        sample_image_bytes(width, height, color=(178, 19, 24)), width, height
+    )
+    for block in (3, 7):
+        block_bytes = out[block * _VC_BLOCK_BYTES : (block + 1) * _VC_BLOCK_BYTES]
+        for q in (0, 123, 719):  # spot-check chunks across both halves
+            chunk = block_bytes[q * _VC_CHUNK : (q + 1) * _VC_CHUNK]
+            assert set(chunk[80:]) == {0x11}, f"block {block} chunk {q} padding"
+            assert set(chunk[:80]) == {0x33}, f"block {block} chunk {q} content"
+
+
+def test_31_5_unpack_round_trips_packed_bin(sample_image_bytes):
+    from custom_components.digital_frames.image_converter import (
+        _open_as_rgb,
+        _pack_to_spectra6_bin,
+        unpack_spectra6_bin,
+    )
+
+    width, height = OFFICIAL_31_5
+    quantized = _quantize_to_spectra6(
+        _open_as_rgb(sample_image_bytes(400, 300)).resize((width, height))
+    )
+    packed = _pack_to_spectra6_bin(quantized)
+    unpacked = unpack_spectra6_bin(packed, width, height)
+    assert unpacked.size == (width, height)
+    assert list(unpacked.getdata()) == list(quantized.getdata())
+
+
+# ---------------------------------------------------------------------------
 # Unpacking (bin -> preview) -- the reverse path used to build a last-image
 # thumbnail for sends that only ever see packed bytes (text-skill renders).
 # ---------------------------------------------------------------------------
