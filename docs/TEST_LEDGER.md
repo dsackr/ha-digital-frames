@@ -162,3 +162,4 @@ Notes on reading it:
 | 2026-08-04 | 2c3c42e | backend-pytest | success | 549 passed in 27.52s | local | local |
 | 2026-08-04 | 2c3c42e | verify-packing | success | 33 checks, 0 failures (incl. 31.5 banded layout); on-glass photo verified on physical 31.5 panel | n/a | local |
 | 2026-08-05 | 9a17f78 | panel-playwright | success | 172 passed | — | CI |
+| 2026-08-05 | 9a17f78 | backend-pytest | failure | 2 failed, 547 passed, 1 error in 150.51s (0:02:30) | 63% | CI |
