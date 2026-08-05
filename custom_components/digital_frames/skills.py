@@ -859,12 +859,18 @@ class SkillManager:
             layout = "split_half"
 
         cfg = dict(skill.config or {})
-        max_stories = cfg.get("max_stories", 8)
-        try:
-            max_stories = int(max_stories)
-        except (TypeError, ValueError):
-            max_stories = 8
-        max_stories = max(3, min(12, max_stories))
+        # Leave max_stories unset when the user did not pick a value so the
+        # renderer can size the story budget to the canvas (31.5" gets more
+        # than 13.3"). Explicit ints still win.
+        raw_max = cfg.get("max_stories", None)
+        max_stories: int | str | None
+        if raw_max in (None, "", 0, "0"):
+            max_stories = ""
+        else:
+            try:
+                max_stories = max(3, min(18, int(raw_max)))
+            except (TypeError, ValueError):
+                max_stories = ""
 
         return {
             "frame": {
