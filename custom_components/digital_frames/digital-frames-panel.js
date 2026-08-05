@@ -2735,6 +2735,7 @@
         this._renderLibrary();
       }
       if (name === 'widgets') {
+        this._renderXotdModeTiles();
         this._loadXotdInstances().then(() => this._renderXotdInstances());
       }
       if (name === 'walls') {
@@ -2918,6 +2919,11 @@
               <button class="btn-primary" id="compose-message-btn" style="flex:0 0 auto">✉ Compose Message</button>
             </div>
           </div>
+          <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 12px">
+            Your configured widgets. Edit one to change options (for newspaper: topics + news sources),
+            or create a new type from the tiles below.
+          </p>
+          <div class="xotd-mode-grid" id="xotd-mode-grid-widgets" style="margin-bottom:18px"></div>
           <div class="feedback" id="xotd-fb"></div>
           <div class="lib-grid skill-grid" id="xotd-grid">
             <div class="empty">
@@ -2932,7 +2938,7 @@
             <h3 style="margin:0;flex:1 1 auto">📦 Expansion Packs</h3>
           </div>
           <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-            Curated art collections and dynamic layout widgets for your frames.
+            Curated art collections and dynamic widgets (newspaper, agenda, quotes, feeds) for your frames.
           </p>
           <div class="feedback" id="pack-fb"></div>
 
@@ -2940,6 +2946,11 @@
             <div class="addons-section" id="addons-featured-section" style="display:none">
               <h2 class="addons-section-title">Featured</h2>
               <div class="lib-grid" id="gallery-featured-grid"></div>
+            </div>
+
+            <div class="addons-section" style="margin-top:24px">
+              <h2 class="addons-section-title">Featured widgets</h2>
+              <div class="lib-grid" id="addons-featured-widgets-grid"></div>
             </div>
             
             <div class="addons-section" style="margin-top:24px">
@@ -2955,8 +2966,8 @@
                 <div class="card addons-hub-tile" id="hub-tile-widgets">
                   <div class="addons-hub-tile-icon">⚙️</div>
                   <div class="addons-hub-tile-content">
-                    <div class="addons-hub-tile-title">Widgets</div>
-                    <div class="addons-hub-tile-desc">Dynamic layout widgets including daily quotes, verses, agenda, calendar, and image feeds.</div>
+                    <div class="addons-hub-tile-title">All widgets</div>
+                    <div class="addons-hub-tile-desc">Daily newspaper, agenda, jokes, quotes, scripture, word of the day, and image feeds.</div>
                   </div>
                 </div>
               </div>
@@ -10255,6 +10266,8 @@
       } else {
         if (featuredSec) featuredSec.style.display = 'none';
       }
+
+      this._renderFeaturedWidgetCards();
     }
 
     _renderExpansionPacksWidgets() {
@@ -10500,13 +10513,15 @@
     //   label, placeholder, help (help supports **bold**)
     //   default    initial value for a fresh install
     //   required   enforced only while the field is visible (see show_if)
-    //   options    [{value, label}] -- for type 'select'
+    //   options    [{value, label}] -- for type 'select' or 'checklist'
     //   domain     entity domain to offer, e.g. 'calendar' -- for type 'entity'
     //   multiple   for type 'entity': render a checkbox group (with a
     //              generic Select all / Clear toolbar once there's more
     //              than one entity) instead of a single <select>; value is
     //              a comma-joined list of entity ids (see
     //              _getFieldValue/_setFieldValue)
+    //   type 'checklist'  multi-select checkbox group from field.options
+    //              (same comma-joined string value as entity+multiple)
     //   show_if    {field, equals} -- row hidden unless that other field has this value
     //   group      'weather' places the field in the optional Location/Weather section
     //
@@ -10525,6 +10540,24 @@
           `<option value="${this._esc(opt.value)}">${this._esc(opt.label)}</option>`
         ).join('');
         inputHtml = `<select id="${fieldId}">${options}</select>`;
+      } else if (field.type === 'checklist') {
+        const options = field.options || [];
+        const selectAllHtml = options.length > 1
+          ? `<div style="display:flex;justify-content:flex-end;gap:14px;margin-bottom:4px">
+              <a href="#" class="entity-select-all" data-target="${fieldId}" style="font-size:12px;color:var(--primary-color);text-decoration:none">Select all</a>
+              <a href="#" class="entity-clear-all" data-target="${fieldId}" style="font-size:12px;color:var(--primary-color);text-decoration:none">Clear</a>
+            </div>`
+          : '';
+        inputHtml = options.length
+          ? `${selectAllHtml}<div id="${fieldId}" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;border:1px solid var(--divider-color, #444);border-radius:6px;padding:8px 10px">
+              ${options.map(opt => `
+                <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:13.5px;cursor:pointer">
+                  <input type="checkbox" value="${this._esc(opt.value)}" style="width:auto;margin:0">
+                  <span>${this._esc(opt.label)}</span>
+                </label>
+              `).join('')}
+            </div>`
+          : `<div id="${fieldId}" style="font-size:13px;color:var(--secondary-text-color)">No options</div>`;
       } else if (field.type === 'entity' && field.multiple) {
         const domainPrefix = `${field.domain}.`;
         const entities = Object.keys(this._hass.states || {})
@@ -10605,7 +10638,7 @@
     // string "on", useless -- el.checked is the real state). Entity value
     // is a comma-joined list of entity ids.
     _getFieldValue(field, el) {
-      if (field.type === 'entity' && field.multiple) {
+      if ((field.type === 'entity' && field.multiple) || field.type === 'checklist') {
         return [...el.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value).join(',');
       }
       if (field.type === 'boolean') {
@@ -10615,8 +10648,12 @@
     }
 
     _setFieldValue(field, el, value) {
-      if (field.type === 'entity' && field.multiple) {
-        const selected = new Set(String(value || '').split(',').map(s => s.trim()).filter(Boolean));
+      if ((field.type === 'entity' && field.multiple) || field.type === 'checklist') {
+        const selected = new Set(
+          Array.isArray(value)
+            ? value.map(String)
+            : String(value || '').split(',').map(s => s.trim()).filter(Boolean)
+        );
         el.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = selected.has(cb.value); });
         return;
       }
@@ -10691,11 +10728,63 @@
     }
 
     _renderXotdModeTiles() {
-      const grid = this.shadowRoot.getElementById('xotd-mode-grid');
+      for (const gridId of ['xotd-mode-grid', 'xotd-mode-grid-widgets']) {
+        const grid = this.shadowRoot.getElementById(gridId);
+        if (!grid) continue;
+        grid.innerHTML = '';
+        for (const def of this._xotdModeTileDefs()) {
+          grid.appendChild(this._buildXotdModeTile(def));
+        }
+      }
+    }
+
+    _renderFeaturedWidgetCards() {
+      const grid = this.shadowRoot.getElementById('addons-featured-widgets-grid');
       if (!grid) return;
       grid.innerHTML = '';
-      for (const def of this._xotdModeTileDefs()) {
-        grid.appendChild(this._buildXotdModeTile(def));
+      // Surface the highest-value widgets on Expansion Packs root so they
+      // are not buried only under "All widgets".
+      const featured = [
+        {
+          mode: 'newspaper',
+          icon: this._skillIcon('newspaper'),
+          title: 'Daily Newspaper',
+          desc: 'Authentic front page from live headlines. Pick topics and news sources.',
+        },
+        {
+          mode: 'agenda',
+          icon: this._skillIcon('agenda'),
+          title: 'Daily Agenda',
+          desc: 'Today’s calendar + weather on the frame.',
+        },
+        {
+          mode: 'quote',
+          icon: this._skillIcon('quote'),
+          title: 'Quote of the Day',
+          desc: 'An inspirational quote with author.',
+        },
+      ];
+      for (const def of featured) {
+        const el = document.createElement('div');
+        el.className = 'card pack-card';
+        el.style.cursor = 'pointer';
+        el.innerHTML = `
+          <div class="pack-cover" style="display:flex;align-items:center;justify-content:center;font-size:42px;min-height:120px;background:var(--secondary-background-color,#1c1c1c)">${def.icon}</div>
+          <div class="pack-body" style="padding:12px 14px 14px">
+            <div class="pack-name" style="font-weight:600;margin-bottom:4px">${this._esc(def.title)}</div>
+            <div class="pack-desc" style="font-size:12px;color:var(--secondary-text-color);line-height:1.4">${this._esc(def.desc)}</div>
+            <div class="btns-primary" style="margin-top:10px">
+              <button type="button" class="btn-primary featured-widget-setup">Set up</button>
+            </div>
+          </div>
+        `;
+        const open = () => this._openXotdModal(null, def.mode);
+        el.querySelector('.featured-widget-setup').addEventListener('click', (e) => {
+          e.stopPropagation();
+          open();
+        });
+        el.addEventListener('click', open);
+        grid.appendChild(el);
       }
     }
 
@@ -10769,9 +10858,17 @@
       } else if (skill.content_mode === 'image_feed') {
         subLabel = `Feed: ${this._esc(cfg.feed_provider || '')}`;
       } else if (skill.content_mode === 'newspaper') {
-        const mix = cfg.news_mix || 'general';
         const paper = cfg.paper_name || 'The Daily Frame';
-        subLabel = `${this._esc(paper)} · ${this._esc(mix)}`;
+        const topics = String(cfg.topics || '').trim();
+        const sources = String(cfg.sources || '').trim();
+        const mix = cfg.news_mix || 'general';
+        if (topics) {
+          subLabel = `${this._esc(paper)} · topics: ${this._esc(topics)}`;
+        } else if (sources) {
+          subLabel = `${this._esc(paper)} · sources: ${this._esc(sources)}`;
+        } else {
+          subLabel = `${this._esc(paper)} · ${this._esc(mix)}`;
+        }
       } else if (skill.content_mode !== 'agenda') {
         const styleLabels = {
           plain: 'Plain', ad_50s: '1950s Diner Ad', movie_poster: 'Movie Poster',
@@ -11124,6 +11221,69 @@
       };
     }
 
+    _newspaperTopicOptions() {
+      return [
+        { value: 'world', label: 'World' },
+        { value: 'national', label: 'National / US' },
+        { value: 'politics', label: 'Politics' },
+        { value: 'tech', label: 'Tech' },
+        { value: 'business', label: 'Business' },
+        { value: 'science', label: 'Science' },
+        { value: 'sports', label: 'Sports' },
+        { value: 'entertainment', label: 'Entertainment' },
+        { value: 'gossip', label: 'Gossip / TMZ-style' },
+        { value: 'health', label: 'Health' },
+      ];
+    }
+
+    _newspaperSourceOptions() {
+      return [
+        { value: 'bbc', label: 'BBC News' },
+        { value: 'bbc_world', label: 'BBC World' },
+        { value: 'bbc_tech', label: 'BBC Tech' },
+        { value: 'bbc_politics', label: 'BBC Politics' },
+        { value: 'npr', label: 'NPR' },
+        { value: 'npr_politics', label: 'NPR Politics' },
+        { value: 'guardian', label: 'The Guardian' },
+        { value: 'nyt', label: 'New York Times' },
+        { value: 'politico', label: 'Politico' },
+        { value: 'reuters', label: 'Reuters (via Google News)' },
+        { value: 'ap', label: 'AP (via Google News)' },
+        { value: 'techcrunch', label: 'TechCrunch' },
+        { value: 'wired', label: 'Wired' },
+        { value: 'ars', label: 'Ars Technica' },
+        { value: 'hn', label: 'Hacker News' },
+        { value: 'tmz', label: 'TMZ' },
+        { value: 'espn', label: 'ESPN' },
+        { value: 'sciam', label: 'Scientific American' },
+        { value: 'gnews_world', label: 'Google News — World' },
+        { value: 'gnews_nation', label: 'Google News — Nation' },
+        { value: 'gnews_tech', label: 'Google News — Technology' },
+        { value: 'gnews_business', label: 'Google News — Business' },
+        { value: 'gnews_science', label: 'Google News — Science' },
+        { value: 'gnews_sports', label: 'Google News — Sports' },
+        { value: 'gnews_entertainment', label: 'Google News — Entertainment' },
+        { value: 'gnews_health', label: 'Google News — Health' },
+      ];
+    }
+
+    // Preset → topic list. Choosing a preset re-checks the Topics boxes;
+    // users can still fine-tune after.
+    _newspaperMixTopics(mix) {
+      return {
+        general: ['world', 'national', 'politics', 'tech'],
+        tech: ['tech', 'science', 'business'],
+        politics: ['politics', 'national', 'world'],
+        gossip: ['gossip', 'entertainment'],
+        world: ['world', 'national'],
+        business: ['business', 'tech', 'national'],
+        science: ['science', 'tech', 'health'],
+        sports: ['sports', 'national'],
+        entertainment: ['entertainment', 'gossip'],
+        custom: [],
+      }[mix] || ['world', 'national', 'politics', 'tech'];
+    }
+
     _xotdNewspaperFields() {
       return [
         {
@@ -11137,7 +11297,7 @@
           placeholder: 'Morning Edition',
         },
         {
-          name: 'news_mix', type: 'select', label: 'News mix (topics)', default: 'general',
+          name: 'news_mix', type: 'select', label: 'Quick preset', default: 'general',
           options: [
             { value: 'general', label: 'General (world + national + politics + tech)' },
             { value: 'tech', label: 'Tech focus' },
@@ -11148,20 +11308,21 @@
             { value: 'science', label: 'Science' },
             { value: 'sports', label: 'Sports' },
             { value: 'entertainment', label: 'Entertainment' },
+            { value: 'custom', label: 'Custom (use checkboxes only)' },
           ],
-          help: 'Chooses which free RSS desks to pull. No API keys required.',
+          help: 'Applies a starting topic set. Then pick Topics and Sources below.',
         },
         {
-          name: 'topics', type: 'string', label: 'Topics override (optional)',
-          required: false,
-          placeholder: 'tech,politics,gossip',
-          help: 'Comma-separated: world, national, politics, tech, business, science, sports, entertainment, gossip, health. Overrides the mix when set.',
+          name: 'topics', type: 'checklist', label: 'Topics',
+          default: 'world,national,politics,tech',
+          options: this._newspaperTopicOptions(),
+          help: 'Which beats fill the front page. At least one topic or source is required.',
         },
         {
-          name: 'sources', type: 'string', label: 'Sources override (optional)',
-          required: false,
-          placeholder: 'bbc,npr,techcrunch,tmz',
-          help: 'Comma-separated feed ids (bbc, npr, nyt, guardian, politico, techcrunch, wired, ars, hn, tmz, espn, reuters, ap, …).',
+          name: 'sources', type: 'checklist', label: 'News sources',
+          default: '',
+          options: this._newspaperSourceOptions(),
+          help: 'Optional. Leave empty to use the default desks for your selected topics. Check sources to force specific feeds (BBC, TMZ, TechCrunch, …).',
         },
         {
           name: 'custom_rss_url', type: 'string', label: 'Custom RSS/Atom URL (optional)',
@@ -11371,6 +11532,17 @@
         el.addEventListener('change', updateConditionalRows);
       }
 
+      // Newspaper: changing the quick preset re-checks Topics so users get
+      // a sensible starting set, then can multi-select further.
+      if (fieldEls.news_mix && fieldEls.topics && fieldsByName.topics) {
+        fieldEls.news_mix.addEventListener('change', () => {
+          const mix = this._getFieldValue(fieldsByName.news_mix, fieldEls.news_mix);
+          if (mix === 'custom') return;
+          const topics = this._newspaperMixTopics(mix).join(',');
+          this._setFieldValue(fieldsByName.topics, fieldEls.topics, topics);
+        });
+      }
+
       const nameInput = this.shadowRoot.getElementById('xotd-name');
 
       if (instance) {
@@ -11383,8 +11555,30 @@
           if (name === 'content_mode') continue;
           if (config[name] !== undefined) this._setFieldValue(fieldsByName[name], el, config[name]);
         }
+        // Seeded daily_newspaper may have empty topics; fill from mix so
+        // the checkboxes aren't blank on first edit.
+        if (
+          instance.content_mode === 'newspaper'
+          && fieldEls.topics
+          && fieldsByName.topics
+          && !String(config.topics || '').trim()
+        ) {
+          const mix = (config.news_mix || 'general').trim().toLowerCase();
+          this._setFieldValue(
+            fieldsByName.topics,
+            fieldEls.topics,
+            this._newspaperMixTopics(mix).join(','),
+          );
+        }
       } else {
         nameInput.value = this._xotdContentModeLabel(presetMode || 'quote');
+        if (presetMode === 'newspaper' && fieldEls.topics && fieldsByName.topics) {
+          this._setFieldValue(
+            fieldsByName.topics,
+            fieldEls.topics,
+            this._newspaperMixTopics('general').join(','),
+          );
+        }
       }
 
       updateConditionalRows();
@@ -11441,6 +11635,15 @@
             const visible = !field.show_if || values[field.show_if.field] === field.show_if.equals;
             if (!visible) continue;
             config[field.name] = values[field.name];
+          }
+          const hasTopics = String(config.topics || '').trim();
+          const hasSources = String(config.sources || '').trim();
+          const hasCustom = String(config.custom_rss_url || '').trim();
+          if (!hasTopics && !hasSources && !hasCustom) {
+            fb.textContent = 'Select at least one topic or news source (or add a custom RSS URL).';
+            fb.className = 'feedback err';
+            fb.style.display = 'block';
+            return;
           }
         } else {
           for (const field of catalogSchema) {

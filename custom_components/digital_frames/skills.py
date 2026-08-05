@@ -145,7 +145,7 @@ _BUILTIN_SKILLS: tuple[dict[str, Any], ...] = (
             "paper_name": "The Daily Frame",
             "edition": "Morning Edition",
             "news_mix": "general",
-            "topics": "",
+            "topics": "world,national,politics,tech",
             "sources": "",
             "custom_rss_url": "",
             "max_stories": 10,
