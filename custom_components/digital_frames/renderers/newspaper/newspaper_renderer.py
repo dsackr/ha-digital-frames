@@ -150,69 +150,45 @@ USER_AGENT = "DigitalFramesNewspaper/1.0 (+https://github.com/dsackr/ha-digital-
 # Publisher feeds + Google News topic/section feeds. Google News is used for
 # Reuters/AP (direct RSS removed) and for topic browsing.
 SOURCE_FEEDS: dict[str, dict[str, str]] = {
+    # --- Major desks (shown in the UI) ---
     "bbc": {
         "name": "BBC",
         "url": "https://feeds.bbci.co.uk/news/rss.xml",
         "section": "World",
     },
-    "bbc_world": {
-        "name": "BBC World",
-        "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
-        "section": "World",
+    "cnn": {
+        "name": "CNN",
+        "url": "http://rss.cnn.com/rss/cnn_topstories.rss",
+        "section": "National",
     },
-    "bbc_tech": {
-        "name": "BBC Tech",
-        "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
-        "section": "Tech",
-    },
-    "bbc_politics": {
-        "name": "BBC Politics",
-        "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
-        "section": "Politics",
+    "fox": {
+        "name": "Fox News",
+        "url": "https://moxie.foxnews.com/google-publisher/latest.xml",
+        "section": "National",
     },
     "npr": {
         "name": "NPR",
         "url": "https://feeds.npr.org/1001/rss.xml",
         "section": "National",
     },
-    "npr_politics": {
-        "name": "NPR Politics",
-        "url": "https://feeds.npr.org/1014/rss.xml",
-        "section": "Politics",
-    },
-    "guardian": {
-        "name": "The Guardian",
-        "url": "https://www.theguardian.com/world/rss",
-        "section": "World",
-    },
     "nyt": {
         "name": "NYT",
         "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
         "section": "National",
     },
-    "politico": {
-        "name": "Politico",
-        "url": "https://rss.politico.com/politics-news.xml",
-        "section": "Politics",
+    "reuters": {
+        "name": "Reuters",
+        "url": "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "section": "World",
+    },
+    "ap": {
+        "name": "AP",
+        "url": "https://news.google.com/rss/search?q=site:apnews.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "section": "National",
     },
     "techcrunch": {
         "name": "TechCrunch",
         "url": "https://techcrunch.com/feed/",
-        "section": "Tech",
-    },
-    "wired": {
-        "name": "Wired",
-        "url": "https://www.wired.com/feed/rss",
-        "section": "Tech",
-    },
-    "ars": {
-        "name": "Ars Technica",
-        "url": "https://feeds.arstechnica.com/arstechnica/index",
-        "section": "Tech",
-    },
-    "hn": {
-        "name": "Hacker News",
-        "url": "https://hnrss.org/frontpage",
         "section": "Tech",
     },
     "tmz": {
@@ -225,21 +201,7 @@ SOURCE_FEEDS: dict[str, dict[str, str]] = {
         "url": "https://www.espn.com/espn/rss/news",
         "section": "Sports",
     },
-    "sciam": {
-        "name": "Scientific American",
-        "url": "http://rss.sciam.com/ScientificAmerican-Global",
-        "section": "Science",
-    },
-    "reuters": {
-        "name": "Reuters",
-        "url": "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
-        "section": "World",
-    },
-    "ap": {
-        "name": "AP",
-        "url": "https://news.google.com/rss/search?q=site:apnews.com+when:1d&hl=en-US&gl=US&ceid=US:en",
-        "section": "National",
-    },
+    # --- Google News sections (picked via the single "google" UI alias) ---
     "gnews_world": {
         "name": "Google News",
         "url": "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en",
@@ -280,20 +242,95 @@ SOURCE_FEEDS: dict[str, dict[str, str]] = {
         "url": "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=en-US&gl=US&ceid=US:en",
         "section": "Health",
     },
+    # --- Topic helpers (not all shown in the UI) ---
+    "bbc_world": {
+        "name": "BBC World",
+        "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "section": "World",
+    },
+    "bbc_tech": {
+        "name": "BBC Tech",
+        "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
+        "section": "Tech",
+    },
+    "bbc_politics": {
+        "name": "BBC Politics",
+        "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+        "section": "Politics",
+    },
+    "cnn_world": {
+        "name": "CNN World",
+        "url": "http://rss.cnn.com/rss/edition_world.rss",
+        "section": "World",
+    },
+    "fox_politics": {
+        "name": "Fox News",
+        "url": "https://moxie.foxnews.com/google-publisher/politics.xml",
+        "section": "Politics",
+    },
+    "guardian": {
+        "name": "The Guardian",
+        "url": "https://www.theguardian.com/world/rss",
+        "section": "World",
+    },
+    "politico": {
+        "name": "Politico",
+        "url": "https://rss.politico.com/politics-news.xml",
+        "section": "Politics",
+    },
+    "wired": {
+        "name": "Wired",
+        "url": "https://www.wired.com/feed/rss",
+        "section": "Tech",
+    },
+    "sciam": {
+        "name": "Scientific American",
+        "url": "http://rss.sciam.com/ScientificAmerican-Global",
+        "section": "Science",
+    },
 }
 
-# Topic → ordered source ids to pull (first feeds preferred for hero).
+# UI source ids that expand to one or more concrete feed ids.
+# "google" expands from the user's selected topics (see resolve_feed_ids).
+SOURCE_ALIASES: dict[str, list[str]] = {
+    "bbc": ["bbc", "bbc_world"],
+    "cnn": ["cnn", "cnn_world"],
+    "fox": ["fox", "fox_politics"],
+    "google": [],  # filled from topics → gnews_*
+    "npr": ["npr"],
+    "nyt": ["nyt"],
+    "reuters": ["reuters"],
+    "ap": ["ap"],
+    "techcrunch": ["techcrunch"],
+    "tmz": ["tmz"],
+    "espn": ["espn"],
+}
+
+_TOPIC_TO_GNEWS: dict[str, str] = {
+    "world": "gnews_world",
+    "national": "gnews_nation",
+    "politics": "gnews_nation",
+    "tech": "gnews_tech",
+    "business": "gnews_business",
+    "science": "gnews_science",
+    "sports": "gnews_sports",
+    "entertainment": "gnews_entertainment",
+    "gossip": "gnews_entertainment",
+    "health": "gnews_health",
+}
+
+# Topic → ordered source ids to pull when the user leaves Sources empty.
 TOPIC_SOURCES: dict[str, list[str]] = {
-    "world": ["bbc_world", "guardian", "reuters", "gnews_world", "bbc"],
-    "national": ["npr", "nyt", "ap", "gnews_nation"],
-    "politics": ["politico", "npr_politics", "bbc_politics", "ap", "gnews_nation"],
-    "tech": ["techcrunch", "wired", "ars", "hn", "bbc_tech", "gnews_tech"],
-    "business": ["gnews_business", "nyt", "reuters"],
-    "science": ["sciam", "gnews_science", "ars"],
+    "world": ["bbc_world", "cnn_world", "reuters", "gnews_world", "bbc"],
+    "national": ["cnn", "fox", "npr", "nyt", "ap", "gnews_nation"],
+    "politics": ["fox_politics", "cnn", "bbc_politics", "politico", "gnews_nation"],
+    "tech": ["techcrunch", "wired", "bbc_tech", "gnews_tech"],
+    "business": ["gnews_business", "nyt", "reuters", "cnn"],
+    "science": ["sciam", "gnews_science"],
     "sports": ["espn", "gnews_sports"],
     "entertainment": ["gnews_entertainment", "tmz"],
     "gossip": ["tmz", "gnews_entertainment"],
-    "health": ["gnews_health", "npr"],
+    "health": ["gnews_health", "npr", "cnn"],
 }
 
 NEWS_MIXES: dict[str, list[str]] = {
@@ -643,22 +680,34 @@ def parse_rss_items(xml_bytes: bytes, source_name: str, section: str) -> list[di
     return stories
 
 
+def _expand_source_alias(alias: str, topics: list[str]) -> list[str]:
+    """Map a UI source id to concrete SOURCE_FEEDS keys."""
+    alias = (alias or "").strip().lower()
+    if not alias:
+        return []
+    if alias == "google":
+        # One "Google News" checkbox → section feeds for the chosen topics.
+        out: list[str] = []
+        for topic in topics or list(NEWS_MIXES["general"]):
+            gid = _TOPIC_TO_GNEWS.get(topic)
+            if gid and gid not in out:
+                out.append(gid)
+        if not out:
+            out = ["gnews_world", "gnews_nation"]
+        return out
+    if alias in SOURCE_ALIASES:
+        expanded = list(SOURCE_ALIASES[alias])
+        return [s for s in expanded if s in SOURCE_FEEDS]
+    if alias in SOURCE_FEEDS:
+        return [alias]
+    return []
+
+
 def resolve_feed_ids(config: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Build ordered unique source ids from news_mix / topics / sources."""
     feed_ids: list[str] = []
 
-    # Explicit sources list wins as seed
-    raw_sources = config.get("sources") or config.get("source") or ""
-    if isinstance(raw_sources, str):
-        sources = [s.strip().lower() for s in raw_sources.split(",") if s.strip()]
-    else:
-        sources = [str(s).strip().lower() for s in raw_sources if str(s).strip()]
-
-    for s in sources:
-        if s in SOURCE_FEEDS and s not in feed_ids:
-            feed_ids.append(s)
-
-    # Topics from mix or free-form list
+    # Topics first (needed to expand the "google" alias).
     mix = (config.get("news_mix") or "general").strip().lower()
     raw_topics = config.get("topics") or ""
     if isinstance(raw_topics, str):
@@ -671,19 +720,31 @@ def resolve_feed_ids(config: dict[str, Any]) -> tuple[list[str], list[str]]:
     if not topics:
         topics = list(NEWS_MIXES["general"])
 
-    for topic in topics:
-        for sid in TOPIC_SOURCES.get(topic, []):
-            if sid not in feed_ids:
-                feed_ids.append(sid)
+    raw_sources = config.get("sources") or config.get("source") or ""
+    if isinstance(raw_sources, str):
+        sources = [s.strip().lower() for s in raw_sources.split(",") if s.strip()]
+    else:
+        sources = [str(s).strip().lower() for s in raw_sources if str(s).strip()]
 
-    # Custom RSS URL
+    for s in sources:
+        for fid in _expand_source_alias(s, topics):
+            if fid not in feed_ids:
+                feed_ids.append(fid)
+
+    # When the user picks no sources, route from topics → default desks.
+    # When they do pick sources, stick to those desks (no flood of extras).
+    if not sources:
+        for topic in topics:
+            for sid in TOPIC_SOURCES.get(topic, []):
+                if sid not in feed_ids and sid in SOURCE_FEEDS:
+                    feed_ids.append(sid)
+
     custom = (config.get("custom_rss_url") or "").strip()
     if custom:
-        # Inject as a virtual source at runtime in fetch layer
         feed_ids.insert(0, "__custom__")
 
     if not feed_ids:
-        feed_ids = ["bbc", "npr", "gnews_world"]
+        feed_ids = ["bbc", "cnn", "fox", "gnews_world"]
     return feed_ids, topics
 
 

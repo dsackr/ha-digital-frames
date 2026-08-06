@@ -11237,33 +11237,20 @@
     }
 
     _newspaperSourceOptions() {
+      // Short curated list — backend expands aliases (e.g. google → topic
+      // section feeds; bbc → top + world). Keep this list small on purpose.
       return [
-        { value: 'bbc', label: 'BBC News' },
-        { value: 'bbc_world', label: 'BBC World' },
-        { value: 'bbc_tech', label: 'BBC Tech' },
-        { value: 'bbc_politics', label: 'BBC Politics' },
+        { value: 'bbc', label: 'BBC' },
+        { value: 'cnn', label: 'CNN' },
+        { value: 'fox', label: 'Fox News' },
+        { value: 'google', label: 'Google News' },
         { value: 'npr', label: 'NPR' },
-        { value: 'npr_politics', label: 'NPR Politics' },
-        { value: 'guardian', label: 'The Guardian' },
         { value: 'nyt', label: 'New York Times' },
-        { value: 'politico', label: 'Politico' },
-        { value: 'reuters', label: 'Reuters (via Google News)' },
-        { value: 'ap', label: 'AP (via Google News)' },
+        { value: 'reuters', label: 'Reuters' },
+        { value: 'ap', label: 'Associated Press' },
         { value: 'techcrunch', label: 'TechCrunch' },
-        { value: 'wired', label: 'Wired' },
-        { value: 'ars', label: 'Ars Technica' },
-        { value: 'hn', label: 'Hacker News' },
         { value: 'tmz', label: 'TMZ' },
         { value: 'espn', label: 'ESPN' },
-        { value: 'sciam', label: 'Scientific American' },
-        { value: 'gnews_world', label: 'Google News — World' },
-        { value: 'gnews_nation', label: 'Google News — Nation' },
-        { value: 'gnews_tech', label: 'Google News — Technology' },
-        { value: 'gnews_business', label: 'Google News — Business' },
-        { value: 'gnews_science', label: 'Google News — Science' },
-        { value: 'gnews_sports', label: 'Google News — Sports' },
-        { value: 'gnews_entertainment', label: 'Google News — Entertainment' },
-        { value: 'gnews_health', label: 'Google News — Health' },
       ];
     }
 
@@ -11322,7 +11309,7 @@
           name: 'sources', type: 'checklist', label: 'News sources',
           default: '',
           options: this._newspaperSourceOptions(),
-          help: 'Optional. Leave empty to use the default desks for your selected topics. Check sources to force specific feeds (BBC, TMZ, TechCrunch, …).',
+          help: 'Optional. Leave empty for automatic desks per topic. Pick specific outlets (BBC, CNN, Fox, Google News, …) to limit the paper to those feeds.',
         },
         {
           name: 'custom_rss_url', type: 'string', label: 'Custom RSS/Atom URL (optional)',
