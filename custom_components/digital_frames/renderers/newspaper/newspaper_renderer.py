@@ -798,8 +798,7 @@ def layout_scale(width: int, height: int) -> float:
     """Type/spacing scale vs reference orientation canvas.
 
     Portrait pages weight height more (31.5\" is much taller than 13.3\")
-    so type and leading grow with the page, not just a mild geometric mean
-    that still looks like postage-stamp copy on a tall panel.
+    so type and leading grow with the page.
     """
     import math
 
@@ -810,13 +809,19 @@ def layout_scale(width: int, height: int) -> float:
     if is_landscape:
         s = math.sqrt(sw * sh)
     else:
-        # ~width^0.4 * height^0.6 — 1440×2560 ≈ 1.48 vs geometric 1.39
-        s = (sw ** 0.4) * (sh ** 0.6)
-    return _clamp(s, 0.65, 2.6)
+        # Bias height so 1440×2560 ≈ 1.55 (readable body on the big glass).
+        s = (sw ** 0.35) * (sh ** 0.65)
+    return _clamp(s, 0.7, 2.8)
 
 
 def _sz(base: float, scale: float, lo: int = 8, hi: int = 220) -> int:
     return int(_clamp(round(base * scale), lo, hi))
+
+
+def _font_bbox_height(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, text: str) -> int:
+    """True ink height for *text* (not a sample glyph)."""
+    bbox = draw.textbbox((0, 0), text or "Ag", font=font)
+    return max(1, bbox[3] - bbox[1])
 
 
 def _draw_scotch_rule(
@@ -847,36 +852,38 @@ def render_masthead(
     edition: str,
     is_landscape: bool,
     scale: float,
+    page_height: int,
 ) -> int:
-    """Draw nameplate + dateline. Returns y below masthead block."""
+    """Draw nameplate + dateline with hard non-overlap spacing.
+
+    Nameplate uses top-anchored drawing and measured ink height so large
+    Black display faces never step on the dateline (the bug in the glass
+    photo: HOME EDITION / date sitting inside THE DAILY FRAME).
+    """
     y = margin
     name = (paper_name or "THE DAILY FRAME").strip().upper()
     max_name_w = width - 2 * margin
+    # Never let the nameplate alone eat more than ~11% of the page height.
+    max_name_h = max(36, int(page_height * (0.09 if is_landscape else 0.11)))
 
     if is_landscape:
-        name_size_max = _sz(54, scale, 28, 120)
-        name_size_min = _sz(22, scale, 14, 48)
-        meta_size = _sz(11, scale, 9, 28)
-        vol_size = _sz(10, scale, 8, 24)
-        rule_thick = _sz(2, scale, 1, 5)
-        gap_sm = _sz(4, scale, 2, 12)
-        gap_md = _sz(6, scale, 3, 14)
+        name_size_max = _sz(48, scale, 26, 96)
+        name_size_min = _sz(20, scale, 14, 40)
+        meta_size = _sz(12, scale, 10, 26)
+        vol_size = _sz(11, scale, 9, 22)
+        rule_thick = _sz(2, scale, 1, 4)
+        gap_sm = _sz(5, scale, 3, 12)
+        gap_md = _sz(8, scale, 4, 16)
     else:
-        name_size_max = _sz(96, scale, 48, 200)
-        name_size_min = _sz(36, scale, 22, 80)
-        meta_size = _sz(16, scale, 12, 36)
-        vol_size = _sz(14, scale, 10, 32)
-        rule_thick = _sz(3, scale, 2, 8)
-        gap_sm = _sz(8, scale, 4, 18)
-        gap_md = _sz(10, scale, 5, 22)
+        name_size_max = _sz(88, scale, 44, 160)
+        name_size_min = _sz(34, scale, 22, 64)
+        meta_size = _sz(18, scale, 13, 34)
+        vol_size = _sz(15, scale, 11, 28)
+        rule_thick = _sz(3, scale, 2, 6)
+        gap_sm = _sz(8, scale, 5, 16)
+        gap_md = _sz(12, scale, 6, 22)
 
-    # Fit masthead name to full width (size already scaled; shrink only if needed)
-    name_font = load_font("PlayfairDisplay", "Black", name_size_max)
-    size = name_size_max
-    while size >= name_size_min and draw.textlength(name, font=name_font) > max_name_w:
-        size -= 2
-        name_font = load_font("PlayfairDisplay", "Black", size)
-
+    # 1) Volume line
     vol_font = load_font("LibreBaskerville", "Regular", vol_size)
     day_num = when.timetuple().tm_yday
     vol_left = f"VOL. {when.year - 2020}  —  NO. {day_num}"
@@ -885,27 +892,46 @@ def render_masthead(
     draw.text((margin, y), vol_left, font=vol_font, fill=COLOR_BLACK)
     draw.text((width // 2, y), price, font=vol_font, fill=COLOR_BLACK, anchor="ma")
     draw.text((width - margin, y), vol_right, font=vol_font, fill=COLOR_BLACK, anchor="ra")
-    y += text_height(draw, vol_font) + gap_sm
+    y += _font_bbox_height(draw, vol_font, vol_left) + gap_sm
 
     y = _draw_thin_rule(draw, margin, y, width - margin, scale)
-    y += gap_sm // 2
+    y += gap_sm
 
-    name_h = text_height(draw, name_font, name)
-    draw.text((width // 2, y), name, font=name_font, fill=COLOR_BLACK, anchor="ma")
+    # 2) Nameplate — fit width AND height budget; draw from TOP (anchor mt)
+    name_font = load_font("PlayfairDisplay", "Black", name_size_max)
+    size = name_size_max
+    while size >= name_size_min:
+        name_font = load_font("PlayfairDisplay", "Black", size)
+        too_wide = draw.textlength(name, font=name_font) > max_name_w
+        too_tall = _font_bbox_height(draw, name_font, name) > max_name_h
+        if not too_wide and not too_tall:
+            break
+        size -= 2
+    name_font = load_font("PlayfairDisplay", "Black", max(name_size_min, size))
+    name_h = _font_bbox_height(draw, name_font, name)
+    # top-center: y is the top of the ink box
+    draw.text((width // 2, y), name, font=name_font, fill=COLOR_BLACK, anchor="mt")
     y += name_h + gap_md
 
-    y = _draw_scotch_rule(draw, margin, y, width - margin, thick=rule_thick, gap=max(2, int(2 * scale)))
+    y = _draw_scotch_rule(
+        draw, margin, y, width - margin, thick=rule_thick, gap=max(2, int(2 * scale))
+    )
+    y += gap_sm // 2
 
+    # 3) Dateline band — always fully below the nameplate
     meta_font = load_font("LibreBaskerville", "Italic", meta_size)
     date_str = when.strftime("%A, %B ") + str(when.day) + when.strftime(", %Y")
     city = "HOME EDITION"
+    meta_h = _font_bbox_height(draw, meta_font, date_str)
     draw.text((margin, y), city, font=meta_font, fill=COLOR_BLACK)
     draw.text((width // 2, y), date_str, font=meta_font, fill=COLOR_BLACK, anchor="ma")
     draw.text((width - margin, y), when.strftime("%H:%M"), font=meta_font, fill=COLOR_BLACK, anchor="ra")
-    y += text_height(draw, meta_font) + gap_sm
+    y += meta_h + gap_sm
 
-    y = _draw_scotch_rule(draw, margin, y, width - margin, thick=max(2, rule_thick - 1), gap=max(2, int(2 * scale)))
-    return y + gap_sm // 2
+    y = _draw_scotch_rule(
+        draw, margin, y, width - margin, thick=max(2, rule_thick - 1), gap=max(2, int(2 * scale))
+    )
+    return y + gap_sm
 
 
 def _draw_kicker(draw, text: str, font, x: int, y: int, color=COLOR_RED, scale: float = 1.0) -> int:
@@ -922,38 +948,60 @@ def _draw_story_block(
     col_w: int,
     max_y: int,
     *,
-    is_hero: bool,
-    is_landscape: bool,
-    scale: float,
+    role: str = "standard",
+    is_landscape: bool = False,
+    scale: float = 1.0,
     fill_body: bool = True,
+    max_body_lines: int | None = None,
 ) -> int:
-    """Draw one story into a column box. Fills remaining vertical room with
-    body copy when *fill_body* is True (no hard line caps that leave holes)."""
-    pad = _sz(20, scale, 12, 40)
+    """Draw one story. *role* controls hierarchy:
+
+    - ``hero`` — lead package (2-col span): large Black display head
+    - ``sidebar`` — thin column piece beside the lead: smaller, denser
+    - ``standard`` — uniform below-the-fold grid items
+    """
+    pad = _sz(18, scale, 12, 36)
     if y >= max_y - pad:
         return y
 
-    if is_hero:
-        kicker_size = _sz(11 if is_landscape else 16, scale, 10, 36)
-        head_max = _sz(34 if is_landscape else 52, scale, 22, 140)
-        head_min = _sz(15 if is_landscape else 24, scale, 12, 48)
-        deck_size = _sz(11 if is_landscape else 17, scale, 10, 36)
-        body_size = _sz(11 if is_landscape else 16, scale, 10, 34)
-        max_head_lines = 4 if is_landscape else 6
-        head_frac = 0.42
-    else:
-        kicker_size = _sz(10 if is_landscape else 13, scale, 9, 28)
-        head_max = _sz(18 if is_landscape else 28, scale, 14, 64)
-        head_min = _sz(12 if is_landscape else 16, scale, 11, 32)
-        deck_size = _sz(10 if is_landscape else 14, scale, 9, 28)
-        body_size = _sz(10 if is_landscape else 15, scale, 9, 30)
-        max_head_lines = 3 if is_landscape else 5
-        head_frac = 0.35
+    if role == "hero":
+        kicker_size = _sz(12 if is_landscape else 18, scale, 11, 40)
+        head_max = _sz(36 if is_landscape else 58, scale, 26, 150)
+        head_min = _sz(18 if is_landscape else 28, scale, 14, 56)
+        deck_size = _sz(12 if is_landscape else 20, scale, 11, 40)
+        body_size = _sz(12 if is_landscape else 19, scale, 11, 38)
+        max_head_lines = 4 if is_landscape else 5
+        head_frac = 0.48
+        head_style = "Black"
+        body_cap = 16 if is_landscape else 22
+    elif role == "sidebar":
+        kicker_size = _sz(10 if is_landscape else 14, scale, 10, 30)
+        head_max = _sz(16 if is_landscape else 24, scale, 14, 48)
+        head_min = _sz(12 if is_landscape else 16, scale, 11, 28)
+        deck_size = _sz(11 if is_landscape else 15, scale, 10, 30)
+        body_size = _sz(11 if is_landscape else 16, scale, 10, 32)
+        max_head_lines = 4
+        head_frac = 0.38
+        head_style = "Bold"
+        body_cap = 10 if is_landscape else 14
+    else:  # standard — uniform secondary grid
+        kicker_size = _sz(11 if is_landscape else 15, scale, 10, 32)
+        head_max = _sz(18 if is_landscape else 30, scale, 15, 58)
+        head_min = _sz(13 if is_landscape else 18, scale, 12, 34)
+        deck_size = _sz(11 if is_landscape else 16, scale, 10, 32)
+        body_size = _sz(11 if is_landscape else 17, scale, 10, 34)
+        max_head_lines = 3 if is_landscape else 4
+        head_frac = 0.36
+        head_style = "Bold"
+        body_cap = 8 if is_landscape else 10
+
+    if max_body_lines is not None:
+        body_cap = max_body_lines
 
     kicker_font = load_font("LibreBaskerville", "Bold", kicker_size)
     body_font = load_font("LibreBaskerville", "Regular", body_size)
     deck_font = load_font("LibreBaskerville", "Italic", deck_size)
-    byline_font = load_font("LibreBaskerville", "Italic", max(9, body_size - 1))
+    byline_font = load_font("LibreBaskerville", "Italic", max(10, body_size - 1))
 
     y = _draw_kicker(draw, story.get("section", "News"), kicker_font, x, y, scale=scale)
     if y >= max_y:
@@ -961,8 +1009,8 @@ def _draw_story_block(
 
     room = max_y - y
     head_budget = max(
-        _sz(48, scale, 36, 200),
-        min(int(room * head_frac), _sz(220 if is_hero else 140, scale, 80, 400)),
+        _sz(56, scale, 40, 220),
+        min(int(room * head_frac), _sz(260 if role == "hero" else 160, scale, 90, 420)),
     )
     head_font, head_lines, head_lh = fit_headline(
         draw,
@@ -970,7 +1018,7 @@ def _draw_story_block(
         col_w,
         head_budget,
         "PlayfairDisplay",
-        "Bold" if not is_hero else "Black",
+        head_style,
         head_max,
         head_min,
         max_lines=max_head_lines,
@@ -980,62 +1028,56 @@ def _draw_story_block(
             break
         draw.text((x, y), line, font=head_font, fill=COLOR_BLACK)
         y += head_lh
-    y += _sz(4 if is_landscape else 6, scale, 2, 14)
+    y += _sz(5 if is_landscape else 7, scale, 3, 16)
 
     byline = f"By {story.get('source', 'Wire')}"
-    if y + text_height(draw, byline_font) < max_y:
+    if y + _font_bbox_height(draw, byline_font, byline) < max_y:
         draw.text((x, y), byline, font=byline_font, fill=COLOR_BLACK)
-        y += text_height(draw, byline_font) + _sz(3, scale, 2, 10)
+        y += _font_bbox_height(draw, byline_font, byline) + _sz(4, scale, 2, 12)
 
     if y + _sz(6, scale) < max_y:
-        rule_w = min(_sz(48, scale, 28, 100), col_w // 3)
+        rule_w = min(_sz(56, scale, 32, 120), col_w // 3)
         draw.line([(x, y), (x + rule_w, y)], fill=COLOR_BLACK, width=max(1, _sz(1, scale, 1, 3)))
-        y += _sz(6 if is_landscape else 8, scale, 4, 16)
+        y += _sz(7 if is_landscape else 9, scale, 4, 18)
 
     summary = (story.get("summary") or "").strip()
 
-    if summary and y < max_y - _sz(12, scale):
-        # Deck: first sentence or a short lead — never repeat below as body.
+    if summary and y < max_y - _sz(14, scale):
         deck = summary
         cut = summary.find(". ")
-        if 40 < cut < 200:
+        if 40 < cut < 220:
             deck = summary[: cut + 1]
-        elif len(summary) > 180:
-            deck = summary[:177].rsplit(" ", 1)[0] + "…"
+        elif len(summary) > 200:
+            deck = summary[:197].rsplit(" ", 1)[0] + "…"
 
-        deck_line_h = text_height(draw, deck_font) + _sz(2, scale, 1, 6)
-        max_deck = min(3 if is_landscape else 4, max(1, (max_y - y) // max(1, deck_line_h) // 2))
+        deck_line_h = _font_bbox_height(draw, deck_font, "Ag") + _sz(3, scale, 2, 8)
+        max_deck = 4 if role == "hero" else (2 if role == "sidebar" else 3)
+        if is_landscape:
+            max_deck = min(max_deck, 3)
         deck_lines = wrap_text(draw, deck, deck_font, col_w)[:max_deck]
         for line in deck_lines:
             if y + deck_line_h > max_y:
                 break
             draw.text((x, y), line, font=deck_font, fill=COLOR_BLACK)
             y += deck_line_h
-        y += _sz(3, scale, 2, 10)
+        y += _sz(4, scale, 2, 12)
 
-        # Body: only the remainder of the summary after the deck sentence.
         rest = ""
         if cut >= 40 and deck.endswith("."):
             rest = summary[cut + 1 :].strip()
         elif len(summary) > len(deck) + 10:
             rest = summary[len(deck) :].strip(" …")
 
-        if fill_body and rest and y < max_y - _sz(14, scale):
-            body_lh = text_height(draw, body_font) + _sz(
+        if fill_body and rest and y < max_y - _sz(16, scale):
+            body_lh = _font_bbox_height(draw, body_font, "Ag") + _sz(
                 3 if not is_landscape else 2, scale, 2, 8
             )
-            # Cap body by remaining room AND a modest max so short RSS
-            # blurbs don't get stretched with crazy justification gaps.
-            max_body_lines = max(1, (max_y - y - _sz(8, scale)) // max(1, body_lh))
-            soft_cap = 18 if scale >= 1.35 else (14 if not is_landscape else 8)
-            max_body_lines = min(max_body_lines, soft_cap)
-
-            body_lines = wrap_text(draw, rest, body_font, col_w)[:max_body_lines]
+            room_lines = max(1, (max_y - y - _sz(8, scale)) // max(1, body_lh))
+            n_lines = min(room_lines, body_cap)
+            body_lines = wrap_text(draw, rest, body_font, col_w)[:n_lines]
             for i, line in enumerate(body_lines):
                 if y + body_lh > max_y:
                     break
-                # Only fully justify lines that are nearly full-width; short
-                # lines (end of graf) stay flush-left to avoid rivers of space.
                 natural = draw.textlength(line, font=body_font)
                 last = i == len(body_lines) - 1 or natural < col_w * 0.82
                 draw_justified_line(
@@ -1059,6 +1101,40 @@ def recommended_story_count(width: int, height: int) -> int:
     return 11
 
 
+def _fill_also_today(
+    draw: ImageDraw.ImageDraw,
+    cx: int,
+    yb: int,
+    col_w: int,
+    content_bottom: int,
+    stories: list[dict[str, str]],
+    scale: float,
+) -> None:
+    if yb >= content_bottom - _sz(64, scale, 40, 120):
+        return
+    brief_font = load_font("LibreBaskerville", "Regular", _sz(14, scale, 11, 30))
+    brief_head = load_font("LibreBaskerville", "Bold", _sz(15, scale, 12, 32))
+    brief_lh = _font_bbox_height(draw, brief_font, "Ag") + _sz(3, scale, 2, 8)
+    yb = _draw_thin_rule(draw, cx, yb + _sz(8, scale), cx + col_w, scale) + _sz(6, scale)
+    draw.text((cx, yb), "ALSO TODAY", font=brief_head, fill=COLOR_RED)
+    yb += _font_bbox_height(draw, brief_head, "ALSO TODAY") + _sz(6, scale, 4, 14)
+    seen: set[str] = set()
+    for s in stories:
+        key = s["title"].lower()[:60]
+        if key in seen:
+            continue
+        seen.add(key)
+        if yb >= content_bottom - brief_lh:
+            break
+        line = f"• {s['title']}"
+        for wl in wrap_text(draw, line, brief_font, col_w)[:2]:
+            if yb >= content_bottom - brief_lh:
+                break
+            draw.text((cx, yb), wl, font=brief_font, fill=COLOR_BLACK)
+            yb += brief_lh
+        yb += _sz(4, scale, 2, 10)
+
+
 def render_newspaper(
     width: int,
     height: int,
@@ -1071,12 +1147,23 @@ def render_newspaper(
     draw = ImageDraw.Draw(img)
     is_landscape = width > height
     scale = layout_scale(width, height)
-    print(f"Layout scale {scale:.2f} for {width}x{height} ({'landscape' if is_landscape else 'portrait'})")
+    print(
+        f"Layout scale {scale:.2f} for {width}x{height} "
+        f"({'landscape' if is_landscape else 'portrait'})"
+    )
 
-    margin = _sz(16 if is_landscape else 36, scale, 12, 72)
-    footer_reserve = _sz(14 if is_landscape else 24, scale, 12, 48)
+    margin = _sz(16 if is_landscape else 36, scale, 12, 64)
+    footer_reserve = _sz(16 if is_landscape else 28, scale, 14, 48)
     y = render_masthead(
-        draw, width, margin, paper_name, when, edition, is_landscape, scale
+        draw,
+        width,
+        margin,
+        paper_name,
+        when,
+        edition,
+        is_landscape,
+        scale,
+        page_height=height,
     )
     content_bottom = height - margin - footer_reserve
 
@@ -1085,150 +1172,214 @@ def render_newspaper(
 
     hero = stories[0]
     rest = stories[1:]
+    rule_w = max(1, _sz(1, scale, 1, 3))
 
     if is_landscape:
-        gap = _sz(12, scale, 8, 28)
-        left_w = int((width - 2 * margin - gap) * 0.58)
+        # Landscape: lead left (~60%) + stacked sidebar right.
+        gap = _sz(14, scale, 10, 28)
+        left_w = int((width - 2 * margin - gap) * 0.60)
         right_x = margin + left_w + gap
         right_w = width - margin - right_x
         col_top = y
         _draw_column_rule(
+            draw, margin + left_w + gap // 2, col_top, content_bottom, width=rule_w
+        )
+
+        _draw_story_block(
             draw,
-            margin + left_w + gap // 2,
+            hero,
+            margin,
             col_top,
+            left_w,
             content_bottom,
-            width=max(1, _sz(1, scale, 1, 3)),
+            role="hero",
+            is_landscape=True,
+            scale=scale,
         )
 
-        n_right = min(len(rest), 4 if scale >= 1.2 else 3)
-        y_left = _draw_story_block(
-            draw, hero, margin, col_top, left_w, content_bottom,
-            is_hero=True, is_landscape=True, scale=scale,
-        )
-
+        n_right = min(len(rest), 3)
         y_right = col_top
         for i, story in enumerate(rest[:n_right]):
             if y_right >= content_bottom - _sz(24, scale):
                 break
-            # Equal-ish slices; last story takes remainder to folio.
             remaining = n_right - i
-            slice_h = max(
-                _sz(80, scale),
-                (content_bottom - y_right) // max(1, remaining),
-            )
-            soft_max = content_bottom if i == n_right - 1 else min(
-                content_bottom, y_right + slice_h
+            slice_h = max(_sz(90, scale), (content_bottom - y_right) // max(1, remaining))
+            soft_max = (
+                content_bottom
+                if i == n_right - 1
+                else min(content_bottom, y_right + slice_h)
             )
             y_right = _draw_story_block(
-                draw, story, right_x, y_right, right_w, soft_max,
-                is_hero=False, is_landscape=True, scale=scale,
+                draw,
+                story,
+                right_x,
+                y_right,
+                right_w,
+                soft_max,
+                role="sidebar" if i == 0 else "standard",
+                is_landscape=True,
+                scale=scale,
+                max_body_lines=6 if i == 0 else 5,
             )
             if i < n_right - 1 and y_right < content_bottom - _sz(16, scale):
-                y_right = _draw_thin_rule(
-                    draw, right_x, y_right + _sz(4, scale), right_x + right_w, scale
-                ) + _sz(4, scale)
-
-        if rest[n_right:] and y_left < content_bottom - _sz(48, scale):
-            y_left = _draw_thin_rule(
-                draw, margin, y_left + _sz(6, scale), margin + left_w, scale
-            ) + _sz(4, scale)
-            _draw_story_block(
-                draw, rest[n_right], margin, y_left, left_w, content_bottom,
-                is_hero=False, is_landscape=True, scale=scale,
-            )
+                y_right = (
+                    _draw_thin_rule(
+                        draw, right_x, y_right + _sz(4, scale), right_x + right_w, scale
+                    )
+                    + _sz(4, scale)
+                )
     else:
-        # Portrait: hero band, then multi-column secondary.
-        hero_frac = 0.30 if scale >= 1.25 else 0.34
-        hero_bottom_limit = y + int((content_bottom - y) * hero_frac)
-        y = _draw_story_block(
-            draw, hero, margin, y, width - 2 * margin, hero_bottom_limit,
-            is_hero=True, is_landscape=False, scale=scale,
-        )
-        y += _sz(8, scale, 4, 18)
-        y = _draw_scotch_rule(
-            draw, margin, y, width - margin, thick=_sz(2, scale, 2, 6), gap=max(2, int(2 * scale))
-        )
-        y += _sz(8, scale, 4, 18)
+        # ------------------------------------------------------------------
+        # Portrait page architecture (classic broadsheet hierarchy):
+        #   1) LEAD ROW: hero spans ~2/3 width + thin sidebar (~1/3) with a
+        #      lesser column piece (and optional second sidebar blurb).
+        #   2) Below: uniform multi-column grid of remaining stories —
+        #      same title weight and similar body length.
+        # ------------------------------------------------------------------
+        gap = _sz(18, scale, 12, 36)
+        usable = width - 2 * margin
+        # 2-col lead + thinner 3rd: ~64% / 36%
+        lead_w = int(usable * 0.64) - gap // 2
+        side_w = usable - lead_w - gap
+        side_x = margin + lead_w + gap
+        lead_top = y
+        # Soft ceiling for the lead package — content height wins (no empty
+        # white band under short copy).
+        lead_ceil = lead_top + int((content_bottom - lead_top) * (0.48 if scale >= 1.3 else 0.46))
+        lead_ceil = min(lead_ceil, content_bottom - _sz(260, scale, 180, 560))
 
-        # Wider/taller pages can carry a fourth column.
-        if width >= 1800:
+        # Main headline package — two columns wide.
+        y_lead = _draw_story_block(
+            draw,
+            hero,
+            margin,
+            lead_top,
+            lead_w,
+            lead_ceil,
+            role="hero",
+            is_landscape=False,
+            scale=scale,
+        )
+
+        # Thin sidebar: one primary lesser story, then a second if room.
+        y_side = lead_top
+        sidebar_stories = rest[:2]
+        rest = rest[2:]
+        for i, story in enumerate(sidebar_stories):
+            if y_side >= lead_ceil - _sz(36, scale):
+                break
+            remaining = len(sidebar_stories) - i
+            # Match sidebar depth to the hero when possible.
+            target_end = max(y_lead, lead_top + (lead_ceil - lead_top) * (i + 1) // max(1, len(sidebar_stories)))
+            soft = min(lead_ceil, max(y_side + _sz(140, scale), int(target_end)))
+            if i == len(sidebar_stories) - 1:
+                soft = max(soft, y_lead)  # last sidebar piece aims to hero bottom
+                soft = min(soft, lead_ceil)
+            y_side = _draw_story_block(
+                draw,
+                story,
+                side_x,
+                y_side,
+                side_w,
+                soft,
+                role="sidebar",
+                is_landscape=False,
+                scale=scale,
+                max_body_lines=10 if i == 0 else 6,
+            )
+            if i < len(sidebar_stories) - 1 and y_side < lead_ceil - _sz(20, scale):
+                y_side = (
+                    _draw_thin_rule(
+                        draw, side_x, y_side + _sz(6, scale), side_x + side_w, scale
+                    )
+                    + _sz(6, scale)
+                )
+
+        band_end = max(y_lead, y_side) + _sz(8, scale, 4, 16)
+        band_end = min(band_end, content_bottom - _sz(200, scale, 160, 480))
+        # Vertical rule only through the actual lead package height.
+        _draw_column_rule(
+            draw, margin + lead_w + gap // 2, lead_top, band_end, width=rule_w
+        )
+        y = band_end + _sz(8, scale, 4, 16)
+        y = _draw_scotch_rule(
+            draw,
+            margin,
+            y,
+            width - margin,
+            thick=_sz(2, scale, 2, 5),
+            gap=max(2, int(2 * scale)),
+        )
+        y += _sz(12, scale, 6, 22)
+
+        # Uniform below-the-fold grid (equal columns, equal type).
+        cols = 3 if width >= 1000 else 2
+        if width >= 2000:
             cols = 4
-        elif width >= 1000:
-            cols = 3
-        else:
-            cols = 2
-        gap = _sz(16, scale, 10, 36)
-        usable = width - 2 * margin - gap * (cols - 1)
-        col_w = usable // cols
+        gap_g = _sz(16, scale, 10, 32)
+        usable_g = width - 2 * margin - gap_g * (cols - 1)
+        col_w = usable_g // cols
         col_top = y
         col_ys = [col_top] * cols
 
-        rule_w = max(1, _sz(1, scale, 1, 3))
         for c in range(1, cols):
-            rx = margin + c * (col_w + gap) - gap // 2
+            rx = margin + c * (col_w + gap_g) - gap_g // 2
             _draw_column_rule(draw, rx, col_top, content_bottom, width=rule_w)
 
-        # Round-robin into shortest column; last wave of stories extend to bottom.
+        # Target ~equal stories per column with similar body length.
         n_rest = len(rest)
+        # Cap how many lines of body each standard item gets so they look even.
+        std_body = 7 if scale >= 1.35 else 6
         for i, story in enumerate(rest):
             c = min(range(cols), key=lambda idx: col_ys[idx])
-            if col_ys[c] >= content_bottom - _sz(36, scale):
+            if col_ys[c] >= content_bottom - _sz(48, scale):
                 continue
-            cx = margin + c * (col_w + gap)
-            # How many stories still need a home in the shortest-column sense
+            cx = margin + c * (col_w + gap_g)
             remaining = max(1, n_rest - i)
-            open_cols = sum(1 for cy in col_ys if cy < content_bottom - _sz(36, scale))
+            open_cols = sum(1 for cy in col_ys if cy < content_bottom - _sz(48, scale))
             per_open = max(1, (remaining + open_cols - 1) // max(1, open_cols))
             col_room = content_bottom - col_ys[c]
-            share = max(_sz(160, scale, 100, 400), col_room // per_open)
-            soft_max = min(content_bottom, col_ys[c] + share)
-            # Final stories in each column run to the folio line.
-            if i >= n_rest - cols or col_room < _sz(240, scale, 160, 500):
+            # Rough fixed slot height so items look uniform.
+            slot = max(_sz(200, scale, 140, 420), col_room // per_open)
+            soft_max = min(content_bottom, col_ys[c] + slot)
+            if i >= n_rest - cols:
                 soft_max = content_bottom
-            if col_ys[c] > col_top + _sz(8, scale):
-                col_ys[c] = _draw_thin_rule(
-                    draw, cx, col_ys[c] + _sz(6, scale), cx + col_w, scale
-                ) + _sz(6, scale)
+            if col_ys[c] > col_top + _sz(6, scale):
+                col_ys[c] = (
+                    _draw_thin_rule(
+                        draw, cx, col_ys[c] + _sz(6, scale), cx + col_w, scale
+                    )
+                    + _sz(8, scale)
+                )
             col_ys[c] = _draw_story_block(
-                draw, story, cx, col_ys[c], col_w, soft_max,
-                is_hero=False, is_landscape=False, scale=scale,
+                draw,
+                story,
+                cx,
+                col_ys[c],
+                col_w,
+                soft_max,
+                role="standard",
+                is_landscape=False,
+                scale=scale,
+                max_body_lines=std_body,
             )
 
-        # Fill leftover column space with scaled "Also today" briefs.
-        brief_font = load_font("LibreBaskerville", "Regular", _sz(12, scale, 10, 28))
-        brief_head = load_font("LibreBaskerville", "Bold", _sz(13, scale, 11, 30))
-        brief_lh = text_height(draw, brief_font) + _sz(3, scale, 2, 8)
+        # Briefs only if a column still has real empty space.
         for c in range(cols):
-            if col_ys[c] >= content_bottom - _sz(72, scale, 48, 140):
-                continue
-            cx = margin + c * (col_w + gap)
-            yb = col_ys[c] + _sz(10, scale, 6, 20)
-            yb = _draw_thin_rule(draw, cx, yb, cx + col_w, scale) + _sz(6, scale)
-            draw.text((cx, yb), "ALSO TODAY", font=brief_head, fill=COLOR_RED)
-            yb += text_height(draw, brief_head) + _sz(6, scale, 4, 14)
-            # Unique briefs only — never recycle titles in one column.
-            seen_brief: set[str] = set()
-            briefs: list[dict[str, str]] = []
-            for s in [hero] + rest:
-                key = s["title"].lower()[:60]
-                if key in seen_brief:
-                    continue
-                seen_brief.add(key)
-                briefs.append(s)
-            for b in briefs:
-                if yb >= content_bottom - brief_lh:
-                    break
-                line = f"• {b['title']}"
-                wrapped = wrap_text(draw, line, brief_font, col_w)[:2]
-                for wl in wrapped:
-                    if yb >= content_bottom - brief_lh:
-                        break
-                    draw.text((cx, yb), wl, font=brief_font, fill=COLOR_BLACK)
-                    yb += brief_lh
-                yb += _sz(4, scale, 2, 10)
+            if col_ys[c] < content_bottom - _sz(100, scale, 72, 180):
+                cx = margin + c * (col_w + gap_g)
+                _fill_also_today(
+                    draw,
+                    cx,
+                    col_ys[c],
+                    col_w,
+                    content_bottom,
+                    [hero] + stories[1:],
+                    scale,
+                )
 
     footer_font = load_font(
-        "LibreBaskerville", "Regular", _sz(10 if is_landscape else 13, scale, 9, 28)
+        "LibreBaskerville", "Regular", _sz(11 if is_landscape else 14, scale, 10, 28)
     )
     folio = (
         f"{(paper_name or 'THE DAILY FRAME').upper()}  ·  PAGE 1  ·  "
