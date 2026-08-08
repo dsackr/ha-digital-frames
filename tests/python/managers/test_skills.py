@@ -132,6 +132,7 @@ async def test_built_in_skills_seeded_on_first_load(skill_manager):
         "Quote of the Day",
         "Scripture of the Day",
         "Daily Agenda",
+        "Daily Newspaper",
     }
 
 
@@ -145,7 +146,7 @@ async def test_built_ins_not_reseeded_after_user_deletes_one(hass, fake_library,
     second = SkillManager(hass, fake_library, fake_scene_packs)
     await second.async_load()
     remaining = await second.async_list_skills()
-    assert len(remaining) == 4
+    assert len(remaining) == 5
     assert victim["skill_id"] not in {s["skill_id"] for s in remaining}
 
 

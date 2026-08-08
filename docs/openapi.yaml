@@ -255,6 +255,20 @@ paths:
         '200':
           description: List of virtual walls.
 
+  /api/digital_frames/openapi.json:
+    get:
+      summary: Get OpenAPI JSON specification (API Discovery)
+      description: Returns the machine-readable OpenAPI specification for automated discovery by AI systems and API tools.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: OpenAPI JSON specification.
+          content:
+            application/json:
+              schema:
+                type: object
+
 components:
   securitySchemes:
     BearerAuth:

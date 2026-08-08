@@ -125,3 +125,95 @@ def compute_wall_canvas_geometry(
         canvas_height=canvas_height,
         crop_boxes=crop_boxes,
     )
+
+
+def compute_2d_wall_canvas_geometry(
+    hass: "HomeAssistant",
+    wall: "Wall",
+    member_entry_ids: list[str] | None = None,
+    preserve_bezel_gaps: bool = True,
+) -> WallCanvasGeometry:
+    """Compute a 2D shared master canvas size + per-frame crop slices for *wall*'s
+    member frames (or all placed frames on *wall* if member_entry_ids is None).
+
+    Supports freeform 2D arrangements (multi-row, multi-column, staggered, mixed orientations).
+    When preserve_bezel_gaps is True (default), physical gaps between frames on the wall canvas
+    are mapped into the spanned canvas coordinate space so image content over physical gaps
+    is skipped, producing a seamless continuous visual flow across physical frames.
+    """
+    from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
+    from .walls import tile_dims  # noqa: PLC0415
+
+    target_ids = (
+        list(member_entry_ids)
+        if member_entry_ids is not None
+        else list(wall.placements.keys())
+    )
+
+    if not target_ids:
+        raise WallGeometryError("No frames given to compute 2D wall canvas geometry")
+
+    frame_boxes: dict[str, tuple[float, float, float, float]] = {}
+    specs = {}
+
+    for entry_id in target_ids:
+        placement = wall.placements.get(entry_id)
+        if placement is None:
+            raise WallGeometryError(
+                f"Frame '{entry_id}' is not placed on wall '{wall.wall_id}'"
+            )
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None:
+            raise WallGeometryError(f"Frame '{entry_id}' is no longer configured")
+
+        spec = render_spec_for_hass_entry(hass, entry)
+        specs[entry_id] = spec
+
+        t_w, t_h = tile_dims(entry)
+        x = float(placement.get("x", 0.0))
+        y = float(placement.get("y", 0.0))
+        frame_boxes[entry_id] = (x, y, x + t_w, y + t_h)
+
+    min_x = min(box[0] for box in frame_boxes.values())
+    min_y = min(box[1] for box in frame_boxes.values())
+    max_x = max(box[2] for box in frame_boxes.values())
+    max_y = max(box[3] for box in frame_boxes.values())
+
+    span_w = max_x - min_x
+    span_h = max_y - min_y
+
+    if span_w <= 0 or span_h <= 0:
+        raise WallGeometryError("Wall target frames produce degenerate zero-size canvas bounding box")
+
+    max_frame_res = max(max(s.width, s.height) for s in specs.values())
+    scale = max(2400.0 / max(span_w, span_h), 1.0)
+    canvas_width = max(round(span_w * scale), max_frame_res)
+    canvas_height = max(round(span_h * scale), max_frame_res)
+
+    crop_boxes: dict[str, tuple[float, float, float, float]] = {}
+
+    if preserve_bezel_gaps:
+        for entry_id, (left, top, right, bottom) in frame_boxes.items():
+            x0 = (left - min_x) / span_w
+            y0 = (top - min_y) / span_h
+            x1 = (right - min_x) / span_w
+            y1 = (bottom - min_y) / span_h
+            crop_boxes[entry_id] = (
+                max(0.0, min(1.0, x0)),
+                max(0.0, min(1.0, y0)),
+                max(0.0, min(1.0, x1)),
+                max(0.0, min(1.0, y1)),
+            )
+    else:
+        # Gapless tight packing: normalize frames based on rank order
+        ordered = sorted(target_ids, key=lambda eid: (frame_boxes[eid][1], frame_boxes[eid][0]))
+        n = len(ordered)
+        for i, entry_id in enumerate(ordered):
+            crop_boxes[entry_id] = (i / n, 0.0, (i + 1) / n, 1.0)
+
+    return WallCanvasGeometry(
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+        crop_boxes=crop_boxes,
+    )
+

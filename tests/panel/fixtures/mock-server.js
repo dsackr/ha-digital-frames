@@ -95,6 +95,7 @@ function createMockServer({
   let nextSkillId = skillList.length + 1;
   const skillSendCalls = []; // { skill_id, entry_id } per /skills/:id/send POST
   const messageSendCalls = []; // request body per /messages/send POST
+  const wallSpanCalls = []; // request body per /walls/:id/span_image POST
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -710,6 +711,22 @@ function createMockServer({
         return json(res, 200, { success: true, wall });
       }
     }
+    const spanMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)\/span_image$/);
+    if (spanMatch && req.method === 'POST') {
+      const wallId = spanMatch[1];
+      const contentType = req.headers['content-type'] || '';
+      const parsed = contentType.includes('multipart/form-data') ? await readFormBody(req) : await readJsonBody(req);
+      wallSpanCalls.push({ wall_id: wallId, body: parsed });
+      return json(res, 200, {
+        success: true,
+        wall_id: wallId,
+        saved_image_id: 'img_spanned_123',
+        scene_id: parsed.save_scene ? 'scene_spanned_123' : null,
+        frames_updated: frames.length || 2,
+        crop_boxes: {},
+      });
+    }
+
     const wallMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)$/);
     if (wallMatch) {
       const wallId = wallMatch[1];
@@ -776,6 +793,7 @@ function createMockServer({
     get skills() { return skillList; },
     skillSendCalls,
     messageSendCalls,
+    wallSpanCalls,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },

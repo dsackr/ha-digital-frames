@@ -167,3 +167,74 @@ async def test_live_follow_device_orientation_wins_over_stale_option(
     # effective composition size to 1600x1200.
     assert geometry.canvas_width == 1600
     assert geometry.canvas_height == 1200
+
+
+async def test_2d_wall_canvas_geometry_multiline_grid(hass, make_frame_entry):
+    """A 2x2 grid of frames with physical gaps computes 2D spatial crop boxes."""
+    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
+
+    # 4 frames: row 1 at y=40 (x=40, x=200), row 2 at y=200 (x=40, x=200)
+    # Tile dims for 1200x1600 portrait tile: width=105, height=140
+    placements = {
+        "e1": {"x": 40.0, "y": 40.0},
+        "e2": {"x": 200.0, "y": 40.0},
+        "e3": {"x": 40.0, "y": 200.0},
+        "e4": {"x": 200.0, "y": 200.0},
+    }
+    for eid in ("e1", "e2", "e3", "e4"):
+        entry = make_frame_entry(entry_id=eid, width=1200, height=1600)
+        entry.add_to_hass(hass)
+
+    wall = _wall(placements)
+    geometry = compute_2d_wall_canvas_geometry(hass, wall, preserve_bezel_gaps=True)
+
+    # All placed frames used by default
+    assert set(geometry.crop_boxes.keys()) == {"e1", "e2", "e3", "e4"}
+
+    # Top-left tile e1 (x: 40..145, y: 40..180) vs total span (x: 40..305, y: 40..340 => span_w=265, span_h=300)
+    c_e1 = geometry.crop_boxes["e1"]
+    assert c_e1[0] == 0.0
+    assert c_e1[1] == 0.0
+    assert 0.38 < c_e1[2] < 0.42
+    assert 0.45 < c_e1[3] < 0.48
+
+    # Bottom-right tile e4 ends at 1.0, 1.0
+    c_e4 = geometry.crop_boxes["e4"]
+    assert c_e4[2] == 1.0
+    assert c_e4[3] == 1.0
+
+
+async def test_2d_wall_canvas_geometry_gapless_packing(hass, make_frame_entry):
+    """Setting preserve_bezel_gaps=False produces tight rank-ordered crop slices."""
+    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
+
+    placements = {
+        "e1": {"x": 40.0, "y": 40.0},
+        "e2": {"x": 200.0, "y": 40.0},
+    }
+    for eid in ("e1", "e2"):
+        entry = make_frame_entry(entry_id=eid, width=1200, height=1600)
+        entry.add_to_hass(hass)
+
+    wall = _wall(placements)
+    geometry = compute_2d_wall_canvas_geometry(hass, wall, preserve_bezel_gaps=False)
+
+    assert geometry.crop_boxes["e1"] == (0.0, 0.0, 0.5, 1.0)
+    assert geometry.crop_boxes["e2"] == (0.5, 0.0, 1.0, 1.0)
+
+
+async def test_2d_wall_canvas_geometry_unplaced_or_missing_entry_raises(hass, make_frame_entry):
+    """Requesting an unplaced frame or missing entry raises WallGeometryError."""
+    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
+
+    entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
+    entry.add_to_hass(hass)
+    wall = _wall({"e1": {"x": 0.0, "y": 0.0}})
+
+    with pytest.raises(WallGeometryError, match="not placed"):
+        compute_2d_wall_canvas_geometry(hass, wall, ["e2"])
+
+    with pytest.raises(WallGeometryError, match="no longer configured"):
+        wall_missing = _wall({"e_gone": {"x": 0.0, "y": 0.0}})
+        compute_2d_wall_canvas_geometry(hass, wall_missing, ["e_gone"])
+

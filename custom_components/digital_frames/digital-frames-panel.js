@@ -2788,7 +2788,8 @@
             keys. A frame works the same whether it's on the wall or still in the
             palette — click it either way to choose its image.
           </p>
-          <div style="margin-bottom:12px">
+          <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-primary" id="wall-span-image-btn" title="Span ONE image across all placed frames on this wall">🖼 Span Image Across Wall</button>
             <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
           </div>
           <!-- Appears when 2+ tiles are selected (shift-click or a
@@ -3587,6 +3588,96 @@
             <div class="modal-actions">
               <button class="btn-primary" id="message-modal-submit">Send</button>
               <button class="btn-ghost" id="message-modal-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="wall-span-modal-overlay" style="display:none">
+          <div class="modal-box" style="max-width:680px">
+            <div style="display:flex;align-items:center;justify-space-between;margin-bottom:12px">
+              <h3 id="wall-span-title" style="margin:0">Span Image Across Wall</h3>
+              <button class="btn-ghost" id="wall-span-close-btn" style="padding:2px 8px;font-size:16px">✕</button>
+            </div>
+            
+            <div class="modal-row" style="margin-bottom:12px">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="wall-span-bezel-cb" checked>
+                Compensate for physical bezel gaps between frames
+              </label>
+              <p style="font-size:11px;color:var(--secondary-text-color);margin:2px 0 0 24px">
+                When checked, image content over gaps between frames is skipped so the spanned picture flows continuously across physical space.
+              </p>
+            </div>
+
+            <!-- Source selection tabs -->
+            <div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--divider-color,#ccc);padding-bottom:8px">
+              <button class="btn-ghost active" id="wall-span-tab-btn-ai" style="font-weight:600">🤖 AI Prompt</button>
+              <button class="btn-ghost" id="wall-span-tab-btn-lib">📷 My Library</button>
+              <button class="btn-ghost" id="wall-span-tab-btn-upload">📤 Upload Image</button>
+            </div>
+
+            <!-- AI Tab -->
+            <div id="wall-span-tab-ai" class="wall-span-tab-body">
+              <div class="modal-row">
+                <label>AI Prompt</label>
+                <textarea id="wall-span-ai-prompt" rows="3" placeholder="Describe the image to generate for this wall layout... (e.g. A dramatic mountain landscape at golden hour)"></textarea>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                <button class="btn-ghost quick-prompt-pill" data-prompt="A dramatic cinematic mountain landscape at golden hour, snow-capped peaks and reflection in lake" style="font-size:11px;padding:3px 8px">🏔 Mountain Landscape</button>
+                <button class="btn-ghost quick-prompt-pill" data-prompt="A vibrant cyberpunk neon city skyline at night with rainy reflection" style="font-size:11px;padding:3px 8px">🌆 Neon City</button>
+                <button class="btn-ghost quick-prompt-pill" data-prompt="Bold abstract geometric modern gallery wall art with vibrant color blocking" style="font-size:11px;padding:3px 8px">🎨 Abstract Art</button>
+                <button class="btn-ghost quick-prompt-pill" data-prompt="Serene Japanese zen bamboo garden with cherry blossom leaves and koi pond" style="font-size:11px;padding:3px 8px">🌸 Zen Garden</button>
+              </div>
+            </div>
+
+            <!-- Library Tab -->
+            <div id="wall-span-tab-lib" class="wall-span-tab-body" style="display:none">
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <input type="text" id="wall-span-lib-search" placeholder="Search library images..." style="flex:1">
+                <select id="wall-span-lib-album" style="max-width:160px"><option value="">All Albums</option></select>
+              </div>
+              <div id="wall-span-lib-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;max-height:180px;overflow-y:auto;padding:4px;border:1px solid var(--divider-color,#ccc);border-radius:6px"></div>
+            </div>
+
+            <!-- Upload Tab -->
+            <div id="wall-span-tab-upload" class="wall-span-tab-body" style="display:none">
+              <div id="wall-span-dropzone" style="border:2px dashed var(--divider-color,#ccc);border-radius:8px;padding:24px;text-align:center;cursor:pointer">
+                <p style="margin:0 0 6px;font-weight:600">Click or drag & drop an image file here</p>
+                <input type="file" id="wall-span-file-input" accept="image/*" style="display:none">
+                <span id="wall-span-file-name" style="font-size:12px;color:var(--primary-color,#03a9f4)"></span>
+              </div>
+            </div>
+
+            <!-- Live Spanned Preview Canvas -->
+            <div style="margin:14px 0 10px">
+              <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Wall Spanned Preview</label>
+              <div id="wall-span-preview-container" style="position:relative;width:100%;height:180px;background:#111;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid var(--divider-color,#444)">
+                <img id="wall-span-preview-img" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none">
+                <div id="wall-span-preview-placeholder" style="color:#aaa;font-size:13px">Select or generate an image to preview wall span</div>
+                <div id="wall-span-preview-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></div>
+              </div>
+            </div>
+
+            <div class="modal-row" style="margin-bottom:8px">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+                <input type="checkbox" id="wall-span-save-scene-cb">
+                Save as Home Assistant Scene
+              </label>
+              <input type="text" id="wall-span-scene-name-input" placeholder="Scene name (e.g. Living Room Spanned)" style="margin-top:4px;display:none;width:100%">
+            </div>
+
+            <div class="modal-row">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+                <input type="checkbox" id="wall-span-save-library-cb" checked>
+                Save master image to Library
+              </label>
+            </div>
+
+            <div class="feedback" id="wall-span-fb" style="display:none"></div>
+
+            <div class="modal-actions" style="margin-top:14px">
+              <button class="btn-primary" id="wall-span-submit-btn">🚀 Send to Wall</button>
+              <button class="btn-ghost" id="wall-span-cancel-btn">Cancel</button>
             </div>
           </div>
         </div>
@@ -7935,6 +8026,7 @@
       this.shadowRoot.getElementById('wall-send-btn').addEventListener('click', () => this._sendWallToFrames());
       this.shadowRoot.getElementById('wall-schedule-btn').addEventListener('click', () => this._scheduleFromWall());
       this.shadowRoot.getElementById('wall-grid-align-btn').addEventListener('click', () => this._alignWallToGrid());
+      this.shadowRoot.getElementById('wall-span-image-btn').addEventListener('click', () => this._openWallImageSpanModal());
 
       // Rubber-band multi-select starts on the canvas background (tiles
       // handle their own pointerdown, so this only fires on empty space).
@@ -11017,8 +11109,341 @@
     // Compose message: its own modal (not the schema-driven _openXotdModal
     // engine, which is built around a skill's content_mode/config_schema
     // shape) -- a message is a fixed-shape, ephemeral send (text + style +
-    // target + optional save-to-library), never a persisted Skill.
-    // -----------------------------------------------------------------------
+    _openWallImageSpanModal() {
+      const wall = this._activeWall() || this._walls[0];
+      if (!wall) return;
+
+      const overlay = this.shadowRoot.getElementById('wall-span-modal-overlay');
+      const titleEl = this.shadowRoot.getElementById('wall-span-title');
+      const bezelCb = this.shadowRoot.getElementById('wall-span-bezel-cb');
+      const aiPrompt = this.shadowRoot.getElementById('wall-span-ai-prompt');
+      const libSearch = this.shadowRoot.getElementById('wall-span-lib-search');
+      const libAlbumSelect = this.shadowRoot.getElementById('wall-span-lib-album');
+      const libGrid = this.shadowRoot.getElementById('wall-span-lib-grid');
+      const fileInput = this.shadowRoot.getElementById('wall-span-file-input');
+      const fileNameEl = this.shadowRoot.getElementById('wall-span-file-name');
+      const dropzone = this.shadowRoot.getElementById('wall-span-dropzone');
+      const previewImg = this.shadowRoot.getElementById('wall-span-preview-img');
+      const previewPlaceholder = this.shadowRoot.getElementById('wall-span-preview-placeholder');
+      const previewOverlay = this.shadowRoot.getElementById('wall-span-preview-overlay');
+      const previewContainer = this.shadowRoot.getElementById('wall-span-preview-container');
+      const saveSceneCb = this.shadowRoot.getElementById('wall-span-save-scene-cb');
+      const sceneNameInput = this.shadowRoot.getElementById('wall-span-scene-name-input');
+      const saveLibCb = this.shadowRoot.getElementById('wall-span-save-library-cb');
+      const submitBtn = this.shadowRoot.getElementById('wall-span-submit-btn');
+      const cancelBtn = this.shadowRoot.getElementById('wall-span-cancel-btn');
+      const closeBtn = this.shadowRoot.getElementById('wall-span-close-btn');
+      const fb = this.shadowRoot.getElementById('wall-span-fb');
+
+      if (!overlay) return;
+
+      titleEl.textContent = `Span Image Across Wall: ${wall.name}`;
+      fb.style.display = 'none';
+      submitBtn.disabled = false;
+      submitBtn.textContent = '🚀 Send to Wall';
+      saveSceneCb.checked = false;
+      sceneNameInput.style.display = 'none';
+      sceneNameInput.value = `${wall.name} Spanned`;
+      saveLibCb.checked = true;
+      bezelCb.checked = true;
+      aiPrompt.value = '';
+
+      let activeTab = 'ai';
+      let selectedImageId = null;
+      let uploadedFile = null;
+      let selectedImageSrc = null;
+
+      const placements = this._wallPlacements || wall.placements || {};
+      const placedEntryIds = Object.keys(placements);
+
+      if (placedEntryIds.length === 0) {
+        fb.className = 'feedback err';
+        fb.textContent = 'No frames are placed on this wall yet. Add frames to the wall layout first.';
+        fb.style.display = 'block';
+      }
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      placedEntryIds.forEach(eid => {
+        const pos = placements[eid];
+        if (!pos) return;
+        const frame = this._frames.find(f => f.entryId === eid);
+        const dims = this._wallTileDims(frame);
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + dims.width);
+        maxY = Math.max(maxY, pos.y + dims.height);
+      });
+
+      const spanW = (maxX > minX) ? (maxX - minX) : 1;
+      const spanH = (maxY > minY) ? (maxY - minY) : 1;
+
+      if (previewContainer) {
+        previewContainer.style.aspectRatio = `${spanW} / ${spanH}`;
+      }
+
+      const updatePreviewOverlays = () => {
+        if (!previewOverlay) return;
+        previewOverlay.innerHTML = '';
+
+        placedEntryIds.forEach(eid => {
+          const pos = placements[eid];
+          if (!pos) return;
+          const frame = this._frames.find(f => f.entryId === eid);
+          const dims = this._wallTileDims(frame);
+
+          const leftPct = ((pos.x - minX) / spanW) * 100;
+          const topPct = ((pos.y - minY) / spanH) * 100;
+          const widthPct = (dims.width / spanW) * 100;
+          const heightPct = (dims.height / spanH) * 100;
+
+          const box = document.createElement('div');
+          box.style.cssText = `
+            position: absolute;
+            left: ${leftPct}%;
+            top: ${topPct}%;
+            width: ${widthPct}%;
+            height: ${heightPct}%;
+            border: 2px solid #00f0ff;
+            box-shadow: 0 0 8px rgba(0,240,255,0.6);
+            border-radius: 4px;
+            box-sizing: border-box;
+            background: rgba(0,240,255,0.08);
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-start;
+            padding: 3px 5px;
+            pointer-events: none;
+          `;
+
+          const label = document.createElement('span');
+          label.style.cssText = `
+            font-size: 10px;
+            font-weight: bold;
+            color: #ffffff;
+            background: rgba(0,0,0,0.75);
+            padding: 1px 4px;
+            border-radius: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+          `;
+          label.textContent = frame ? frame.title : eid.substring(0, 8);
+          box.appendChild(label);
+
+          previewOverlay.appendChild(box);
+        });
+      };
+
+      updatePreviewOverlays();
+      bezelCb.onchange = updatePreviewOverlays;
+
+      const tabBtnAi = this.shadowRoot.getElementById('wall-span-tab-btn-ai');
+      const tabBtnLib = this.shadowRoot.getElementById('wall-span-tab-btn-lib');
+      const tabBtnUpload = this.shadowRoot.getElementById('wall-span-tab-btn-upload');
+      const tabAi = this.shadowRoot.getElementById('wall-span-tab-ai');
+      const tabLib = this.shadowRoot.getElementById('wall-span-tab-lib');
+      const tabUpload = this.shadowRoot.getElementById('wall-span-tab-upload');
+
+      const setTab = (tab) => {
+        activeTab = tab;
+        tabBtnAi.classList.toggle('active', tab === 'ai');
+        tabBtnLib.classList.toggle('active', tab === 'lib');
+        tabBtnUpload.classList.toggle('active', tab === 'upload');
+        tabAi.style.display = tab === 'ai' ? 'block' : 'none';
+        tabLib.style.display = tab === 'lib' ? 'block' : 'none';
+        tabUpload.style.display = tab === 'upload' ? 'block' : 'none';
+      };
+
+      tabBtnAi.onclick = () => setTab('ai');
+      tabBtnLib.onclick = async () => {
+        setTab('lib');
+        if (!this._libraryImages || this._libraryImages.length === 0) {
+          await this._loadLibrary();
+        }
+        renderLibraryGrid();
+      };
+      tabBtnUpload.onclick = () => setTab('upload');
+
+      this.shadowRoot.querySelectorAll('.quick-prompt-pill').forEach(pill => {
+        pill.onclick = () => {
+          aiPrompt.value = pill.dataset.prompt;
+          setTab('ai');
+        };
+      });
+
+      const renderLibraryGrid = () => {
+        if (!libGrid) return;
+        libGrid.innerHTML = '';
+        const search = (libSearch.value || '').toLowerCase();
+        const album = libAlbumSelect.value;
+
+        let filtered = this._libraryImages || [];
+        if (search) {
+          filtered = filtered.filter(img => (img.filename || '').toLowerCase().includes(search) || (img.voice_name || '').toLowerCase().includes(search));
+        }
+        if (album) {
+          filtered = filtered.filter(img => img.albums && img.albums.includes(album));
+        }
+
+        filtered.forEach(img => {
+          const item = document.createElement('div');
+          item.style.cssText = `
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 2px solid ${selectedImageId === img.image_id ? '#00f0ff' : 'transparent'};
+          `;
+          const thumb = document.createElement('img');
+          thumb.src = this._thumbUrl(img);
+          thumb.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+          item.appendChild(thumb);
+
+          item.onclick = () => {
+            selectedImageId = img.image_id;
+            selectedImageSrc = this._thumbUrl(img);
+            previewImg.src = selectedImageSrc;
+            previewImg.style.display = 'block';
+            previewPlaceholder.style.display = 'none';
+            renderLibraryGrid();
+          };
+          libGrid.appendChild(item);
+        });
+      };
+
+      if (libSearch) libSearch.oninput = renderLibraryGrid;
+      if (libAlbumSelect) {
+        libAlbumSelect.innerHTML = '<option value="">All Albums</option>' +
+          (this._albums || []).map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+        libAlbumSelect.onchange = renderLibraryGrid;
+      }
+
+      if (dropzone && fileInput) {
+        dropzone.onclick = () => fileInput.click();
+        dropzone.ondragover = (e) => { e.preventDefault(); dropzone.style.borderColor = '#00f0ff'; };
+        dropzone.ondragleave = () => { dropzone.style.borderColor = 'var(--divider-color,#ccc)'; };
+        dropzone.ondrop = (e) => {
+          e.preventDefault();
+          dropzone.style.borderColor = 'var(--divider-color,#ccc)';
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleFileSelect(e.dataTransfer.files[0]);
+          }
+        };
+        fileInput.onchange = (e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleFileSelect(e.target.files[0]);
+          }
+        };
+      }
+
+      const handleFileSelect = (file) => {
+        uploadedFile = file;
+        fileNameEl.textContent = `Selected: ${file.name}`;
+        const url = URL.createObjectURL(file);
+        selectedImageSrc = url;
+        previewImg.src = url;
+        previewImg.style.display = 'block';
+        previewPlaceholder.style.display = 'none';
+      };
+
+      saveSceneCb.onchange = () => {
+        sceneNameInput.style.display = saveSceneCb.checked ? 'block' : 'none';
+      };
+
+      const closeModal = () => { overlay.style.display = 'none'; };
+      cancelBtn.onclick = closeModal;
+      closeBtn.onclick = closeModal;
+
+      submitBtn.onclick = async () => {
+        if (placedEntryIds.length === 0) {
+          fb.className = 'feedback err';
+          fb.textContent = 'Add frames to this wall layout first.';
+          fb.style.display = 'block';
+          return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Spanning & Sending...';
+        fb.className = 'feedback';
+        fb.textContent = 'Generating spanned master canvas and slicing for frames...';
+        fb.style.display = 'block';
+
+        try {
+          let bodyPayload;
+          let headers = this._authHeaders();
+
+          if (activeTab === 'upload' && uploadedFile) {
+            const formData = new FormData();
+            formData.append('source_type', 'upload');
+            formData.append('file', uploadedFile);
+            formData.append('preserve_bezel_gaps', bezelCb.checked ? 'true' : 'false');
+            formData.append('save_scene', saveSceneCb.checked ? 'true' : 'false');
+            formData.append('scene_name', sceneNameInput.value.trim() || `${wall.name} Spanned`);
+            formData.append('save_to_library', saveLibCb.checked ? 'true' : 'false');
+            bodyPayload = formData;
+          } else {
+            headers['Content-Type'] = 'application/json';
+            const jsonBody = {
+              source_type: activeTab,
+              preserve_bezel_gaps: bezelCb.checked,
+              save_scene: saveSceneCb.checked,
+              scene_name: sceneNameInput.value.trim() || `${wall.name} Spanned`,
+              save_to_library: saveLibCb.checked,
+            };
+            if (activeTab === 'ai') {
+              jsonBody.prompt = aiPrompt.value.trim() || `Spanned wall art for ${wall.name}`;
+            } else if (activeTab === 'lib') {
+              if (!selectedImageId) {
+                throw new Error('Please select an image from your library.');
+              }
+              jsonBody.image_id = selectedImageId;
+            }
+            bodyPayload = JSON.stringify(jsonBody);
+          }
+
+          const resp = await fetch(`/api/digital_frames/walls/${wall.wall_id}/span_image`, {
+            method: 'POST',
+            headers: headers,
+            body: bodyPayload,
+          });
+
+          const res = await resp.json().catch(() => ({}));
+          if (!resp.ok || !res.success) {
+            throw new Error(res.message || resp.statusText || `HTTP ${resp.status}`);
+          }
+
+          fb.className = 'feedback success';
+          fb.textContent = `Success! Image spanned across ${res.frames_updated || placedEntryIds.length} frames.`;
+
+          if (saveLibCb.checked || saveSceneCb.checked) {
+            await this._loadLibrary();
+            await this._loadScenes();
+          }
+
+          setTimeout(() => {
+            closeModal();
+            const wallFb = this.shadowRoot.getElementById('wall-fb');
+            if (wallFb) {
+              wallFb.className = 'feedback success';
+              wallFb.textContent = `Image successfully spanned across ${res.frames_updated || placedEntryIds.length} frames on ${wall.name}.`;
+              wallFb.style.display = 'block';
+            }
+          }, 1000);
+
+        } catch (err) {
+          fb.className = 'feedback err';
+          fb.textContent = `Span failed: ${err.message}`;
+          fb.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = '🚀 Send to Wall';
+        }
+      };
+
+      overlay.style.display = 'flex';
+    }
+
     _openMessageComposeModal() {
       const overlay = this.shadowRoot.getElementById('message-modal-overlay');
       const textInput = this.shadowRoot.getElementById('message-text-input');

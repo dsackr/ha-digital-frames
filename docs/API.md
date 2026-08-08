@@ -35,6 +35,12 @@ Some endpoints are intentionally unauthenticated to allow local hardware frames 
 
 ### 1. Frame Management & Discovery
 
+#### `GET /api/digital_frames/openapi.json`
+Returns the machine-readable OpenAPI 3.0 specification for automated API discovery by AI systems, API gateways, and developer tools (Swagger UI, Postman, Insomnia).
+
+- **Headers**: Requires `Authorization: Bearer <TOKEN>`
+- **Response `200 OK`**: `application/json` object containing full OpenAPI 3.0 specification.
+
 #### `GET /api/digital_frames/frames`
 Retrieves a list of all configured digital frames, including their entity status, screen dimensions, rotation, battery level, online/offline status, active thumbnail, and queued image delivery state.
 
