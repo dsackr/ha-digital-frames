@@ -47,6 +47,37 @@ class DigitalFramesSamsungContentView(HomeAssistantView):
         return web.Response(status=404, text="Not found")
 
 
+class DigitalFramesRokuContentView(HomeAssistantView):
+    """Unauthenticated token URL for Roku's `media_player.play_media` fetch.
+
+    Same stage/token pattern as Samsung: the Roku Media Player app fetches
+    this URL without HA cookies, so security is the unguessable per-send
+    token (short TTL) rather than auth.
+    """
+
+    url = "/api/digital_frames/roku/{token}/content.png"
+    name = "api:digital_frames:roku:content"
+    requires_auth = False
+
+    async def get(self, request: web.Request, token: str) -> web.Response:
+        hass = request.app["hass"]
+        domain_data = hass.data.get(DOMAIN, {})
+        for key, coord in domain_data.items():
+            if str(key).startswith("_"):
+                continue
+            getter = getattr(coord, "get_staged_content", None)
+            if not callable(getter):
+                continue
+            body = getter(token)
+            if body is not None:
+                return web.Response(
+                    body=body,
+                    content_type="image/png",
+                    headers={"Cache-Control": "no-store"},
+                )
+        return web.Response(status=404, text="Not found")
+
+
 class DigitalFramesFramePullBinView(HomeAssistantView):
     """Unauthenticated token URL for Fraimic/clone frame pull-on-wake.
 
@@ -145,6 +176,7 @@ _ENTITY_UNIQUE_SUFFIXES = (
     "_backlight",
     "_mdc_reachable",
     "_charging",
+    "_roku_reachable",
 )
 
 

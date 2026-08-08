@@ -1,6 +1,9 @@
 {
   "domain": "digital_frames",
   "name": "Digital Frames",
+  "after_dependencies": [
+    "roku"
+  ],
   "codeowners": [
     "@dsackr"
   ],

@@ -11,6 +11,7 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -35,6 +36,7 @@ from .const import (
     DOMAIN,
     DRIVER_FRAIMIC,
     DRIVER_MEURAL,
+    DRIVER_ROKU,
     DRIVER_SAMSUNG,
     KIND_SCENES_HUB,
     MEURAL_DEFAULT_HEIGHT,
@@ -45,6 +47,10 @@ from .const import (
     SAMSUNG_SIZE_LABEL,
     CONF_MDC_PIN,
     DEFAULT_MDC_PIN,
+    CONF_ROKU_ENTITY_ID,
+    ROKU_DEFAULT_HEIGHT,
+    ROKU_DEFAULT_WIDTH,
+    ROKU_SIZE_LABEL,
     CONF_ORIENTATION,
     CONF_ORIENTATION_FOLLOW_DEVICE,
     ORIENTATION_AUTO,
@@ -279,7 +285,7 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
         """Primary entry: pick Fraimic/clone or Meural Canvas (local)."""
         return self.async_show_menu(
             step_id="user",
-            menu_options=["add_fraimic", "add_meural", "add_samsung"],
+            menu_options=["add_fraimic", "add_meural", "add_samsung", "add_roku"],
         )
 
     # ------------------------------------------------------------------
@@ -468,6 +474,83 @@ class DigitalFramesConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
+    # Roku TV — cast via HA core's `roku` media_player, no push protocol
+    # ------------------------------------------------------------------
+
+    async def async_step_add_roku(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Target an existing HA core `roku` media_player entity.
+
+        Roku has no local API to receive arbitrary image bytes, so this
+        driver does not discover/probe hardware directly -- it reuses
+        whatever `media_player.roku_*` entity HA core's own `roku`
+        integration already created and casts to it via `play_media`.
+        """
+        errors: dict[str, str] = {}
+
+        registry = er.async_get(self.hass)
+        configured = {
+            entry.data.get(CONF_ROKU_ENTITY_ID)
+            for entry in self._async_current_entries()
+            if entry.data.get(CONF_DRIVER) == DRIVER_ROKU
+        }
+        available = {
+            reg_entry.entity_id: (
+                reg_entry.name or reg_entry.original_name or reg_entry.entity_id
+            )
+            for reg_entry in registry.entities.values()
+            if reg_entry.platform == "roku"
+            and reg_entry.domain == "media_player"
+            and reg_entry.entity_id not in configured
+        }
+
+        if not available:
+            return self.async_abort(reason="no_roku_media_players")
+
+        if user_input is not None:
+            entity_id = user_input[CONF_ROKU_ENTITY_ID]
+            name = (
+                (user_input.get(CONF_NAME) or "").strip()
+                or available.get(entity_id, entity_id)
+            )
+            width = int(user_input.get(CONF_WIDTH) or ROKU_DEFAULT_WIDTH)
+            height = int(user_input.get(CONF_HEIGHT) or ROKU_DEFAULT_HEIGHT)
+
+            unique = f"roku:{entity_id}"
+            await self.async_set_unique_id(unique)
+            self._abort_if_unique_id_configured()
+
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_DRIVER: DRIVER_ROKU,
+                    CONF_ROKU_ENTITY_ID: entity_id,
+                    CONF_NAME: name,
+                    CONF_WIDTH: width,
+                    CONF_HEIGHT: height,
+                    CONF_SIZE: ROKU_SIZE_LABEL,
+                    CONF_DEVICE_KEY: unique,
+                },
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ROKU_ENTITY_ID): vol.In(available),
+                vol.Optional(CONF_NAME, default=""): str,
+                vol.Optional(CONF_WIDTH, default=ROKU_DEFAULT_WIDTH): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+                vol.Optional(CONF_HEIGHT, default=ROKU_DEFAULT_HEIGHT): vol.All(
+                    vol.Coerce(int), vol.Range(min=100, max=8000)
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="add_roku", data_schema=schema, errors=errors
+        )
+
+    # ------------------------------------------------------------------
     # Step 2 (scan path) — pick a discovered device
     # ------------------------------------------------------------------
 
@@ -651,6 +734,7 @@ class DigitalFramesOptionsFlow(OptionsFlow):
     ) -> FlowResult:
         """Manage the options."""
         is_meural = self.config_entry.data.get(CONF_DRIVER) == DRIVER_MEURAL
+        is_roku = self.config_entry.data.get(CONF_DRIVER) == DRIVER_ROKU
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -714,10 +798,12 @@ class DigitalFramesOptionsFlow(OptionsFlow):
 
             return self.async_create_entry(title="", data=user_input)
 
-        return await self._async_show_options_form(is_meural=is_meural, errors=errors)
+        return await self._async_show_options_form(
+            is_meural=is_meural, is_roku=is_roku, errors=errors
+        )
 
     async def _async_show_options_form(
-        self, *, is_meural: bool, errors: dict[str, str]
+        self, *, is_meural: bool, is_roku: bool = False, errors: dict[str, str]
     ) -> FlowResult:
         current_interval: int = self.config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -804,6 +890,10 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             schema_dict[vol.Optional(CONF_MEURAL_EMAIL, default=linked_hint)] = str
             schema_dict[vol.Optional(CONF_MEURAL_PASSWORD, default="")] = str
             schema_dict[vol.Optional(CONF_MEURAL_UNLINK, default=False)] = bool
+        elif is_roku:
+            # Roku has no battery/keep-awake concept of its own -- power is
+            # whatever the underlying HA `roku` media_player already tracks.
+            pass
         else:
             # Battery / keep-awake controls (Fraimic family only).
             schema_dict[
@@ -820,7 +910,7 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             vol.Optional(CONF_SCAN_INTERVAL, default=current_interval)
         ] = vol.All(int, vol.Range(min=30))
 
-        if not is_meural:
+        if not is_meural and not is_roku:
             # Advanced: 30s wake-hunt while a send is queued. Default off —
             # prefer network device_tracker (UniFi etc.) for push-on-wake.
             schema_dict[

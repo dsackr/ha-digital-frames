@@ -4,11 +4,12 @@
     "step": {
       "user": {
         "title": "Add a frame",
-        "description": "Choose the kind of display to add. Meural uses the local LAN postcard API. Samsung EM32DX uses local MDC (experimental).",
+        "description": "Choose the kind of display to add. Meural uses the local LAN postcard API. Samsung EM32DX uses local MDC (experimental). Roku casts to an existing Roku media player.",
         "menu_options": {
           "add_fraimic": "Fraimic / e-ink clone",
           "add_meural": "Meural Canvas (local)",
-          "add_samsung": "Samsung EM32DX (experimental)"
+          "add_samsung": "Samsung EM32DX (experimental)",
+          "add_roku": "Roku TV"
         }
       },
       "add_fraimic": {
@@ -71,6 +72,22 @@
           "height": "Panel height (default 1440)"
         }
       },
+      "add_roku": {
+        "title": "Add Roku TV",
+        "description": "Casts images to an existing Roku via Home Assistant's own `roku` integration (media_player.play_media) — no push protocol, no cloud. Set up that Roku in HA first if it's not listed below.",
+        "data": {
+          "roku_media_player_entity_id": "Roku media player",
+          "name": "Frame Name",
+          "width": "Width (pixels)",
+          "height": "Height (pixels)"
+        },
+        "data_description": {
+          "roku_media_player_entity_id": "An existing media_player entity from HA core's Roku integration",
+          "name": "Friendly name for walls and scenes",
+          "width": "Screen width in pixels (default 1920)",
+          "height": "Screen height in pixels (default 1080)"
+        }
+      },
       "pick_device": {
         "title": "Choose a Fraimic Frame",
         "description": "Select a frame discovered on your network.",
@@ -111,7 +128,8 @@
     },
     "abort": {
       "already_configured": "This frame is already configured",
-      "not_fraimic_device": "This device is not a Fraimic frame"
+      "not_fraimic_device": "This device is not a Fraimic frame",
+      "no_roku_media_players": "No available Roku media players found. Set up HA core's Roku integration first (Settings → Devices & Services → Add Integration → Roku), or every discovered Roku is already added here."
     }
   },
   "options": {

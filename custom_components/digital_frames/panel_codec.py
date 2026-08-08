@@ -25,8 +25,10 @@ _LOGGER = logging.getLogger(__name__)
 from .const import (
     CONF_DRIVER,
     DRIVER_MEURAL,
+    DRIVER_ROKU,
     DRIVER_SAMSUNG,
     MEURAL_SIZE_LABEL,
+    ROKU_SIZE_LABEL,
     SAMSUNG_SIZE_LABEL,
 )
 from .frame_types import (
@@ -122,13 +124,13 @@ def panel_codec_for_entry(entry: "ConfigEntry") -> PanelCodec:
     """Resolve codec for a config entry (driver, then size, then geometry)."""
     if entry.data.get(CONF_DRIVER) == DRIVER_MEURAL:
         return panel_codec_for_id(CODEC_JPEG_Q90)
-    if entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG:
+    if entry.data.get(CONF_DRIVER) in (DRIVER_SAMSUNG, DRIVER_ROKU):
         return panel_codec_for_id(CODEC_PNG)
 
     size = entry.data.get("size")
     if isinstance(size, str) and size == MEURAL_SIZE_LABEL:
         return panel_codec_for_id(CODEC_JPEG_Q90)
-    if isinstance(size, str) and size == SAMSUNG_SIZE_LABEL:
+    if isinstance(size, str) and size in (SAMSUNG_SIZE_LABEL, ROKU_SIZE_LABEL):
         return panel_codec_for_id(CODEC_PNG)
     if isinstance(size, str) and size in FRAME_TYPES:
         return panel_codec_for_frame_type_id(size)

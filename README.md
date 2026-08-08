@@ -17,7 +17,7 @@ slideshow rotation. Drivers talk to devices on your network.
 - **Your library, not a photo dump.** Upload once, organize into albums, reuse across frames and scenes.
 - **A gallery wall out of the box.** Curated public-domain art packs install with one click.
 - **Set it and forget it.** Daily agenda, skills, schedules.
-- **Multi-vendor local drivers.** Fraimic / community e‑ink, Meural Canvas (local), experimental Samsung EM32DX.
+- **Multi-vendor local drivers.** Fraimic / community e‑ink, Meural Canvas (local), experimental Samsung EM32DX, Roku TV (cast via HA's own Roku integration).
 
 ## Quick start
 
@@ -40,6 +40,7 @@ We develop against hardware the maintainers own. Other vendors (and panel sizes 
 | Fraimic / Spectra e‑ink (official + common clones) | Primary development target |
 | Meural Canvas **local** LAN | Implemented; volunteer reports welcome |
 | Samsung EM32DX (MDC local) | Experimental; **needs volunteer hardware** |
+| Roku TV (cast via HA core `roku` integration) | Implemented; **needs volunteer hardware** |
 | InkJoy | Out of scope for now (MQTT control plane) |
 | Meural **cloud pin / album push** | Optional (link Netgear account on Meural options) |
 
