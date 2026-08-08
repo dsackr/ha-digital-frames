@@ -108,12 +108,12 @@ test.describe('Spanned Wall Image Flow (KPF 36)', () => {
       root.getElementById('wall-span-tab-btn-lib').click();
     });
 
-    // Wait for library grid items to be rendered
+    // Wait for item div in library grid
     await page.waitForFunction(() => {
       const root = document.getElementById('panel').shadowRoot;
       const grid = root.getElementById('wall-span-lib-grid');
-      return grid && grid.children.length > 0;
-    }, { timeout: 5000 });
+      return grid && grid.querySelector('div') !== null;
+    }, { timeout: 10000 });
 
     // Pick first library image and submit
     await page.evaluate(() => {

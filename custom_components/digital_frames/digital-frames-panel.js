@@ -2716,7 +2716,7 @@
     _setTab(name, skipPushState = false) {
       this._activeTab = name;
       const root = this.shadowRoot;
-      ['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs'].forEach(tab => {
+      ['walls', 'my_gallery', 'art_gallery', 'art_factory', 'widgets', 'expansion_packs'].forEach(tab => {
         const content = root.getElementById(`tab-${tab}`);
         const btn     = root.querySelector(`.tab-btn[data-tab="${tab}"]`);
         if (content) content.classList.toggle('active', tab === name);
@@ -2729,6 +2729,7 @@
 
       // Fire-and-forget: keeps the tab switch itself synchronous/instant,
       // re-rendering once the (throttled) refetch resolves.
+      if (name === 'art_factory') this._initArtFactoryTab();
       if (name === 'expansion_packs') this._refreshScenePacksIfStale();
       if (name === 'my_gallery' || name === 'art_gallery') {
         this._currentAlbum = null;
@@ -2754,6 +2755,7 @@
           <button class="tab-btn active" data-tab="walls">Walls</button>
           <button class="tab-btn" data-tab="my_gallery">My Gallery</button>
           <button class="tab-btn" data-tab="art_gallery">Art Gallery</button>
+          <button class="tab-btn" data-tab="art_factory">🎨 Art Factory</button>
           <button class="tab-btn" data-tab="widgets">Widgets</button>
           <button class="tab-btn" data-tab="expansion_packs">Expansion Packs</button>
         </div>
@@ -2912,6 +2914,116 @@
             </div>
           </div>
         </div><!-- /tab-art_gallery -->
+
+        <div class="tab-content" id="tab-art_factory">
+          <div class="lib-toolbar">
+            <h3 style="margin:0;flex:1 1 auto">🎨 Art Factory</h3>
+            <div id="art-factory-engine-badge" style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:12px;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3)">
+              🤖 Loading AI Engine…
+            </div>
+          </div>
+          <p style="font-size:13px;color:var(--secondary-text-color);margin:0 0 16px">
+            Generate custom artwork from text prompts. Uses Home Assistant AI Task integrations or public AI engines out of the box.
+          </p>
+          <div class="feedback" id="art-factory-fb" style="display:none"></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+            <!-- Left Column: Controls & Inputs -->
+            <div style="background:var(--card-background-color,#1e293b);padding:20px;border-radius:8px;border:1px solid var(--divider-color,rgba(255,255,255,0.1))">
+              <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:6px">
+                Prompt
+              </label>
+              <textarea id="art-factory-prompt" rows="4" placeholder="Describe the artwork you want to create... (e.g. 'A vibrant cyberpunk skyline at night with neon reflections')" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box"></textarea>
+
+              <!-- Quick Presets / Style Pills -->
+              <div style="margin-top:14px">
+                <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:6px">
+                  Quick Prompt Ideas
+                </label>
+                <div style="display:flex;flex-wrap:wrap;gap:6px" id="art-factory-presets">
+                  <button class="btn-ghost art-preset-pill" data-prompt="Vibrant mountain sunset over a serene alpine lake, dramatic golden hour lighting" data-style="plain" style="font-size:11px;padding:3px 8px">🏔 Mountain Sunset</button>
+                  <button class="btn-ghost art-preset-pill" data-prompt="Futuristic cyberpunk city street with glowing neon signs and rain-slicked pavement" data-style="neon_noir" style="font-size:11px;padding:3px 8px">🌃 Cyberpunk City</button>
+                  <button class="btn-ghost art-preset-pill" data-prompt="Minimalist Japanese zen garden with maple trees, koi pond, and bamboo fountain" data-style="nature_zen" style="font-size:11px;padding:3px 8px">🌿 Zen Garden</button>
+                  <button class="btn-ghost art-preset-pill" data-prompt="Abstract 1960s pop art color block typography poster" data-style="pop_art" style="font-size:11px;padding:3px 8px">🎨 Pop Art Poster</button>
+                </div>
+              </div>
+
+              <!-- Style Selector & Orientation -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+                <div>
+                  <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:4px">Artistic Style</label>
+                  <select id="art-factory-style" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit">
+                    <option value="plain">Clean Art Poster</option>
+                    <option value="movie_poster">Cinematic Movie Poster</option>
+                    <option value="pop_art">1960s Pop Art</option>
+                    <option value="neon_noir">Neon Cyberpunk</option>
+                    <option value="nature_zen">Minimalist Nature Zen</option>
+                    <option value="chalkboard">Cafe Chalkboard</option>
+                    <option value="gothic_gold">Gothic Gold Filigree</option>
+                    <option value="ad_50s">50s Retro Sign</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:4px">Canvas Size</label>
+                  <select id="art-factory-size" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit">
+                    <option value="1024x1024">Square (1024x1024)</option>
+                    <option value="1200x1600">Portrait (1200x1600)</option>
+                    <option value="1600x1200">Landscape (1600x1200)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Options Checkbox -->
+              <div style="margin-top:16px">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                  <input type="checkbox" id="art-factory-save-lib-cb" checked>
+                  Save generated image to Library ("AI Art" album)
+                </label>
+              </div>
+
+              <!-- Generate Button -->
+              <button class="btn-primary" id="art-factory-generate-btn" style="width:100%;margin-top:20px;padding:12px;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px">
+                🎨 Generate Image
+              </button>
+            </div>
+
+            <!-- Right Column: Live High-Res Result Preview & Delivery -->
+            <div style="background:var(--card-background-color,#1e293b);padding:20px;border-radius:8px;border:1px solid var(--divider-color,rgba(255,255,255,0.1));display:flex;flex-direction:column;align-items:center;text-align:center;min-height:380px;justify-content:center">
+              <div id="art-factory-preview-placeholder" style="color:var(--secondary-text-color)">
+                <div style="font-size:48px;margin-bottom:12px">🎨</div>
+                <h4 style="margin:0 0 4px">No Art Generated Yet</h4>
+                <p style="font-size:12px;margin:0">Enter a prompt and click Generate Image to create custom artwork.</p>
+              </div>
+              <div id="art-factory-preview-wrapper" style="display:none;width:100%">
+                <div style="position:relative;width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#000;box-shadow:0 10px 25px rgba(0,0,0,0.5)">
+                  <img id="art-factory-preview-img" style="width:100%;height:100%;object-fit:contain" src="">
+                </div>
+                <div style="margin-top:12px;font-size:12px;color:var(--secondary-text-color)" id="art-factory-engine-info"></div>
+
+                <!-- Destination Actions -->
+                <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px;width:100%">
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <select id="art-factory-target-frame" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit">
+                      <!-- Populated dynamically with frames -->
+                    </select>
+                    <button class="btn-primary" id="art-factory-send-btn" style="flex:0 0 auto;padding:8px 16px">🚀 Send to Frame</button>
+                  </div>
+                  <div style="display:flex;gap:8px;justify-content:center">
+                    <a id="art-factory-download-btn" download="ai_art.png" class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">💾 Download PNG</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- History / Recent Generations Strip -->
+          <div style="margin-top:28px">
+            <h4 style="margin:0 0 12px">Recent Generations</h4>
+            <div id="art-factory-history-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));gap:12px">
+              <div style="color:var(--secondary-text-color);font-size:12px;grid-column:1/-1">Generations in this session will appear here.</div>
+            </div>
+          </div>
+        </div><!-- /tab-art_factory -->
 
         <div class="tab-content" id="tab-widgets">
           <div class="lib-toolbar">
@@ -10892,6 +11004,203 @@
       return el;
     }
 
+    async _initArtFactoryTab() {
+      const root = this.shadowRoot;
+      const engineBadge = root.getElementById('art-factory-engine-badge');
+      const targetSelect = root.getElementById('art-factory-target-frame');
+      const generateBtn = root.getElementById('art-factory-generate-btn');
+      const promptEl = root.getElementById('art-factory-prompt');
+      const styleEl = root.getElementById('art-factory-style');
+      const sizeEl = root.getElementById('art-factory-size');
+      const saveLibCb = root.getElementById('art-factory-save-lib-cb');
+      const fb = root.getElementById('art-factory-fb');
+      const placeholder = root.getElementById('art-factory-preview-placeholder');
+      const wrapper = root.getElementById('art-factory-preview-wrapper');
+      const previewImg = root.getElementById('art-factory-preview-img');
+      const engineInfo = root.getElementById('art-factory-engine-info');
+      const sendBtn = root.getElementById('art-factory-send-btn');
+      const downloadBtn = root.getElementById('art-factory-download-btn');
+
+      if (!this._artFactoryHistory) this._artFactoryHistory = [];
+
+      // 1. Load engine status
+      try {
+        const resp = await fetch('/api/digital_frames/art_factory/status', { headers: this._authHeaders() });
+        const data = await resp.json().catch(() => ({}));
+        if (engineBadge && data.active_engine) {
+          engineBadge.textContent = `🤖 ${data.active_engine}`;
+        }
+      } catch (err) {
+        if (engineBadge) engineBadge.textContent = '🤖 Public AI Generator';
+      }
+
+      // 2. Populate target frame select
+      const populateTargetSelect = () => {
+        if (!targetSelect) return;
+        targetSelect.innerHTML = '';
+        (this._frames || []).forEach(f => {
+          const id = f.entryId || f.entry_id;
+          if (!id) return;
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = `🖥 ${f.title || id}`;
+          targetSelect.appendChild(opt);
+        });
+      };
+      populateTargetSelect();
+
+      // 3. Quick preset pills click handlers
+      root.querySelectorAll('#art-factory-presets .art-preset-pill').forEach(pill => {
+        pill.onclick = () => {
+          if (promptEl) promptEl.value = pill.dataset.prompt;
+          if (styleEl && pill.dataset.style) styleEl.value = pill.dataset.style;
+        };
+      });
+
+      // 4. Generate Button click handler
+      if (generateBtn && !generateBtn._bound) {
+        generateBtn._bound = true;
+        generateBtn.onclick = async () => {
+          const prompt = (promptEl.value || '').trim();
+          if (!prompt) {
+            if (fb) {
+              fb.className = 'feedback err';
+              fb.textContent = 'Please enter a prompt first.';
+              fb.style.display = 'block';
+            }
+            return;
+          }
+
+          if (fb) fb.style.display = 'none';
+          generateBtn.disabled = true;
+          const origText = generateBtn.textContent;
+          generateBtn.textContent = '✨ Generating Artwork...';
+
+          const [wStr, hStr] = (sizeEl.value || '1024x1024').split('x');
+
+          try {
+            const resp = await fetch('/api/digital_frames/art_factory/generate', {
+              method: 'POST',
+              headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt,
+                style: styleEl.value,
+                width: parseInt(wStr, 10),
+                height: parseInt(hStr, 10),
+                save_to_library: saveLibCb.checked,
+              }),
+            });
+
+            const result = await resp.json().catch(() => ({}));
+            if (!resp.ok || !result.success) {
+              throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+            }
+
+            // Show generated preview
+            if (placeholder) placeholder.style.display = 'none';
+            if (wrapper) wrapper.style.display = 'block';
+            if (previewImg) previewImg.src = result.preview_url;
+            if (engineInfo) engineInfo.textContent = `Generated via ${result.engine_used}`;
+            if (downloadBtn) downloadBtn.href = result.preview_url;
+
+            // Store active generated image ID & data URL
+            this._lastArtFactoryResult = result;
+
+            // Add to session history
+            this._artFactoryHistory.unshift(result);
+            if (this._artFactoryHistory.length > 8) this._artFactoryHistory.pop();
+            this._renderArtFactoryHistory();
+
+          } catch (err) {
+            console.error('[fraimic-panel] Art Factory generation failed:', err);
+            if (fb) {
+              fb.className = 'feedback err';
+              fb.textContent = `Generation failed: ${err.message}`;
+              fb.style.display = 'block';
+            }
+          } finally {
+            generateBtn.disabled = false;
+            generateBtn.textContent = origText;
+          }
+        };
+      }
+
+      // 5. Send to Frame button
+      if (sendBtn && !sendBtn._bound) {
+        sendBtn._bound = true;
+        sendBtn.onclick = async () => {
+          if (!this._lastArtFactoryResult) return;
+          if (targetSelect && !targetSelect.children.length) populateTargetSelect();
+          const targetEntryId = targetSelect ? targetSelect.value : null;
+          if (!targetEntryId) return;
+
+          sendBtn.disabled = true;
+          const origText = sendBtn.textContent;
+          sendBtn.textContent = '🚀 Sending...';
+
+          try {
+            if (this._lastArtFactoryResult.image_id) {
+              await fetch('/api/digital_frames/library/send', {
+                method: 'POST',
+                headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  entry_id: targetEntryId,
+                  image_id: this._lastArtFactoryResult.image_id,
+                }),
+              });
+            }
+            if (fb) {
+              fb.className = 'feedback ok';
+              fb.textContent = 'Artwork sent successfully!';
+              fb.style.display = 'block';
+            }
+          } catch (err) {
+            if (fb) {
+              fb.className = 'feedback err';
+              fb.textContent = `Send failed: ${err.message}`;
+              fb.style.display = 'block';
+            }
+          } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = origText;
+          }
+        };
+      }
+
+      this._renderArtFactoryHistory();
+    }
+
+    _renderArtFactoryHistory() {
+      const root = this.shadowRoot;
+      const grid = root.getElementById('art-factory-history-grid');
+      if (!grid) return;
+      if (!this._artFactoryHistory || this._artFactoryHistory.length === 0) {
+        grid.innerHTML = '<div style="color:var(--secondary-text-color);font-size:12px;grid-column:1/-1">Generations in this session will appear here.</div>';
+        return;
+      }
+
+      grid.innerHTML = '';
+      this._artFactoryHistory.forEach(item => {
+        const div = document.createElement('div');
+        div.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;background:#000;cursor:pointer;border:2px solid transparent;position:relative';
+        div.innerHTML = `<img src="${item.preview_url}" style="width:100%;height:100%;object-fit:cover" title="${this._esc(item.prompt)}">`;
+        div.onclick = () => {
+          this._lastArtFactoryResult = item;
+          const placeholder = root.getElementById('art-factory-preview-placeholder');
+          const wrapper = root.getElementById('art-factory-preview-wrapper');
+          const previewImg = root.getElementById('art-factory-preview-img');
+          const engineInfo = root.getElementById('art-factory-engine-info');
+          const downloadBtn = root.getElementById('art-factory-download-btn');
+          if (placeholder) placeholder.style.display = 'none';
+          if (wrapper) wrapper.style.display = 'block';
+          if (previewImg) previewImg.src = item.preview_url;
+          if (engineInfo) engineInfo.textContent = `Generated via ${item.engine_used}`;
+          if (downloadBtn) downloadBtn.href = item.preview_url;
+        };
+        grid.appendChild(div);
+      });
+    }
+
     async _loadXotdInstances() {
       const fb = this.shadowRoot.getElementById('xotd-fb');
       if (fb) fb.style.display = 'none';
@@ -11258,7 +11567,7 @@
       tabBtnAi.onclick = () => setTab('ai');
       tabBtnLib.onclick = async () => {
         setTab('lib');
-        if (!this._libraryImages || this._libraryImages.length === 0) {
+        if (!this._library || this._library.length === 0) {
           await this._loadLibrary();
         }
         renderLibraryGrid();
@@ -11278,7 +11587,7 @@
         const search = (libSearch.value || '').toLowerCase();
         const album = libAlbumSelect.value;
 
-        let filtered = this._libraryImages || [];
+        let filtered = this._libraryImages || this._library || [];
         if (search) {
           filtered = filtered.filter(img => (img.filename || '').toLowerCase().includes(search) || (img.voice_name || '').toLowerCase().includes(search));
         }
@@ -11296,14 +11605,15 @@
             cursor: pointer;
             border: 2px solid ${selectedImageId === img.image_id ? '#00f0ff' : 'transparent'};
           `;
+          const thumbSrc = `/api/digital_frames/library/preview/${encodeURIComponent(img.image_id)}`;
           const thumb = document.createElement('img');
-          thumb.src = this._thumbUrl(img);
+          thumb.src = thumbSrc;
           thumb.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
           item.appendChild(thumb);
 
           item.onclick = () => {
             selectedImageId = img.image_id;
-            selectedImageSrc = this._thumbUrl(img);
+            selectedImageSrc = thumbSrc;
             previewImg.src = selectedImageSrc;
             previewImg.style.display = 'block';
             previewPlaceholder.style.display = 'none';
