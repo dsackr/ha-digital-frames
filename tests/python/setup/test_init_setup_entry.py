@@ -8,6 +8,8 @@ or doesn't prune wall layouts.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from custom_components.digital_frames.const import DOMAIN, KIND_SCENES_HUB
@@ -19,6 +21,16 @@ def _no_real_network(monkeypatch):
         "custom_components.digital_frames.coordinator.async_get_clientsession",
         lambda hass: _FakeSession(),
     )
+    # manifest.json declares `dhcp` as a dependency, so every hass fixture in
+    # this file loads HA core's dhcp component too. That component's own
+    # EVENT_HOMEASSISTANT_STARTED listener calls both aiodhcpwatcher.async_init()
+    # and (via DHCPWatcher.async_start) aiodhcpwatcher.async_start(), each of
+    # which opens a real AF_NETLINK socket via scapy -- irrelevant to what
+    # this file tests, but fatal under pytest-socket's sandbox (and a real
+    # network syscall otherwise). Stub both out so firing that event here
+    # only exercises this integration's own listener.
+    monkeypatch.setattr("aiodhcpwatcher.async_init", AsyncMock())
+    monkeypatch.setattr("aiodhcpwatcher.async_start", AsyncMock(return_value=lambda: None))
 
 
 class _FakeResponse:
