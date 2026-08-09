@@ -396,3 +396,65 @@ class DigitalFramesSendImageView(HomeAssistantView):
             len(bin_bytes),
         )
         return self.json({"success": True, "queued": False, "bytes_sent": len(bin_bytes)})
+
+
+class DigitalFramesOpenApiView(HomeAssistantView):
+    """Serve the OpenAPI 3.0 specification for automated API discovery."""
+
+    url = "/api/digital_frames/openapi.json"
+    name = "api:digital_frames:openapi"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Return the OpenAPI JSON specification."""
+        hass = request.app["hass"]
+        import os
+
+        pkg_dir = os.path.dirname(__file__)
+        candidate_paths = [
+            os.path.join(pkg_dir, "..", "..", "docs", "openapi.yaml"),
+            os.path.join(hass.config.config_dir, "docs", "openapi.yaml"),
+        ]
+
+        spec_data = None
+        for path in candidate_paths:
+            norm_path = os.path.normpath(path)
+            if os.path.exists(norm_path):
+                try:
+                    import yaml
+
+                    def _load_yaml(p: str):
+                        with open(p, "r", encoding="utf-8") as f:
+                            return yaml.safe_load(f)
+
+                    spec_data = await hass.async_add_executor_job(_load_yaml, norm_path)
+                    if spec_data:
+                        break
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning("Could not parse openapi.yaml at %s: %s", norm_path, err)
+
+        if not spec_data:
+            spec_data = {
+                "openapi": "3.0.3",
+                "info": {
+                    "title": "Digital Frames for Home Assistant REST API",
+                    "description": "REST HTTP API exposed by Digital Frames custom component under /api/digital_frames/*",
+                    "version": "1.0.0",
+                },
+                "paths": {
+                    "/api/digital_frames/frames": {"get": {"summary": "List all configured frames"}},
+                    "/api/digital_frames/send_image": {"post": {"summary": "Send raw image directly to a frame"}},
+                    "/api/digital_frames/library/list": {"get": {"summary": "List library images"}},
+                    "/api/digital_frames/library/upload": {"post": {"summary": "Upload image to library"}},
+                    "/api/digital_frames/library/send": {"post": {"summary": "Send library image to frame"}},
+                    "/api/digital_frames/messages/send": {"post": {"summary": "Render text message and send to frame"}},
+                    "/api/digital_frames/scenes": {"get": {"summary": "List wall scenes"}},
+                    "/api/digital_frames/skills": {"get": {"summary": "List dynamic skills"}},
+                    "/api/digital_frames/schedules": {"get": {"summary": "List display schedules"}},
+                    "/api/digital_frames/walls": {"get": {"summary": "List virtual wall layouts"}},
+                    "/api/digital_frames/openapi.json": {"get": {"summary": "Get OpenAPI JSON specification"}},
+                },
+            }
+
+        return self.json(spec_data)
+

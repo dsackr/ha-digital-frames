@@ -1424,6 +1424,34 @@ never happens.
   text rejected client-side, backend failure surfaced in the feedback
   div).
 
+## 36. Spanned wall image (AI, photo library, or upload across 2D physical frame layouts)
+User arranges multiple frames on a Wall canvas matching their physical placement, picks or generates ONE master image (AI prompt generation, Library photo selection, or direct file upload), and spans it across all frames on the wall.
+Supports freeform 2D arrangements (multiline grids, staggered tiles, mixed orientations, and different resolutions).
+**Bezel-gap compensation** (default on) maps physical spacing between frames into the spanned canvas coordinate space so image content over physical gaps is skipped, creating a seamless visual flow across physical frames on the wall.
+The spanned result can optionally be saved to the Library or saved as a Home Assistant **Scene** (using `image_crop` mappings with exact `crop_box` slices) for re-sending or scheduling.
+- **Entry points**: `wall_geometry.py` (`compute_2d_wall_canvas_geometry`),
+  `walls_http.py` (`DigitalFramesWallSpanImageView`),
+  `__init__.py` (view registration),
+  `digital-frames-panel.js` (`_openWallImageSpanModal`, `_sendWallSpannedImage`).
+- **If it silently breaks**: frames show misaligned image slices, physical bezel gaps distort the spanned picture, AI generation fails without feedback, or saved scenes store invalid crop box ratios.
+- **Test status**: **Backend-tested** — `tests/python/managers/test_wall_geometry.py`
+  (2D spatial canvas geometry, bezel gap crop calculation, zero-gap packing, invalid frame validation),
+  `tests/python/managers/test_walls.py` (`DigitalFramesWallSpanImageView` API endpoint with AI, library, upload, bezel gaps, scene saving, and frame delivery).
+  **Panel-tested** — `tests/panel/walls-span-image.spec.js` (opening the modal, toggling bezel gaps, AI prompt generation, library photo pick, file upload, saving a scene, sending to wall).
+
+## 37. OpenAPI 3.0 specification & REST API discovery
+Client applications, AI agents, and external automation systems query `GET /api/digital_frames/openapi.json` (requires Home Assistant Bearer authentication) to fetch the machine-readable OpenAPI 3.0 specification describing all endpoints, HTTP methods, parameters, and schemas exposed under `/api/digital_frames/*`.
+- **Entry points**: `http_api.py` (`DigitalFramesOpenApiView`), `__init__.py` (view registration), `docs/openapi.yaml`, `docs/API.md`.
+- **If it silently breaks**: API clients/agents receive a 404 or unauthenticated access error, or the returned JSON schema is missing endpoints or invalid OpenAPI 3.0 structure.
+## 38. Art Factory AI image generation (HA AI Task service or public AI fallback)
+Users type custom prompts in the Web App's dedicated "Art Factory" tab (`🎨 Art Factory`) to generate artwork from text prompts. Uses Home Assistant's native `ai_task` / `image_generator` service when available in the user's HA instance (`_find_ai_task_image_entity`), and provides a zero-config public AI generator fallback (Pollinations.ai) when no HA AI integration is configured. Generated images can be saved to the shared image library under the "AI Art" album, downloaded locally, or sent directly to any selected frame or wall layout.
+- **Entry points**: `art_factory_http.py` (`DigitalFramesArtFactoryStatusView`, `DigitalFramesArtFactoryGenerateView`, `async_generate_ai_art_image`),
+  `__init__.py` (view registrations),
+  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryHistory`).
+- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, or generated images fail to upload to the library.
+- **Test status**: **Backend-tested** — `tests/python/managers/test_art_factory.py` (status endpoint, prompt generation with HA `ai_task` and public fallback, library upload, direct frame delivery).
+  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory tab, status badge load, typing prompt, clicking Generate Image, preview rendering, and sending to frame).
+
 ---
 
 ## Coverage summary
@@ -1440,6 +1468,8 @@ never happens.
 | — | Panel init-load resilience, panel element lifecycle, Lovelace card (KPFs 26, 27, 29) | Done — frontend side; KPF 29's HTTP views fold into 5b |
 | — | Media Source & AI Auto-tagging (KPFs 30, 31) | Done |
 | — | Compose & send a styled text message (KPF 35) | Done |
+| — | Spanned wall image across 2D physical frame layouts (KPF 36) | Done |
+| — | Art Factory AI image generation & fallback (KPF 38) | Done |
 
 Phase 5b (plus KPF 18's widget scheduling) is scoped here but not yet
 implemented — see [TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the

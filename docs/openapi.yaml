@@ -1,0 +1,310 @@
+openapi: 3.0.3
+info:
+  title: Digital Frames for Home Assistant REST API
+  description: >
+    REST HTTP API exposed by the Digital Frames Home Assistant custom component
+    under `/api/digital_frames/*`. Provides frame management, direct image sending,
+    photo library control, scenes, skills, schedules, and virtual walls.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8123
+    description: Local Home Assistant Instance
+paths:
+  /api/digital_frames/frames:
+    get:
+      summary: List all configured frames
+      description: Returns status, dimensions, orientation, and thumbnail metadata for all digital frames.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of digital frame configurations and states.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Frame'
+
+  /api/digital_frames/frame/{entry_id}/thumbnail:
+    get:
+      summary: Get live thumbnail preview for frame
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: entry_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JPEG image binary stream.
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /api/digital_frames/send_image:
+    post:
+      summary: Send raw image directly to a frame
+      description: Encodes an uploaded image directly for the target frame without storing in library.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                entity_id:
+                  type: string
+                  description: Target frame sensor entity ID.
+                entry_id:
+                  type: string
+                  description: Target frame config entry ID.
+                image:
+                  type: string
+                  format: binary
+                  description: Raw image file binary.
+      responses:
+        '200':
+          description: Image delivery result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendImageResult'
+
+  /api/digital_frames/pull/{token}/image.bin:
+    get:
+      summary: Pull image binary payload (Unauthenticated)
+      description: Served to pull-mode hardware frames requesting their staged binary image.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Packed e-ink panel binary stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /api/digital_frames/samsung/{token}/content.png:
+    get:
+      summary: Samsung frame PNG content payload (Unauthenticated)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PNG image binary stream.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+  /api/digital_frames/library/list:
+    get:
+      summary: List library images
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: album
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [newest, oldest, name]
+      responses:
+        '200':
+          description: List of library image records.
+
+  /api/digital_frames/library/upload:
+    post:
+      summary: Upload image to library
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                album:
+                  type: string
+      responses:
+        '200':
+          description: Upload status and image metadata.
+
+  /api/digital_frames/library/send:
+    post:
+      summary: Send library image to frame
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - image_id
+              properties:
+                image_id:
+                  type: string
+                entity_id:
+                  type: string
+                entry_id:
+                  type: string
+      responses:
+        '200':
+          description: Image delivery result.
+
+  /api/digital_frames/messages/send:
+    post:
+      summary: Render text message and send to frame
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                entity_id:
+                  type: string
+                entry_id:
+                  type: string
+                title:
+                  type: string
+                message:
+                  type: string
+                theme:
+                  type: string
+      responses:
+        '200':
+          description: Message rendering and delivery status.
+
+  /api/digital_frames/scenes:
+    get:
+      summary: List wall scenes
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of scenes.
+    post:
+      summary: Create wall scene
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Created scene.
+
+  /api/digital_frames/skills:
+    get:
+      summary: List dynamic skills
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of configured skills.
+
+  /api/digital_frames/schedules:
+    get:
+      summary: List display schedules
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of schedules.
+
+  /api/digital_frames/walls:
+    get:
+      summary: List virtual wall layouts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of virtual walls.
+
+  /api/digital_frames/openapi.json:
+    get:
+      summary: Get OpenAPI JSON specification (API Discovery)
+      description: Returns the machine-readable OpenAPI specification for automated discovery by AI systems and API tools.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: OpenAPI JSON specification.
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: HomeAssistantLongLivedToken
+  schemas:
+    Frame:
+      type: object
+      properties:
+        entry_id:
+          type: string
+        name:
+          type: string
+        model:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        rotation:
+          type: integer
+        online:
+          type: boolean
+        last_image_id:
+          type: string
+        queued:
+          type: boolean
+    SendImageResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        queued:
+          type: boolean
+        bytes_sent:
+          type: integer
+        message:
+          type: string

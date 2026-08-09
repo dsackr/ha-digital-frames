@@ -43,6 +43,13 @@ We develop against hardware the maintainers own. Other vendors (and panel sizes 
 | InkJoy | Out of scope for now (MQTT control plane) |
 | Meural **cloud pin / album push** | Optional (link Netgear account on Meural options) |
 
+## API reference
+
+Digital Frames provides a comprehensive REST HTTP API (`/api/digital_frames/*`) for custom frontend panels, dashboard cards, and external automation scripts.
+
+- **[REST API Documentation](docs/API.md)** — Complete endpoint reference, parameters, and authentication.
+- **[OpenAPI 3.0 Specification](docs/openapi.yaml)** — Machine-readable OpenAPI spec file.
+
 ## Credits
 
 **Meural Canvas** — local `/remote/` HTTP inventory from **Guy Sie**’s

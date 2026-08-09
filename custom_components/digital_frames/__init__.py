@@ -133,6 +133,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesFramePullBinView,
         DigitalFramesFrameStatusView,
         DigitalFramesOnboardingView,
+        DigitalFramesOpenApiView,
         DigitalFramesSamsungContentView,
         DigitalFramesSendImageView,
     )
@@ -141,6 +142,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(DigitalFramesFrameStatusView())
     hass.http.register_view(DigitalFramesSamsungContentView())
     hass.http.register_view(DigitalFramesFramePullBinView())
+    hass.http.register_view(DigitalFramesOpenApiView())
 
     from .update_http import async_register_update_views  # noqa: PLC0415
 
@@ -269,10 +271,23 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     # configured frames (config entries are already loaded at this point).
     await wall_manager.async_ensure_default_wall()
 
-    from .walls_http import DigitalFramesWallsView, DigitalFramesWallView  # noqa: PLC0415
+    from .walls_http import (  # noqa: PLC0415
+        DigitalFramesWallsView,
+        DigitalFramesWallView,
+        DigitalFramesWallSpanImageView,
+    )
 
     hass.http.register_view(DigitalFramesWallsView())
     hass.http.register_view(DigitalFramesWallView())
+    hass.http.register_view(DigitalFramesWallSpanImageView())
+
+    from .art_factory_http import (  # noqa: PLC0415
+        DigitalFramesArtFactoryStatusView,
+        DigitalFramesArtFactoryGenerateView,
+    )
+
+    hass.http.register_view(DigitalFramesArtFactoryStatusView())
+    hass.http.register_view(DigitalFramesArtFactoryGenerateView())
 
     # Scene packs: curated bundles of public-domain images + an auto-built
     # scene, installable from the panel with no manual setup. Built on top

@@ -95,6 +95,8 @@ function createMockServer({
   let nextSkillId = skillList.length + 1;
   const skillSendCalls = []; // { skill_id, entry_id } per /skills/:id/send POST
   const messageSendCalls = []; // request body per /messages/send POST
+  const wallSpanCalls = []; // request body per /walls/:id/span_image POST
+  const artFactoryCalls = []; // request body per /art_factory/generate POST
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -701,6 +703,28 @@ function createMockServer({
       }
     }
 
+    if (p === '/api/digital_frames/art_factory/status') {
+      return json(res, 200, {
+        success: true,
+        has_ha_ai: true,
+        ai_entity_id: 'ai_task.mock_generator',
+        active_engine: 'Home Assistant AI Task (ai_task.mock_generator)',
+      });
+    }
+
+    if (p === '/api/digital_frames/art_factory/generate' && req.method === 'POST') {
+      const parsed = await readJsonBody(req);
+      artFactoryCalls.push(parsed);
+      return json(res, 200, {
+        success: true,
+        prompt: parsed.prompt,
+        style: parsed.style || 'plain',
+        engine_used: 'Home Assistant AI Task (ai_task.mock_generator)',
+        image_id: 'img_art_123',
+        preview_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      });
+    }
+
     if (p === '/api/digital_frames/walls') {
       if (req.method === 'GET') return json(res, 200, { walls: wallList });
       if (req.method === 'POST') {
@@ -710,6 +734,22 @@ function createMockServer({
         return json(res, 200, { success: true, wall });
       }
     }
+    const spanMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)\/span_image$/);
+    if (spanMatch && req.method === 'POST') {
+      const wallId = spanMatch[1];
+      const contentType = req.headers['content-type'] || '';
+      const parsed = contentType.includes('multipart/form-data') ? await readFormBody(req) : await readJsonBody(req);
+      wallSpanCalls.push({ wall_id: wallId, body: parsed });
+      return json(res, 200, {
+        success: true,
+        wall_id: wallId,
+        saved_image_id: 'img_spanned_123',
+        scene_id: parsed.save_scene ? 'scene_spanned_123' : null,
+        frames_updated: frames.length || 2,
+        crop_boxes: {},
+      });
+    }
+
     const wallMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)$/);
     if (wallMatch) {
       const wallId = wallMatch[1];
@@ -776,6 +816,8 @@ function createMockServer({
     get skills() { return skillList; },
     skillSendCalls,
     messageSendCalls,
+    wallSpanCalls,
+    artFactoryCalls,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },
