@@ -170,6 +170,106 @@ async def test_span_image_push_now_false_saves_scene_without_touching_hardware(
     assert scene.mappings["frame-2"]["type"] == "image_crop"
 
 
+async def test_span_image_re_saving_with_scene_id_updates_in_place(
+    hass, span_client, make_frame_entry, sample_image_bytes
+):
+    """Re-opening a saved wallpaper scene for editing (a new background, a
+    dragged frame) and saving again must update the same scene record, not
+    collide with its own name as a duplicate -- without threading scene_id
+    back through, async_save_scene(scene_id=None) rejects a name that
+    already belongs to a different scene_id."""
+    e1 = make_frame_entry(entry_id="frame-1", width=1200, height=1600)
+    e1.add_to_hass(hass)
+
+    wall_mgr = hass.data[DOMAIN]["_walls"]
+    created = await wall_mgr.async_save_wall("Living Room", {"frame-1": {"x": 40.0, "y": 40.0}})
+    wall_id = created["wall_id"]
+
+    lib_mgr = hass.data[DOMAIN]["_library"]
+    record1 = await lib_mgr.async_upload("bg1.png", sample_image_bytes(1200, 1600, color=(10, 10, 10)), ["Backgrounds"])
+    image_id_1 = record1.get("image_id") if isinstance(record1, dict) else record1.image_id
+
+    first = await span_client.post(
+        f"/api/digital_frames/walls/{wall_id}/span_image",
+        json={
+            "source_type": "library",
+            "image_id": image_id_1,
+            "push_now": False,
+            "save_scene": True,
+            "scene_name": "Living Room Wallpaper",
+        },
+    )
+    assert first.status == 200
+    first_body = await first.json()
+    scene_id = first_body["scene_id"]
+    assert scene_id is not None
+
+    # Edit: a different background, same scene name, scene_id threaded back
+    # (as the wallpaper editor now does after loading a scene for editing).
+    record2 = await lib_mgr.async_upload("bg2.png", sample_image_bytes(1200, 1600, color=(200, 200, 200)), ["Backgrounds"])
+    image_id_2 = record2.get("image_id") if isinstance(record2, dict) else record2.image_id
+
+    second = await span_client.post(
+        f"/api/digital_frames/walls/{wall_id}/span_image",
+        json={
+            "source_type": "library",
+            "image_id": image_id_2,
+            "push_now": False,
+            "save_scene": True,
+            "scene_name": "Living Room Wallpaper",
+            "scene_id": scene_id,
+        },
+    )
+
+    assert second.status == 200
+    second_body = await second.json()
+    assert second_body["success"] is True
+    assert "scene_save_error" not in second_body
+    assert second_body["scene_id"] == scene_id
+
+    scene_mgr = hass.data[DOMAIN]["_scenes"]
+    all_scenes = await scene_mgr.async_list_scenes()
+    assert len(all_scenes) == 1
+    scene = await scene_mgr.async_get_scene(scene_id)
+    assert scene.mappings["frame-1"]["image_id"] == image_id_2
+
+
+async def test_span_image_same_name_without_scene_id_reports_error_not_500(
+    hass, span_client, make_frame_entry, sample_image_bytes
+):
+    """Saving a *new* scene whose name collides with an existing one (no
+    scene_id passed) must surface as scene_save_error on an otherwise-
+    successful response, not silently succeed or crash."""
+    e1 = make_frame_entry(entry_id="frame-1", width=1200, height=1600)
+    e1.add_to_hass(hass)
+
+    wall_mgr = hass.data[DOMAIN]["_walls"]
+    created = await wall_mgr.async_save_wall("Living Room", {"frame-1": {"x": 40.0, "y": 40.0}})
+    wall_id = created["wall_id"]
+
+    lib_mgr = hass.data[DOMAIN]["_library"]
+    record = await lib_mgr.async_upload("bg.png", sample_image_bytes(1200, 1600), ["Backgrounds"])
+    image_id = record.get("image_id") if isinstance(record, dict) else record.image_id
+
+    body = {
+        "source_type": "library",
+        "image_id": image_id,
+        "push_now": False,
+        "save_scene": True,
+        "scene_name": "Duplicate Name",
+    }
+    first = await span_client.post(f"/api/digital_frames/walls/{wall_id}/span_image", json=body)
+    assert first.status == 200
+    assert (await first.json())["scene_id"] is not None
+
+    second = await span_client.post(f"/api/digital_frames/walls/{wall_id}/span_image", json=body)
+    assert second.status == 200
+    second_body = await second.json()
+    assert second_body["success"] is True
+    assert second_body["scene_id"] is None
+    assert "already exists" in second_body["scene_save_error"]
+
+
 async def test_span_image_push_now_true_sends_to_coordinators(
     hass, span_client, make_frame_entry, sample_image_bytes
 ):

@@ -2372,6 +2372,7 @@
       this._wallCanvasMode = 'normal';        // 'normal' | 'wallpaper'
       this._afBackgroundImageId = null;       // library image_id used as the wallpaper background
       this._afBackgroundImageName = null;     // its filename, purely for the "Background: ..." label
+      this._afLoadedSceneId = null;           // scene_id currently being edited, or null for "new scene"
       this._wallActiveSceneId = null;    // scene_id loaded for preview on this wall, or null
       this._wallPendingMappings = {};    // entry_id -> image_id ('' = explicitly cleared) touched this session,
                                           // overlaid on the active scene's own mappings -- see _wallEffectiveMapping
@@ -3188,6 +3189,13 @@
 
                 <!-- Action Controls -->
                 <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <span style="font-size:12px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase;white-space:nowrap">Scene:</span>
+                    <select id="art-factory-scene-select" style="flex:1;padding:6px 12px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-weight:600">
+                      <option value="">＋ New Scene…</option>
+                      <!-- Populated dynamically with existing wallpaper scenes -->
+                    </select>
+                  </div>
                   <input type="text" id="art-factory-scene-name" placeholder="Scene name (e.g. Living Room Wallpaper)" style="padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-size:12px">
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <button class="btn-primary" id="art-factory-save-scene-btn" style="padding:10px 16px;font-weight:600;font-size:14px;background:#8b5cf6;border-color:#7c3aed;display:flex;align-items:center;justify-content:center;gap:6px">
@@ -11330,6 +11338,7 @@
       const bgPickerOverlay = root.getElementById('art-factory-bg-picker-overlay');
       const bgPickerCancel = root.getElementById('art-factory-bg-picker-cancel');
       const useWallSizeBtn = root.getElementById('art-factory-use-wall-size-btn');
+      const sceneSelect = root.getElementById('art-factory-scene-select');
 
       if (!this._artFactoryHistory) this._artFactoryHistory = [];
 
@@ -11370,6 +11379,16 @@
             wallSelect.appendChild(opt);
           });
         }
+        if (sceneSelect) {
+          sceneSelect.innerHTML = '<option value="">＋ New Scene…</option>';
+          (this._scenes || []).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.scene_id;
+            opt.textContent = s.name;
+            sceneSelect.appendChild(opt);
+          });
+          sceneSelect.value = this._afLoadedSceneId || '';
+        }
         this._updateArtFactoryBgLabel();
         this._updateArtFactoryWallSizeHint();
       };
@@ -11382,7 +11401,21 @@
         wallSelect.onchange = () => {
           this._openWallForArtFactory(wallSelect.value);
           this._updateArtFactoryWallSizeHint();
+          // A loaded scene's mappings were validated against the previous
+          // wall's frames -- switching walls starts a fresh "New Scene"
+          // rather than silently retargeting the old scene at a different
+          // wall's frames. The background image itself is left as-is; it
+          // can still be reused on the new wall, just as a new scene.
+          this._afLoadedSceneId = null;
+          if (sceneSelect) sceneSelect.value = '';
+          const sceneNameInput = root.getElementById('art-factory-scene-name');
+          if (sceneNameInput) sceneNameInput.value = '';
         };
+      }
+
+      if (sceneSelect && !sceneSelect._bound) {
+        sceneSelect._bound = true;
+        sceneSelect.onchange = () => this._loadArtFactoryScene(sceneSelect.value);
       }
 
       if (useWallSizeBtn && !useWallSizeBtn._bound) {
@@ -11583,6 +11616,57 @@
       label.textContent = this._afBackgroundImageName || 'None selected';
     }
 
+    // Loads a previously-saved wallpaper scene back into the editor so it
+    // can be re-adjusted and re-saved in place -- there was previously no
+    // way to reopen one at all (its background/crop mapping only ever got
+    // *written*, never read back). A scene built here always maps each of
+    // this wall's frames to the same shared image_id via an "image_crop"
+    // mapping (see _sendArtFactoryWallpaper) -- that's what's searched for
+    // among the scene's mappings, restricted to entries actually on the
+    // current wall (a scene could span a different wall's frames, or be an
+    // ordinary per-frame Walls-tab scene with no wallpaper background at
+    // all, in which case there's nothing to load).
+    _loadArtFactoryScene(sceneId) {
+      const root = this.shadowRoot;
+      const sceneNameInput = root.getElementById('art-factory-scene-name');
+      const fb = root.getElementById('art-factory-fb');
+
+      if (!sceneId) {
+        this._afLoadedSceneId = null;
+        if (sceneNameInput) sceneNameInput.value = '';
+        return;
+      }
+
+      const scene = (this._scenes || []).find(s => s.scene_id === sceneId);
+      if (!scene) return;
+
+      const wallEntryIds = new Set(Object.keys(this._wallPlacements));
+      let backgroundImageId = null;
+      for (const [entryId, mapping] of Object.entries(scene.mappings || {})) {
+        if (wallEntryIds.has(entryId) && mapping && typeof mapping === 'object' && mapping.type === 'image_crop') {
+          backgroundImageId = mapping.image_id;
+          break;
+        }
+      }
+
+      if (!backgroundImageId) {
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent = `"${scene.name}" has no wallpaper background for this wall's frames -- pick a different scene, or switch to the wall it was built for.`;
+          fb.style.display = 'block';
+        }
+        this._afLoadedSceneId = null;
+        const sceneSelect = root.getElementById('art-factory-scene-select');
+        if (sceneSelect) sceneSelect.value = '';
+        if (sceneNameInput) sceneNameInput.value = '';
+        return;
+      }
+
+      this._afLoadedSceneId = sceneId;
+      if (sceneNameInput) sceneNameInput.value = scene.name;
+      this._selectArtFactoryBackground(backgroundImageId, scene.name);
+    }
+
     // Fetches the active wall's aggregate spanned-canvas size (the same
     // geometry a save/send will compute) purely to show it -- generation
     // itself stays completely decoupled from any wall (see the generate
@@ -11753,12 +11837,38 @@
             push_now: pushNow,
             save_scene: !pushNow,
             scene_name: sceneName || undefined,
+            // Editing a previously-loaded scene updates it in place instead
+            // of colliding with its own name as a "new" scene (see
+            // _loadArtFactoryScene / walls_http.py's existing_scene_id).
+            scene_id: (!pushNow && this._afLoadedSceneId) || undefined,
           }),
         });
 
         const result = await resp.json().catch(() => ({}));
         if (!resp.ok || !result.success) {
           throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+
+        if (!pushNow && result.scene_save_error) {
+          throw new Error(result.scene_save_error);
+        }
+
+        if (!pushNow && result.scene_id) {
+          // Now editable in place on the next save, and selectable again
+          // (e.g. after switching walls and back) without re-picking it.
+          this._afLoadedSceneId = result.scene_id;
+          await this._loadScenes();
+          const sceneSelect = root.getElementById('art-factory-scene-select');
+          if (sceneSelect) {
+            sceneSelect.innerHTML = '<option value="">＋ New Scene…</option>';
+            this._scenes.forEach(s => {
+              const opt = document.createElement('option');
+              opt.value = s.scene_id;
+              opt.textContent = s.name;
+              sceneSelect.appendChild(opt);
+            });
+            sceneSelect.value = result.scene_id;
+          }
         }
 
         if (fb) {

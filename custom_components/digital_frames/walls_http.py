@@ -233,6 +233,11 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             push_now = push_now.lower() in ("true", "1", "yes")
 
         scene_name = (body.get("scene_name") or f"{wall.name} Spanned").strip()
+        # When editing a previously-saved wallpaper scene, the caller passes
+        # its id back so this save updates it in place -- without this,
+        # async_save_scene(scene_id=None) treats every save as "create new"
+        # and rejects a name that already belongs to a different scene_id.
+        existing_scene_id = body.get("scene_id") or None
 
         save_to_library = body.get("save_to_library", False)
         if isinstance(save_to_library, str):
@@ -321,10 +326,17 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
         if not master_bytes:
             return self.json_message("Failed to produce master image for wall span", status_code=500)
 
-        # Save master image to library if requested or if saving a scene
-        saved_image_id: str | None = None
+        # Save master image to library if requested or if saving a scene --
+        # unless it's already a library image (source_type "library"), in
+        # which case that image_id IS the saved image; re-uploading it as a
+        # new "wall_span_*.png" record every save would pile up duplicate
+        # copies of the same background (e.g. every time an existing
+        # wallpaper scene is re-opened and re-saved) instead of referencing
+        # the one original -- exactly the duplicate-asset-per-save the
+        # crop-based scene model exists to avoid.
+        saved_image_id: str | None = image_id if source_type == "library" else None
         lib_mgr = hass.data.get(DOMAIN, {}).get("_library")
-        if (save_to_library or save_scene) and lib_mgr is not None:
+        if saved_image_id is None and (save_to_library or save_scene) and lib_mgr is not None:
             import uuid  # noqa: PLC0415
             filename = f"wall_span_{uuid.uuid4().hex[:8]}.png"
             try:
@@ -404,6 +416,7 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
 
         # Save Scene if requested
         scene_id: str | None = None
+        scene_save_error: str | None = None
         if save_scene and saved_image_id and scene_mappings:
             scene_mgr = hass.data.get(DOMAIN, {}).get("_scenes")
             if scene_mgr is not None:
@@ -411,15 +424,22 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
                     scene_record = await scene_mgr.async_save_scene(
                         name=scene_name,
                         mappings=scene_mappings,
+                        scene_id=existing_scene_id,
                         album="Wall Spans",
                     )
                     scene_id = scene_record.get("scene_id")
                 except Exception as err:  # noqa: BLE001
+                    # Surfaced to the caller (not just logged) -- silently
+                    # swallowing this left the wallpaper editor's "Save as
+                    # Scene" reporting success even when e.g. the scene
+                    # being edited had been deleted elsewhere since it was
+                    # loaded, or its name collided with an unrelated scene.
+                    scene_save_error = str(err)
                     _LOGGER.warning("Failed to save scene for wall span: %s", err)
 
         failed = [r for r in results if push_now and not r.get("sent")]
 
-        return self.json({
+        response: dict[str, Any] = {
             "success": True,
             "wall_id": wall_id,
             "saved_image_id": saved_image_id,
@@ -428,7 +448,10 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             "crop_boxes": geometry.crop_boxes,
             "results": results,
             "frames_failed": len(failed),
-        })
+        }
+        if scene_save_error:
+            response["scene_save_error"] = scene_save_error
+        return self.json(response)
 
 
 def _generate_pil_wall_span_image(width: int, height: int, prompt: str) -> bytes:

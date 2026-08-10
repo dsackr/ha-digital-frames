@@ -16,6 +16,22 @@ const IMAGES = [
   { image_id: 'img_bg_1', filename: 'sunset.png', albums: ['Images'] },
 ];
 
+const SCENES = [
+  {
+    scene_id: 'scene_wallpaper_1',
+    name: 'Existing Wallpaper',
+    mappings: {
+      entry_1: { type: 'image_crop', image_id: 'img_bg_1', crop_box: [0, 0, 0.5, 1] },
+      entry_2: { type: 'image_crop', image_id: 'img_bg_1', crop_box: [0.5, 0, 1, 1] },
+    },
+  },
+  {
+    scene_id: 'scene_plain_1',
+    name: 'Ordinary Per-Frame Scene',
+    mappings: { entry_1: 'img_bg_1' },
+  },
+];
+
 async function openArtFactoryTab(page) {
   await page.evaluate(() => {
     document.getElementById('panel').shadowRoot.querySelector('.tab-btn[data-tab="art_factory"]').click();
@@ -31,7 +47,7 @@ test.describe('Art Factory AI Generation & Wallpaper Studio (KPF 36, 37, 38)', (
   let baseUrl;
 
   test.beforeEach(async () => {
-    mockServer = createMockServer({ frames: FRAMES, images: IMAGES });
+    mockServer = createMockServer({ frames: FRAMES, images: IMAGES, scenes: SCENES });
     baseUrl = await mockServer.start();
   });
 
@@ -252,6 +268,87 @@ test.describe('Art Factory AI Generation & Wallpaper Studio (KPF 36, 37, 38)', (
     // wider than any single frame's own resolution, proving this is the
     // wall's aggregate size, not one frame's.
     expect(sizeValue).toBe(`${1200 * FRAMES.length}x1600`);
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('the scene select lists existing scenes and loading one restores its background', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openArtFactoryTab(page);
+
+    const optionLabels = await page.evaluate(() =>
+      [...document.getElementById('panel').shadowRoot.getElementById('art-factory-scene-select').options]
+        .map((o) => o.textContent)
+    );
+    expect(optionLabels).toContain('Existing Wallpaper');
+    expect(optionLabels).toContain('Ordinary Per-Frame Scene');
+    expect(optionLabels[0]).toBe('＋ New Scene…');
+
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const select = root.getElementById('art-factory-scene-select');
+      select.value = 'scene_wallpaper_1';
+      select.dispatchEvent(new Event('change'));
+    });
+
+    const state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        bgName: root.getElementById('art-factory-bg-name').textContent,
+        sceneNameInput: root.getElementById('art-factory-scene-name').value,
+        loadedSceneId: document.getElementById('panel')._afLoadedSceneId,
+      };
+    });
+    expect(state.bgName).toBe('Existing Wallpaper');
+    expect(state.sceneNameInput).toBe('Existing Wallpaper');
+    expect(state.loadedSceneId).toBe('scene_wallpaper_1');
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('loading a scene with no wallpaper background for this wall shows an error, not a false success', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openArtFactoryTab(page);
+
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const select = root.getElementById('art-factory-scene-select');
+      select.value = 'scene_plain_1';
+      select.dispatchEvent(new Event('change'));
+    });
+
+    const state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return {
+        loadedSceneId: document.getElementById('panel')._afLoadedSceneId,
+        fbText: root.getElementById('art-factory-fb').textContent,
+      };
+    });
+    expect(state.loadedSceneId).toBeNull();
+    expect(state.fbText).toContain('no wallpaper background');
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('re-saving a loaded scene threads its scene_id so the save updates it in place', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openArtFactoryTab(page);
+
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const select = root.getElementById('art-factory-scene-select');
+      select.value = 'scene_wallpaper_1';
+      select.dispatchEvent(new Event('change'));
+    });
+
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('art-factory-save-scene-btn').click();
+    });
+    await page.waitForTimeout(300);
+
+    expect(mockServer.wallSpanCalls.length).toBe(1);
+    expect(mockServer.wallSpanCalls[0].body.scene_id).toBe('scene_wallpaper_1');
+    expect(mockServer.wallSpanCalls[0].body.push_now).toBe(false);
 
     expect(pageErrors).toHaveLength(0);
   });
