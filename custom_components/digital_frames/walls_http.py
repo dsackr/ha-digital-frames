@@ -5,6 +5,7 @@ Endpoints:
     POST   /api/digital_frames/walls               create a wall ({name, placements})
     POST   /api/digital_frames/walls/{wall_id}     update a wall ({name, placements})
     DELETE /api/digital_frames/walls/{wall_id}     delete a wall
+    GET    /api/digital_frames/walls/{wall_id}/geometry   read-only aggregate canvas size + crop boxes
 """
 
 from __future__ import annotations
@@ -131,6 +132,51 @@ class DigitalFramesWallView(HomeAssistantView):
         return self.json({"success": True})
 
 
+class DigitalFramesWallGeometryView(HomeAssistantView):
+    """GET a wall's aggregate spanned-canvas size + per-frame crop boxes,
+    with no generation or send side effects -- the wallpaper editor uses
+    this purely to size a "generate for this wall" request and to preview
+    what a save/send would compute, before either happens."""
+
+    url = "/api/digital_frames/walls/{wall_id}/geometry"
+    name = "api:digital_frames:walls:geometry"
+    requires_auth = True
+
+    async def get(self, request: web.Request, wall_id: str) -> web.Response:
+        hass = request.app["hass"]
+        wall_mgr = _get_wall_manager(hass)
+
+        wall = await wall_mgr.async_get_wall(wall_id)
+        if wall is None:
+            return self.json_message(f"Wall '{wall_id}' not found", status_code=404)
+
+        member_entry_ids = request.query.get("member_entry_ids")
+        if member_entry_ids:
+            member_entry_ids = [eid for eid in member_entry_ids.split(",") if eid]
+        else:
+            member_entry_ids = None
+
+        preserve_bezel_gaps = request.query.get("preserve_bezel_gaps", "true")
+        preserve_bezel_gaps = preserve_bezel_gaps.lower() in ("true", "1", "yes")
+
+        from .wall_geometry import WallGeometryError, compute_2d_wall_canvas_geometry  # noqa: PLC0415
+
+        try:
+            geometry = compute_2d_wall_canvas_geometry(
+                hass, wall, member_entry_ids, preserve_bezel_gaps=preserve_bezel_gaps
+            )
+        except WallGeometryError as err:
+            return self.json_message(str(err), status_code=400)
+
+        return self.json({
+            "success": True,
+            "wall_id": wall_id,
+            "canvas_width": geometry.canvas_width,
+            "canvas_height": geometry.canvas_height,
+            "crop_boxes": geometry.crop_boxes,
+        })
+
+
 class DigitalFramesWallSpanImageView(HomeAssistantView):
     """Span an image (AI generated, library photo, or upload) across a 2D wall layout."""
 
@@ -177,6 +223,15 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
         if isinstance(save_scene, str):
             save_scene = save_scene.lower() in ("true", "1", "yes")
 
+        # Whether to actually push wire bytes to the physical frames right
+        # now. Defaults True so existing "Send to Frames" callers (and the
+        # old span_image behavior) are unaffected; the wallpaper editor's
+        # "Save as Scene" action sets this False so building/previewing a
+        # scene never touches hardware.
+        push_now = body.get("push_now", True)
+        if isinstance(push_now, str):
+            push_now = push_now.lower() in ("true", "1", "yes")
+
         scene_name = (body.get("scene_name") or f"{wall.name} Spanned").strip()
 
         save_to_library = body.get("save_to_library", False)
@@ -215,7 +270,7 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             if lib_mgr is None:
                 return self.json_message("Library manager not initialised", status_code=500)
             try:
-                master_bytes = await lib_mgr.get_original(image_id)
+                master_bytes, _content_type = await lib_mgr.async_get_original(image_id)
             except Exception as err:  # noqa: BLE001
                 return self.json_message(f"Failed to read image '{image_id}': {err}", status_code=400)
 
@@ -293,34 +348,35 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             if entry is None:
                 continue
 
-            try:
-                codec_id = panel_codec_for_entry(entry).id
-            except Exception:  # noqa: BLE001
-                codec_id = None
+            if push_now:
+                try:
+                    codec_id = panel_codec_for_entry(entry).id
+                except Exception:  # noqa: BLE001
+                    codec_id = None
 
-            spec = render_spec_for_hass_entry(hass, entry)
-            wire_bytes, preview_png = encode_for_panel_with_preview(
-                source_bytes=master_bytes,
-                width=spec.width,
-                height=spec.height,
-                rotation=spec.rotation,
-                locked=spec.locked,
-                codec_id=codec_id,
-                crop_box=crop_box,
-            )
-
-            coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
-            if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
-                await coordinator.async_send_image_or_queue(
-                    wire_bytes=wire_bytes,
-                    preview_png=preview_png,
-                    image_id=saved_image_id,
+                spec = render_spec_for_hass_entry(hass, entry)
+                wire_bytes, preview_png = encode_for_panel_with_preview(
+                    source_bytes=master_bytes,
+                    width=spec.width,
+                    height=spec.height,
+                    rotation=spec.rotation,
+                    locked=spec.locked,
+                    codec_id=codec_id,
+                    crop_box=crop_box,
                 )
+
+                coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+                if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
+                    await coordinator.async_send_image_or_queue(
+                        wire_bytes=wire_bytes,
+                        preview_png=preview_png,
+                        image_id=saved_image_id,
+                    )
 
             results.append({
                 "entry_id": entry_id,
                 "crop_box": crop_box,
-                "sent": True,
+                "sent": push_now,
             })
 
             if saved_image_id:

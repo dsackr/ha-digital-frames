@@ -14,6 +14,7 @@ from custom_components.digital_frames.walls import (
     KIND_DEFAULT,
     WallError,
     WallManager,
+    tile_dims,
 )
 
 
@@ -267,3 +268,50 @@ async def test_auto_layout_does_not_overlap_after_removing_and_readding_a_frame(
     assert len(coords) == len(set(coords)), (
         f"two placements share the same (x, y): {coords}"
     )
+
+
+# ---------------------------------------------------------------------------
+# tile_dims(): physical-scale on-canvas sizing (KPF: Art Factory wallpaper mode)
+# ---------------------------------------------------------------------------
+
+
+def test_tile_dims_reference_13_3_matches_pre_existing_pixel_size(make_frame_entry):
+    """The 13.3"/1200x1600 reference frame must render at exactly its
+    original 105x140 -- every wall saved before the physical-scale fix used
+    that pixel size, and this pins it so existing layouts don't shift."""
+    entry = make_frame_entry(width=1200, height=1600, size="13.3")
+    assert tile_dims(entry) == (105, 140)
+
+
+def test_tile_dims_31_5_is_physically_larger_than_13_3(make_frame_entry):
+    """A 31.5" panel must render visibly larger than a 13.3" one on a mixed
+    wall -- normalizing each tile to a common longest-*pixel*-edge (the
+    pre-fix behavior) made every frame type the same on-canvas size
+    regardless of its real physical footprint."""
+    small = make_frame_entry(entry_id="e-small", width=1200, height=1600, size="13.3")
+    large = make_frame_entry(entry_id="e-large", width=1440, height=2560, size="31.5")
+
+    small_w, small_h = tile_dims(small)
+    large_w, large_h = tile_dims(large)
+
+    assert large_w > small_w
+    assert large_h > small_h
+    # Roughly proportional to the diagonal-size ratio (31.5 / 13.3 ~= 2.37),
+    # not identical (the pre-fix bug) or wildly off (a units mistake).
+    assert 2.0 < (large_h / small_h) < 3.0
+
+
+def test_tile_dims_clone_size_label_parses_same_as_official(make_frame_entry):
+    """"13.3_clone" must scale identically to "13.3" -- only the leading
+    numeric diagonal matters, not the origin suffix."""
+    official = make_frame_entry(entry_id="e-official", width=1200, height=1600, size="13.3")
+    clone = make_frame_entry(entry_id="e-clone", width=1200, height=1600, size="13.3_clone")
+    assert tile_dims(official) == tile_dims(clone)
+
+
+def test_tile_dims_non_numeric_size_label_falls_back_to_pixel_formula(make_frame_entry):
+    """Meural/Samsung store a driver label (not an inch figure) in
+    CONF_SIZE -- with no physical size to go on, this must reproduce the
+    original longest-pixel-edge formula exactly rather than guess."""
+    entry = make_frame_entry(width=800, height=480, size="meural")
+    assert tile_dims(entry) == (140, 84)

@@ -734,6 +734,28 @@ function createMockServer({
         return json(res, 200, { success: true, wall });
       }
     }
+    const geometryMatch = p.match(/^\/api\/digital_frames\/walls\/([^/]+)\/geometry$/);
+    if (geometryMatch && req.method === 'GET') {
+      const wallId = geometryMatch[1];
+      const wall = wallList.find((w) => w.wall_id === wallId);
+      if (!wall) return json(res, 404, { message: `Wall '${wallId}' not found` });
+      const memberIds = Object.keys(wall.placements || {});
+      if (!memberIds.length) return json(res, 400, { message: 'No frames given to compute 2D wall canvas geometry' });
+      // Simplified stand-in for wall_geometry.py's real bounding-box math --
+      // plausible, deterministic numbers are enough for panel-side tests,
+      // which never assert exact pixel values here (those live in the
+      // Python test suite against the real implementation).
+      const cropBoxes = {};
+      memberIds.forEach((id, i) => { cropBoxes[id] = [i / memberIds.length, 0, (i + 1) / memberIds.length, 1]; });
+      return json(res, 200, {
+        success: true,
+        wall_id: wallId,
+        canvas_width: 1200 * memberIds.length,
+        canvas_height: 1600,
+        crop_boxes: cropBoxes,
+      });
+    }
+
     const spanMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)\/span_image$/);
     if (spanMatch && req.method === 'POST') {
       const wallId = spanMatch[1];

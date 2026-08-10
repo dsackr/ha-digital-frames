@@ -11,6 +11,7 @@ automations, voice control, or any entity platform.
 from __future__ import annotations
 
 import math
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from homeassistant.helpers.storage import Store
 from .const import (
     CONF_HEIGHT,
     CONF_ORIENTATION,
+    CONF_SIZE,
     CONF_WIDTH,
     DOMAIN,
     KIND_SCENES_HUB,
@@ -64,9 +66,64 @@ _MARGIN_LEFT = _CELL * 2
 _MARGIN_TOP = _CELL * 2
 
 
+_SIZE_LEADING_NUMBER_RE = re.compile(r"^([\d.]+)")
+
+# Calibration reference: an official 13.3" panel (1200x1600) is the most
+# common frame in the wild, so tile_dims() is pinned to reproduce its exact
+# pre-existing on-canvas size (105x140) -- every other physical size scales
+# relative to that reference instead of getting independently renormalized.
+_REFERENCE_DIAGONAL_IN = 13.3
+_REFERENCE_RESOLUTION = (1200, 1600)
+
+
+def _parse_diagonal_inches(size_label: Any) -> float | None:
+    """Diagonal inches from a CONF_SIZE label (e.g. "31.5", "13.3_clone").
+    None if the label is missing or doesn't start with a number."""
+    if not isinstance(size_label, str):
+        return None
+    match = _SIZE_LEADING_NUMBER_RE.match(size_label.strip())
+    return float(match.group(1)) if match else None
+
+
+def _physical_dims_inches(
+    diagonal_in: float, width_px: int, height_px: int
+) -> tuple[float, float]:
+    """A panel's physical (width, height) in inches from its diagonal size
+    and pixel aspect ratio -- diagonal^2 = w^2 + h^2 with w/h fixed by the
+    resolution."""
+    aspect = width_px / height_px if height_px else 1.0
+    height_in = diagonal_in / math.sqrt(aspect * aspect + 1)
+    return height_in * aspect, height_in
+
+
+def _reference_px_per_inch() -> float:
+    ref_w_in, ref_h_in = _physical_dims_inches(_REFERENCE_DIAGONAL_IN, *_REFERENCE_RESOLUTION)
+    return _TILE_TARGET_LONGEST / max(ref_w_in, ref_h_in)
+
+
+# Computed once at import: pixels-per-inch that makes the reference 13.3"
+# panel's longest physical edge equal _TILE_TARGET_LONGEST px. Applying this
+# same constant to every frame's own physical size (rather than
+# renormalizing each frame's longest *pixel* edge independently) is what
+# keeps a 31.5" panel visibly larger on canvas than a 13.3" one.
+_PX_PER_INCH = _reference_px_per_inch()
+
+
 def tile_dims(entry: "ConfigEntry") -> tuple[int, int]:
-    """A frame's on-canvas tile size (px), aspect-correct and orientation-
-    aware -- the backend twin of the panel's _wallTileDims."""
+    """A frame's on-canvas tile size (px), aspect-correct, orientation-aware,
+    and scaled to the panel's true physical size -- the backend twin of the
+    panel's _wallTileDims.
+
+    Two panels with different pixel resolutions but the same diagonal size
+    (or vice versa) must render at their correct *relative* size on a wall
+    that mixes frame types -- scaling each tile independently to a common
+    longest-*pixel*-edge target (the pre-KPF behavior) made a 31.5" panel
+    look the same size as a 13.3" one. CONF_SIZE's diagonal-inch label plus
+    the resolution's aspect ratio gives true physical width/height; a frame
+    whose CONF_SIZE isn't a parseable inch figure (Meural/Samsung store a
+    driver label there instead, e.g. "meural") has no physical size to go
+    on, so it falls back to the original longest-pixel-edge formula as-is.
+    """
     width = entry.data.get(CONF_WIDTH) or 1200
     height = entry.data.get(CONF_HEIGHT) or 1600
     orientation = entry.options.get(CONF_ORIENTATION)
@@ -74,8 +131,19 @@ def tile_dims(entry: "ConfigEntry") -> tuple[int, int]:
         width, height = height, width
     if orientation == ORIENTATION_LANDSCAPE and height > width:
         width, height = height, width
-    scale = _TILE_TARGET_LONGEST / max(width, height)
-    return round(width * scale), round(height * scale)
+
+    diagonal_in = _parse_diagonal_inches(entry.data.get(CONF_SIZE))
+    if diagonal_in is None:
+        # No parseable diagonal (Meural/Samsung's CONF_SIZE is a driver
+        # label like "meural", not an inch figure, and a malformed/legacy
+        # entry could have no size at all) -- physical scale is undefined,
+        # so fall back to the original longest-pixel-edge normalization
+        # exactly rather than guessing a diagonal.
+        scale = _TILE_TARGET_LONGEST / max(width, height)
+        return round(width * scale), round(height * scale)
+
+    width_in, height_in = _physical_dims_inches(diagonal_in, width, height)
+    return round(width_in * _PX_PER_INCH), round(height_in * _PX_PER_INCH)
 
 
 class WallError(Exception):

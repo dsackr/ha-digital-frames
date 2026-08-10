@@ -826,12 +826,24 @@ An "Align Wall to Grid" option allows users to snap all
 placed frames on a wall to a clean structured layout. When aligning selected
 frames, if they would overlap each other, they are automatically spaced out
 along the other axis rather than producing a collision error.
+A tile's on-canvas size is scaled to the frame's true physical size
+(`tile_dims`/`_wallTileDims`, using `CONF_SIZE`'s diagonal-inch label plus
+the resolution's aspect ratio), not just its pixel resolution — a 31.5"
+panel renders visibly larger than a 13.3" one on a wall that mixes frame
+types, instead of both being independently normalized to the same
+longest-pixel-edge length. A frame whose size label isn't a parseable inch
+figure (Meural/Samsung store a driver label there instead) falls back to
+the old longest-pixel-edge formula, which is also what every frame got
+before this fix — so an all-13.3"/default-resolution wall renders pixel
+identical to before.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
-  `async_ensure_default_wall`, `async_ensure_placement`, `async_prune_entry`), `walls_http.py`,
-  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`).
+  `async_ensure_default_wall`, `async_ensure_placement`, `async_prune_entry`, `tile_dims`), `walls_http.py`,
+  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_setActiveWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`, `_wallTileDims`).
 - **If it silently breaks**: removed/re-added frames haunt old layouts,
-  the default wall stops tracking newly-added frames, or alignment features
-  produce layout overlaps or throw unexpected error banners. A real bug
+  the default wall stops tracking newly-added frames, mixed-frame-type
+  walls render every frame at the same size regardless of physical
+  diagonal, or alignment features produce layout overlaps or throw
+  unexpected error banners. A real bug
   fixed in the July 2026 code review: `_append_placement`'s "is this row
   empty" check trusted `len(wall.placements) % _MAX_FRAMES_PER_ROW == 0`
   rather than scanning the row's actual occupants — removing one frame
@@ -880,7 +892,12 @@ along the other axis rather than producing a collision error.
   **Backend-tested** — `tests/python/managers/test_walls.py` (custom wall
   CRUD, default-wall auto-sync, clearing/ignoring exclusions, default-wall save
   preserving omitted placements, entry removal pruning, auto-layout collision math,
-  no placement overlap after removing and re-adding a frame around a full row boundary).
+  no placement overlap after removing and re-adding a frame around a full row boundary,
+  `tile_dims`'s physical-scale sizing — the 13.3"/1200x1600 reference frame
+  pinned to its exact pre-fix pixel size, a 31.5" panel rendering visibly
+  larger than a 13.3" one, `"13.3_clone"` scaling identically to `"13.3"`,
+  and a non-numeric size label like Meural's falling back to the original
+  longest-pixel-edge formula).
 
 ## 20. Schedules: send a scene or image at a future/recurring time
 User schedules a one-shot or daily/weekly/monthly recurring send; missed
@@ -1538,30 +1555,36 @@ never happens.
 User arranges multiple frames on a Wall canvas matching their physical placement, picks or generates ONE master image (AI prompt generation, Library photo selection, or direct file upload), and spans it across all frames on the wall.
 Supports freeform 2D arrangements (multiline grids, staggered tiles, mixed orientations, and different resolutions).
 **Bezel-gap compensation** (default on) maps physical spacing between frames into the spanned canvas coordinate space so image content over physical gaps is skipped, creating a seamless visual flow across physical frames on the wall.
-The spanned result can optionally be saved to the Library or saved as a Home Assistant **Scene** (using `image_crop` mappings with exact `crop_box` slices) for re-sending or scheduling.
+The spanned result can optionally be saved to the Library or saved as a Home Assistant **Scene** (using `image_crop` mappings with exact `crop_box` slices) for re-sending or scheduling — that scene mapping is the same crop-based model KPF 38's wallpaper editor writes, so a wall-spanning scene resolves to pixels identically regardless of which UI built it.
+A `push_now` flag (default `true`) controls whether this also pushes wire bytes to the physical frames right now — `save_scene`-only calls (the wallpaper editor's "Save as Scene" action) set it `false` so building/previewing a scene never touches hardware; a bug where the send loop ran unconditionally regardless of this flag was fixed alongside KPF 38's wallpaper editor.
+A read-only `GET .../geometry` endpoint exposes the same aggregate canvas-size + crop-box computation with no generation/send side effects, for callers that just want to preview or size against it.
 - **Entry points**: `wall_geometry.py` (`compute_2d_wall_canvas_geometry`),
-  `walls_http.py` (`DigitalFramesWallSpanImageView`),
-  `__init__.py` (view registration),
-  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryWallCanvas`, `_sendArtFactorySpannedWall`).
-- **If it silently breaks**: frames show misaligned image slices, physical bezel gaps distort the spanned picture, AI generation fails without feedback, or saved scenes store invalid crop box ratios.
+  `walls_http.py` (`DigitalFramesWallSpanImageView`, `DigitalFramesWallGeometryView`),
+  `__init__.py` (view registration).
+- **If it silently breaks**: frames show misaligned image slices, physical bezel gaps distort the spanned picture, AI generation fails without feedback, saved scenes store invalid crop box ratios, or a `push_now=false` "Save as Scene" call pushes to hardware anyway.
 - **Test status**: **Backend-tested** — `tests/python/managers/test_wall_geometry.py`
   (2D spatial canvas geometry, bezel gap crop calculation, zero-gap packing, invalid frame validation),
-  `tests/python/managers/test_walls.py` (`DigitalFramesWallSpanImageView` API endpoint with AI, library, upload, bezel gaps, scene saving, and frame delivery).
-  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory studio, frame overlay dragging over generated artwork, Send to Frames, and Save as Scene).
+  `tests/python/managers/test_wall_span_image.py` (`DigitalFramesWallSpanImageView` with AI/library/upload sources, bezel gaps, scene saving, `push_now` true/false hardware-push gating, and `DigitalFramesWallGeometryView`'s read-only geometry/error responses).
 
 ## 37. OpenAPI 3.0 specification & REST API discovery
 Client applications, AI agents, and external automation systems query `GET /api/digital_frames/openapi.json` (requires Home Assistant Bearer authentication) to fetch the machine-readable OpenAPI 3.0 specification describing all endpoints, HTTP methods, parameters, and schemas exposed under `/api/digital_frames/*`.
 - **Entry points**: `http_api.py` (`DigitalFramesOpenApiView`), `__init__.py` (view registration), `docs/openapi.yaml`, `docs/API.md`.
 - **If it silently breaks**: API clients/agents receive a 404 or unauthenticated access error, or the returned JSON schema is missing endpoints or invalid OpenAPI 3.0 structure.
 
-## 38. Art Factory AI image & wall spanning studio (HA AI Task service or public AI fallback)
-Users type custom prompts in the Web App's dedicated "Art Factory" tab (`🎨 Art Factory`) to generate artwork from text prompts, visually drag wall frames over the artwork to position on-screen crops, send spanned artwork to all wall frames, or save as a Home Assistant Scene. Uses Home Assistant's native `ai_task` / `image_generator` service when available in the user's HA instance (`_find_ai_task_image_entity`), and provides a zero-config public AI generator fallback (Pollinations.ai) when no HA AI integration is configured. Generated images can be saved to the shared image library under the "AI Art" album, downloaded locally, or sent directly to any selected frame or wall layout.
+## 38. Art Factory: standalone AI generation + wallpaper mode (multi-frame wall backgrounds)
+Users type custom prompts in the Web App's dedicated "Art Factory" tab (`🎨 Art Factory`) to generate artwork from text prompts. Generation is always standalone: it produces one library image, full stop — it is never locked to, or generated "for," a particular wall. Uses Home Assistant's native `ai_task` / `image_generator` service when available in the user's HA instance (`_find_ai_task_image_entity`), and provides a zero-config public AI generator fallback (Pollinations.ai) when no HA AI integration is configured. Generated images can be saved to the shared image library under the "AI Art" album, downloaded locally, sent to a single frame, or (via an explicit "Use as Wallpaper Background" step) turned into a wallpaper background — exactly like picking any older library image for that would work too.
+
+**Wallpaper mode** is a second view onto the exact same wall the Walls tab (KPF 19) edits — not a separate "Art Factory wall." The panel physically relocates the Walls tab's real `#wall-canvas` DOM element into Art Factory's layout while this tab is showing (`_activateArtFactoryWallpaperCanvas`) and draws a different skin over it: each placed frame is a transparent, border-only window (`.af-wallpaper-tile`) instead of a thumbnail tile, sized/positioned with the same physical-scale `_wallTileDims` math as the Walls tab, over a background `<img>` stretched to exactly the wall's content bounding box (not the whole scrollable canvas viewport). Every drag/collision/persistence helper (`_wallBeginDrag`, `_onWallPointerUp`, `_scheduleWallLayoutSave`, ...) is the Walls tab's own, completely unmodified — a `_renderActiveWallCanvas()` dispatcher just routes the handful of shared render call sites to the right skin. Dragging a frame here writes to `this._wallPlacements` exactly like the Walls tab, so a position change is visible in either view immediately (verified by dragging in one and reading it back from the other). The background image itself never moves, scales, or splits — only frame positions do, and whatever falls inside a frame's boundary is exactly what a save/send will crop, since the crop is just that frame's own wall position mapped into the background image's bounding box (`wall_geometry.compute_2d_wall_canvas_geometry`, KPF 36) — no new "frame_crop" entity was needed since the existing `image_crop` scene mapping (image_id + crop_box, resolved to pixels only at send time) already fit exactly.
+
+A "Use This Wall's Size for Generation" button reads the wall's aggregate spanned-canvas size (`GET .../geometry`, KPF 36) and injects it as a custom option in the generator's Canvas Size dropdown — satisfying "size the generation for the whole wall" without coupling generation to any wall record. "Save as Scene" and "Send to Frames Now" both post to `DigitalFramesWallSpanImageView` with `source_type: "library"` and the chosen background's `image_id`, differing only in `push_now` (KPF 36): Save as Scene builds/updates a crop-based scene without touching hardware; Send to Frames Now pushes immediately. Both first flush any in-flight debounced drag save (`_flushWallLayoutSave`) so the backend computes crops against the latest positions, not a stale wall record.
+
+Viewed from the Walls tab, a wallpaper-based scene shows normally: each frame's own resolved crop, per KPF 19's existing per-frame rendering — the Walls tab has no "background image" concept and never needs one.
 - **Entry points**: `art_factory_http.py` (`DigitalFramesArtFactoryStatusView`, `DigitalFramesArtFactoryGenerateView`, `async_generate_ai_art_image`),
   `__init__.py` (view registrations),
-  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryWallCanvas`, `_sendArtFactorySpannedWall`, `_renderArtFactoryHistory`).
-- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, frame overlay dragging fails, or generated images fail to upload to the library.
+  `digital-frames-panel.js` (`_initArtFactoryTab`, `_activateArtFactoryWallpaperCanvas`, `_deactivateArtFactoryWallpaperCanvas`, `_renderArtFactoryWallpaperCanvas`, `_renderActiveWallCanvas`, `_openWallForArtFactory`, `_setActiveWall`, `_sendArtFactoryWallpaper`, `_selectArtFactoryBackground`, `_openArtFactoryBgPicker`, `_useArtFactoryWallSizeForGeneration`, `_wallContentBoundingBox`).
+- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, the wall `<select>` renders empty (a prior bug: it was only ever populated once, at tab-init time, with no re-population once wall/frame data actually landed), the canvas fails to relocate/re-skin (frames show as thumbnails or nothing renders), a drag in one view doesn't show up in the other, or generated images fail to upload to the library.
 - **Test status**: **Backend-tested** — `tests/python/managers/test_art_factory.py` (status endpoint, prompt generation with HA `ai_task` and public fallback, library upload, direct frame delivery).
-  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory studio tab, status badge load, typing prompt, clicking Generate Image, interactive frame canvas drag overlays, Send to Frames, and Save as Scene).
+  **Panel-tested** — `tests/panel/art-factory.spec.js` (engine status badge load; wall `<select>` populates and the canvas shows one transparent window per placed frame; dragging a frame in the wallpaper editor updates the same wall the Walls tab shows; choosing a background from the library; generating artwork and using the result as a wallpaper background without it ever being wall-locked; Save as Scene posting `push_now: false` vs Send to Frames Now posting `push_now: true`; the wall-size hint/"Use This Wall's Size" button reflecting the wall's aggregate geometry, not one frame's).
 
 ---
 

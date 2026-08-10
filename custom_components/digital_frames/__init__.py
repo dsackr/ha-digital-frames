@@ -274,11 +274,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .walls_http import (  # noqa: PLC0415
         DigitalFramesWallsView,
         DigitalFramesWallView,
+        DigitalFramesWallGeometryView,
         DigitalFramesWallSpanImageView,
     )
 
     hass.http.register_view(DigitalFramesWallsView())
     hass.http.register_view(DigitalFramesWallView())
+    hass.http.register_view(DigitalFramesWallGeometryView())
     hass.http.register_view(DigitalFramesWallSpanImageView())
 
     from .art_factory_http import (  # noqa: PLC0415
