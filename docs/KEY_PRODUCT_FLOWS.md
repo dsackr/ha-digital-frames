@@ -84,12 +84,27 @@ set. Legacy entries without a size still get a one-time Frame Type field.
 
 Advanced settings (scan interval, fast poll when queued, hanging edge) and
 actions (Reconnect Frame, Remove from HA) are under expandable Advanced Settings.
-- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`, `_flowFieldLabelFallback`).
+
+**Flip Landscape Image default**: official Fraimic Canvas panels (`size`
+`13.3` and `31.5` — both the standard and large sizes) are portrait-native,
+so an unlocked landscape image lands upside down on the physical frame
+unless flipped. Since Fraimic is this project's primary, most-common
+hardware, `rotate_landscape_180` now defaults **on** for those two sizes
+(`helpers.default_rotate_landscape_180`) instead of requiring every user to
+discover and tick the box — both in the options form's displayed default
+and in `render_spec_for_entry`'s actual rotation when the option has never
+been explicitly saved. Community clones (`13.3_clone`, `7.3`) and Meural/
+Samsung are unaffected and still default off. Saving the options form with
+the box unticked (an explicit `False`) always overrides the default.
+- **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`, `_flowFieldLabelFallback`), `helpers.py` (`default_rotate_landscape_180`).
 - **If it silently breaks**: settings don't stick, labels show snake_case
-  keys, Frame Type reappears for normal entries, or the orientation lock
-  resets when saving an unrelated field.
+  keys, Frame Type reappears for normal entries, the orientation lock
+  resets when saving an unrelated field, or landscape images on official
+  Fraimic panels are upside down again by default.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`, `frame-manage.spec.js`).
-  **Backend-tested** — `tests/python/config_flow/test_config_flow_options.py`.
+  **Backend-tested** — `tests/python/config_flow/test_config_flow_options.py`
+  (including `test_official_fraimic_sizes_default_landscape_flip_on`,
+  `test_clone_size_does_not_default_landscape_flip_on`).
 
 ## 3. Coordinator polling & IP self-healing
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
@@ -856,7 +871,12 @@ orientation (e.g. a portrait-mounted frame always showing "Landscape
   (and anything following it in Auto mode) is backwards for every
   native-orientation frame.
 - **Test status**: **Backend-tested** —
-  `tests/python/unit/test_helpers_render_spec.py`, `tests/python/library/test_crop_aspect_ratio_and_lock.py` (`test_unlocked_frame_natural_orientation_selection`), and `tests/python/coordinator/test_coordinator_polling.py` (`test_accelerometer_polling_success` -- native/portrait reading; `test_accelerometer_polling_rotated_90_degrees` -- rotated reading).
+  `tests/python/unit/test_helpers_render_spec.py` (including
+  `test_official_fraimic_landscape_flips_by_default`,
+  `test_official_fraimic_landscape_default_flip_can_be_disabled`,
+  `test_non_fraimic_size_landscape_does_not_flip_by_default` — the
+  `default_rotate_landscape_180` unlocked-landscape default for official
+  Fraimic sizes), `tests/python/library/test_crop_aspect_ratio_and_lock.py` (`test_unlocked_frame_natural_orientation_selection`), and `tests/python/coordinator/test_coordinator_polling.py` (`test_accelerometer_polling_success` -- native/portrait reading; `test_accelerometer_polling_rotated_90_degrees` -- rotated reading).
 
 ## 23. Frame-type registry, PanelCodec ids & byte-layout dispatch
 Declares every supported physical panel (resolution, **codec_id** /
@@ -1432,25 +1452,26 @@ The spanned result can optionally be saved to the Library or saved as a Home Ass
 - **Entry points**: `wall_geometry.py` (`compute_2d_wall_canvas_geometry`),
   `walls_http.py` (`DigitalFramesWallSpanImageView`),
   `__init__.py` (view registration),
-  `digital-frames-panel.js` (`_openWallImageSpanModal`, `_sendWallSpannedImage`).
+  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryWallCanvas`, `_sendArtFactorySpannedWall`).
 - **If it silently breaks**: frames show misaligned image slices, physical bezel gaps distort the spanned picture, AI generation fails without feedback, or saved scenes store invalid crop box ratios.
 - **Test status**: **Backend-tested** — `tests/python/managers/test_wall_geometry.py`
   (2D spatial canvas geometry, bezel gap crop calculation, zero-gap packing, invalid frame validation),
   `tests/python/managers/test_walls.py` (`DigitalFramesWallSpanImageView` API endpoint with AI, library, upload, bezel gaps, scene saving, and frame delivery).
-  **Panel-tested** — `tests/panel/walls-span-image.spec.js` (opening the modal, toggling bezel gaps, AI prompt generation, library photo pick, file upload, saving a scene, sending to wall).
+  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory studio, frame overlay dragging over generated artwork, Send to Frames, and Save as Scene).
 
 ## 37. OpenAPI 3.0 specification & REST API discovery
 Client applications, AI agents, and external automation systems query `GET /api/digital_frames/openapi.json` (requires Home Assistant Bearer authentication) to fetch the machine-readable OpenAPI 3.0 specification describing all endpoints, HTTP methods, parameters, and schemas exposed under `/api/digital_frames/*`.
 - **Entry points**: `http_api.py` (`DigitalFramesOpenApiView`), `__init__.py` (view registration), `docs/openapi.yaml`, `docs/API.md`.
 - **If it silently breaks**: API clients/agents receive a 404 or unauthenticated access error, or the returned JSON schema is missing endpoints or invalid OpenAPI 3.0 structure.
-## 38. Art Factory AI image generation (HA AI Task service or public AI fallback)
-Users type custom prompts in the Web App's dedicated "Art Factory" tab (`🎨 Art Factory`) to generate artwork from text prompts. Uses Home Assistant's native `ai_task` / `image_generator` service when available in the user's HA instance (`_find_ai_task_image_entity`), and provides a zero-config public AI generator fallback (Pollinations.ai) when no HA AI integration is configured. Generated images can be saved to the shared image library under the "AI Art" album, downloaded locally, or sent directly to any selected frame or wall layout.
+
+## 38. Art Factory AI image & wall spanning studio (HA AI Task service or public AI fallback)
+Users type custom prompts in the Web App's dedicated "Art Factory" tab (`🎨 Art Factory`) to generate artwork from text prompts, visually drag wall frames over the artwork to position on-screen crops, send spanned artwork to all wall frames, or save as a Home Assistant Scene. Uses Home Assistant's native `ai_task` / `image_generator` service when available in the user's HA instance (`_find_ai_task_image_entity`), and provides a zero-config public AI generator fallback (Pollinations.ai) when no HA AI integration is configured. Generated images can be saved to the shared image library under the "AI Art" album, downloaded locally, or sent directly to any selected frame or wall layout.
 - **Entry points**: `art_factory_http.py` (`DigitalFramesArtFactoryStatusView`, `DigitalFramesArtFactoryGenerateView`, `async_generate_ai_art_image`),
   `__init__.py` (view registrations),
-  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryHistory`).
-- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, or generated images fail to upload to the library.
+  `digital-frames-panel.js` (`_initArtFactoryTab`, `_renderArtFactoryWallCanvas`, `_sendArtFactorySpannedWall`, `_renderArtFactoryHistory`).
+- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, frame overlay dragging fails, or generated images fail to upload to the library.
 - **Test status**: **Backend-tested** — `tests/python/managers/test_art_factory.py` (status endpoint, prompt generation with HA `ai_task` and public fallback, library upload, direct frame delivery).
-  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory tab, status badge load, typing prompt, clicking Generate Image, preview rendering, and sending to frame).
+  **Panel-tested** — `tests/panel/art-factory.spec.js` (opening Art Factory studio tab, status badge load, typing prompt, clicking Generate Image, interactive frame canvas drag overlays, Send to Frames, and Save as Scene).
 
 ---
 

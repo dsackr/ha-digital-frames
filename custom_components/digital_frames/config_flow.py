@@ -56,6 +56,7 @@ from .const import (
 )
 from .frame_types import FRAME_TYPES
 from .helpers import (
+    default_rotate_landscape_180,
     detect_frame_type_from_info,
     device_key_from_info,
     dimensions_from_info,
@@ -766,7 +767,7 @@ class DigitalFramesOptionsFlow(OptionsFlow):
             CONF_ROTATE_PORTRAIT_180, False
         )
         current_rotate_landscape: bool = self.config_entry.options.get(
-            CONF_ROTATE_LANDSCAPE_180, False
+            CONF_ROTATE_LANDSCAPE_180, default_rotate_landscape_180(self.config_entry)
         )
 
         # Entries created before CONF_SIZE existed have no size on file --

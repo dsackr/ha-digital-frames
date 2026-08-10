@@ -21,6 +21,7 @@ from custom_components.digital_frames.const import (
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATE_PORTRAIT_180,
     CONF_ROTATION_EDGE,
+    CONF_SIZE,
     CONF_WIDTH,
     DRIVER_MEURAL,
     EDGE_LEFT,
@@ -35,11 +36,14 @@ from custom_components.digital_frames.helpers import (
 )
 
 
-def _entry(width: int, height: int, **options) -> SimpleNamespace:
+def _entry(width: int, height: int, *, size: str | None = None, **options) -> SimpleNamespace:
     """A minimal stand-in for ConfigEntry -- render_spec_for_entry only
     reads entry.data[...] and entry.options.get(...)."""
+    data: dict = {CONF_WIDTH: width, CONF_HEIGHT: height}
+    if size is not None:
+        data[CONF_SIZE] = size
     return SimpleNamespace(
-        data={CONF_WIDTH: width, CONF_HEIGHT: height},
+        data=data,
         options=options,
     )
 
@@ -181,6 +185,30 @@ def test_180_flip_composes_with_lock_rotation():
     )
     assert spec.rotation == (90 + 180) % 360
     assert spec.locked is True
+
+
+@pytest.mark.parametrize("size", ["13.3", "31.5"])
+def test_official_fraimic_landscape_flips_by_default(size):
+    # Official Fraimic Canvas panels (both sizes) are portrait-native and
+    # land unlocked landscape images upside down unless flipped -- default
+    # this on so the primary hardware doesn't require ticking the option.
+    native_w, native_h = (1200, 1600) if size == "13.3" else (1440, 2560)
+    spec = render_spec_for_entry(_entry(native_h, native_w, size=size))
+    assert spec.rotation == 180
+
+
+@pytest.mark.parametrize("size", ["13.3", "31.5"])
+def test_official_fraimic_landscape_default_flip_can_be_disabled(size):
+    native_w, native_h = (1200, 1600) if size == "13.3" else (1440, 2560)
+    spec = render_spec_for_entry(
+        _entry(native_h, native_w, size=size, **{CONF_ROTATE_LANDSCAPE_180: False})
+    )
+    assert spec.rotation == 0
+
+
+def test_non_fraimic_size_landscape_does_not_flip_by_default():
+    spec = render_spec_for_entry(_entry(2560, 1440, size="13.3_clone"))
+    assert spec.rotation == 0
 
 
 def test_variant_cache_key_distinguishes_rotation_and_lock_combinations():

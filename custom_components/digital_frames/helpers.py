@@ -117,6 +117,19 @@ def orientation_for_hass_entry(
     return orientation_for_entry(entry, device_orientation=device_orientation)
 
 
+# Official Fraimic Canvas sizes (see frame_types.FRAME_TYPES) whose native
+# Spectra buffer lands unlocked landscape images upside down unless flipped.
+# Fraimic is this project's primary hardware and by far the most common
+# panel in use, so default the flip on for these two sizes instead of
+# requiring every user to discover and tick CONF_ROTATE_LANDSCAPE_180.
+_LANDSCAPE_FLIP_DEFAULT_SIZES = frozenset({"13.3", "31.5"})
+
+
+def default_rotate_landscape_180(entry: "ConfigEntry") -> bool:
+    """Whether CONF_ROTATE_LANDSCAPE_180 should default on for *entry*."""
+    return entry.data.get(CONF_SIZE) in _LANDSCAPE_FLIP_DEFAULT_SIZES
+
+
 def render_spec_for_entry(
     entry: "ConfigEntry",
     *,
@@ -159,7 +172,9 @@ def render_spec_for_entry(
     # 180-degree flip is keyed off the *effective* orientation the viewer
     # sees, and composes with any lock rotation above.
     eff_is_landscape = eff_w > eff_h
-    if eff_is_landscape and entry.options.get(CONF_ROTATE_LANDSCAPE_180):
+    if eff_is_landscape and entry.options.get(
+        CONF_ROTATE_LANDSCAPE_180, default_rotate_landscape_180(entry)
+    ):
         rotation = (rotation + 180) % 360
     elif not eff_is_landscape and entry.options.get(CONF_ROTATE_PORTRAIT_180):
         rotation = (rotation + 180) % 360

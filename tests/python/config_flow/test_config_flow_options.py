@@ -54,6 +54,33 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     assert "resolution" not in field_names
 
 
+async def test_official_fraimic_sizes_default_landscape_flip_on(hass, make_frame_entry):
+    """13.3"/31.5" are portrait-native; unlocked landscape images land
+    upside down unless flipped, so the option defaults on without the user
+    ever having saved it (options dict starts empty at add time)."""
+    entry = make_frame_entry(size="13.3")
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    defaults = {
+        str(k): k.default() for k in schema if getattr(k, "default", None) is not None
+    }
+    assert defaults[CONF_ROTATE_LANDSCAPE_180] is True
+
+
+async def test_clone_size_does_not_default_landscape_flip_on(hass, make_frame_entry):
+    entry = make_frame_entry(size="13.3_clone")
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    defaults = {
+        str(k): k.default() for k in schema if getattr(k, "default", None) is not None
+    }
+    assert defaults[CONF_ROTATE_LANDSCAPE_180] is False
+
+
 async def test_official_form_defaults_use_detected_keep_awake(
     hass, make_frame_entry
 ):
