@@ -296,6 +296,15 @@ async def test_span_image_push_now_true_sends_to_coordinators(
     body = await resp.json()
     assert body["success"] is True
     assert len(coord1.sent) == 1
+    # image_id deliberately omitted on the coordinator call: this frame
+    # shows a *crop* of the shared background, not the whole image, and
+    # async_set_last_image's contract is "pass exactly one of image_id/
+    # thumbnail" -- passing both made every frame's tile thumbnail resolve
+    # to the one shared (uncropped) background image, since the read side
+    # checks image_id before thumbnail. See coordinator.py's
+    # async_set_last_image docstring.
+    assert coord1.sent[0]["image_id"] is None
+    assert coord1.sent[0]["thumbnail"] is not None
 
 
 async def test_geometry_view_returns_canvas_and_crop_boxes_without_side_effects(

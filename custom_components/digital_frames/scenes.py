@@ -399,7 +399,39 @@ class SceneManager:
                 )
             except Exception as err:  # noqa: BLE001
                 return {"entry_id": entry_id, "success": False, "message": str(err)}
-            prepared[entry_id] = (coordinator, bin_bytes, image_id, None)
+
+            reported_image_id: str | None = image_id
+            preview_bytes: bytes | None = None
+            if crop_box_override is not None:
+                # This frame is showing a *crop* of image_id, not the whole
+                # image -- render this frame's own accurate preview instead
+                # of leaving the tile to fall back to image_id's full
+                # (uncropped) thumbnail (identical across every frame
+                # sharing the same wallpaper background), and omit image_id
+                # per async_set_last_image's "pass exactly one" contract.
+                # A preview-generation failure must not fail the actual
+                # send -- bin_bytes above is already resolved and correct.
+                try:
+                    original_bytes, _content_type = await library_manager.async_get_original(image_id)
+                    spec = render_spec_for_hass_entry(hass, entry)
+                    from .panel_codec import _compose_rgb  # noqa: PLC0415
+                    from .image_converter import _encode_preview_png  # noqa: PLC0415
+
+                    composed = await hass.async_add_executor_job(
+                        _compose_rgb,
+                        original_bytes,
+                        spec.width,
+                        spec.height,
+                        spec.rotation,
+                        spec.locked,
+                        crop_box_override,
+                    )
+                    preview_bytes = await hass.async_add_executor_job(_encode_preview_png, composed)
+                    reported_image_id = None
+                except Exception:  # noqa: BLE001
+                    preview_bytes = None
+
+            prepared[entry_id] = (coordinator, bin_bytes, reported_image_id, preview_bytes)
             return None
 
         failures = await asyncio.gather(

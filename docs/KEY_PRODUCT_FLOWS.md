@@ -743,12 +743,38 @@ assigned image at once; exposed as `scene.*` entities for voice control.
   `scene.py`, `scenes_http.py`.
 - **If it silently breaks**: partial-failure semantics could be wrong (one
   dead frame blocking the whole scene, or a fully-failed scene reporting
-  success).
+  success), or an `image_crop` mapping's per-frame thumbnail regresses back
+  to the shared (uncropped) background image.
+  A real bug found and fixed alongside KPF 38's wallpaper editor:
+  `async_send_mappings`'s `image_crop` branch always passed `thumbnail=None`
+  to `coordinator.async_send_image_or_queue`, and passed the *shared*
+  background `image_id` — since `async_set_last_image` sets whichever of
+  `image_id`/`thumbnail` it's given (its own docstring says pass exactly
+  one), the frame's tile thumbnail fell back to `image_id`'s full,
+  uncropped image, identical across every frame sharing that background.
+  Fixed to render each frame's own cropped preview (`panel_codec._compose_rgb`
+  + `image_converter._encode_preview_png`, same technique
+  `walls_http.py`'s immediate push already used) and pass that as
+  `thumbnail` with `image_id` omitted — this matters whenever a saved
+  wallpaper scene is activated later (the Scenes tab's Send button, or a
+  schedule), not just the wallpaper editor's own immediate "Send to Frames
+  Now" (see KPF 38, which hit the identical bug in `walls_http.py`
+  directly). Separately, the Walls tab's own tile-preview rendering
+  (`_renderWallTileContent`'s "effective mapping" branch, and the unplaced-
+  frame palette) never unwrapped an `image_crop` mapping object at all --
+  it stringified the whole object into `_loadThumbnail`, producing a
+  literal `"[object Object]"` fetch that 404'd; fixed via a shared
+  `_wallMappingImageId()` helper (previews as the full background image,
+  since there's no "render me this crop" endpoint for a not-yet-sent
+  preview).
 - **Test status**: Panel-tested (`walls-scenes-merge.spec.js`,
   `walls-flow.spec.js` — scene CRUD outside the Walls UI isn't directly
   covered). **Backend-tested** — `tests/python/managers/test_scenes.py`
   (CRUD, duplicate-name rejection, send_mappings partial-failure fan-out,
-  schedule-disarm on delete).
+  schedule-disarm on delete, an `image_crop` mapping generating a distinct
+  per-frame cropped preview and omitting `image_id` on the coordinator
+  call — proven with a source image whose cropped halves are visibly
+  different, so identical preview bytes would mean the crop was ignored).
 
 ## 17. Gallery art packs (curated bundles, install/sync/uninstall)
 **(Content platform: Gallery tab — was "Add-ons / scene packs".)** One-click
@@ -1592,10 +1618,11 @@ Viewed from the Walls tab, a wallpaper-based scene shows normally: each frame's 
 - **Entry points**: `art_factory_http.py` (`DigitalFramesArtFactoryStatusView`, `DigitalFramesArtFactoryGenerateView`, `async_generate_ai_art_image`),
   `__init__.py` (view registrations),
   `digital-frames-panel.js` (`_initArtFactoryTab`, `_activateArtFactoryWallpaperCanvas`, `_deactivateArtFactoryWallpaperCanvas`, `_renderArtFactoryWallpaperCanvas`, `_renderActiveWallCanvas`, `_openWallForArtFactory`, `_setActiveWall`, `_sendArtFactoryWallpaper`, `_selectArtFactoryBackground`, `_openArtFactoryBgPicker`, `_useArtFactoryWallSizeForGeneration`, `_wallContentBoundingBox`, `_loadArtFactoryScene`).
-- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, the wall `<select>` renders empty (a prior bug: it was only ever populated once, at tab-init time, with no re-population once wall/frame data actually landed), the canvas fails to relocate/re-skin (frames show as thumbnails or nothing renders), a drag in one view doesn't show up in the other, generated images fail to upload to the library, re-saving a loaded scene creates a duplicate instead of updating it (or errors with "a scene named ... already exists"), or Send to Frames Now 500s.
+- **If it silently breaks**: prompt generation fails without feedback, HA AI task calls fail without falling back to public AI, the wall `<select>` renders empty (a prior bug: it was only ever populated once, at tab-init time, with no re-population once wall/frame data actually landed), the canvas fails to relocate/re-skin (frames show as thumbnails or nothing renders), a drag in one view doesn't show up in the other, generated images fail to upload to the library, re-saving a loaded scene creates a duplicate instead of updating it (or errors with "a scene named ... already exists"), Send to Frames Now 500s, or every frame's Walls-tab tile thumbnail shows the shared (uncropped) background instead of that frame's own crop.
   A real bug fixed after a live user report: `DigitalFramesWallSpanImageView`'s (and Art Factory's single-frame `send_to_entry_id` branch's) per-frame send loop called `coordinator.async_send_image_or_queue(wire_bytes=..., preview_png=...)`, but every real coordinator (`DigitalFramesCoordinator`/`MeuralCoordinator`/`SamsungCoordinator`) takes a positional `image_bytes` and a `thumbnail` keyword — an immediate, unconditional `TypeError` for every frame, on every wall, confirmed via direct API calls against a production instance (`push_now=false` succeeded; `push_now=true` 500'd). The test suite's own coordinator fake was mocked with the same wrong keyword names as the bug, so it never caught this; fixed to match the real signature. The send loop is now also hardened so one frame's encode/send failure doesn't abort every other frame's delivery, and the response reports per-frame `results`/`frames_failed` instead of a blanket "success".
+  A second, related bug reported right after the first was fixed: even with the `TypeError` gone, every frame's Walls-tab tile thumbnail showed the identical, uncropped background image. `async_send_image_or_queue` was still called with *both* `image_id=saved_image_id` (the one shared background, identical for every frame on the wall) and `thumbnail=preview_png` (each frame's own correctly-cropped preview) — but `coordinator.async_set_last_image`'s own contract is to pass exactly one, and the Walls tab's tile-render priority checks `image_id` before `thumbnail`, so the correct per-frame preview was silently ignored in favor of the shared image's own (uncropped) thumbnail, even though the actual wire bytes sent to each panel were already correct. Fixed by omitting `image_id` for crop-based sends (see KPF 16 for the identical fix in `scenes.py`, needed for a saved wallpaper scene activated later rather than sent immediately here).
 - **Test status**: **Backend-tested** — `tests/python/managers/test_art_factory.py` (status endpoint, prompt generation with HA `ai_task` and public fallback, library upload, direct frame delivery);
-  `tests/python/managers/test_wall_span_image.py` (a fake coordinator matching every real driver's actual `async_send_image_or_queue` signature — which reproduces the exact live `TypeError`/500 against the unpatched code; re-saving a loaded scene by `scene_id` updates it in place rather than duplicating; saving a new scene whose name collides with an existing one, with no `scene_id`, surfaces `scene_save_error` instead of crashing or silently overwriting).
+  `tests/python/managers/test_wall_span_image.py` (a fake coordinator matching every real driver's actual `async_send_image_or_queue` signature — which reproduces the exact live `TypeError`/500 against the unpatched code; re-saving a loaded scene by `scene_id` updates it in place rather than duplicating; saving a new scene whose name collides with an existing one, with no `scene_id`, surfaces `scene_save_error` instead of crashing or silently overwriting; a `push_now=true` send omitting `image_id` on the coordinator call while still passing a non-null `thumbnail`).
   **Panel-tested** — `tests/panel/art-factory.spec.js` (engine status badge load; wall `<select>` populates and the canvas shows a tile per placed frame; frames showing their own live thumbnail until a background is picked, then dropping it for a transparent window; dragging a frame in the wallpaper editor updates the same wall the Walls tab shows; choosing a background from the library; generating artwork and using the result as a wallpaper background without it ever being wall-locked; Save as Scene posting `push_now: false` vs Send to Frames Now posting `push_now: true`; the wall-size hint/"Use This Wall's Size" button reflecting the wall's aggregate geometry, not one frame's; the scene `<select>` listing existing scenes and loading a wallpaper-shaped one restoring its background; loading a scene with no wallpaper mapping for the current wall surfacing an error instead of a false success; re-saving a loaded scene threading its `scene_id` in the request).
 
 ---

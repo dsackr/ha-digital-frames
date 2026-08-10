@@ -8954,7 +8954,7 @@
               <div class="wall-palette-thumb">🖼</div>
               <div style="flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(frame.title)}</div>
             `;
-            this._loadThumbnail(mapping, item.querySelector('.wall-palette-thumb'));
+            this._loadThumbnail(this._wallMappingImageId(mapping), item.querySelector('.wall-palette-thumb'));
           } else {
             item.textContent = frame.title;
           }
@@ -9452,6 +9452,22 @@
       return (scene && scene.mappings && scene.mappings[entryId]) || null;
     }
 
+    // A mapping value is a plain library image_id (string), a skill
+    // assignment (handled separately by callers), or an image_crop object
+    // (a wallpaper background + this frame's slice of it, see KPF 38) --
+    // this pulls out the library image_id to preview from either shape.
+    // There's no "give me this crop rendered" endpoint (see KPF 36/38), so
+    // an image_crop mapping previews as the *full*, uncropped background
+    // here -- correct-ish and non-broken, unlike passing the raw mapping
+    // object straight into _loadThumbnail (which stringifies it to the
+    // literal "[object Object]" as both a cache key and a fetch URL).
+    _wallMappingImageId(mapping) {
+      if (!mapping) return null;
+      if (typeof mapping === 'string') return mapping;
+      if (typeof mapping === 'object' && mapping.type === 'image_crop') return mapping.image_id;
+      return null;
+    }
+
     _renderWallTileContent(tile, entryId, frame) {
       // Media lives in its own child so re-rendering an image never wipes
       // the tile's footer (name/status/gear) or remove button.
@@ -9490,7 +9506,7 @@
       }
       media.className = 'wall-tile-media';
 
-      const imageId = mapping;
+      const imageId = this._wallMappingImageId(mapping);
       if (imageId) {
         media.innerHTML = '';
         // _loadThumbnail paints synchronously on a cache hit and dedupes

@@ -108,8 +108,9 @@ class _FakeLibrary:
     (simulating a deleted/missing image) -- avoids pulling in the real
     LibraryManager just to test the fan-out/aggregation logic here."""
 
-    def __init__(self):
+    def __init__(self, original_bytes=None):
         self.crop_box_override_calls = []
+        self._original_bytes = original_bytes
 
     async def async_get_bin_for_send(
         self, image_id, spec, pack_method=None, codec_id=None, crop_box_override=None, entry=None
@@ -120,6 +121,11 @@ class _FakeLibrary:
             self.crop_box_override_calls.append((image_id, tuple(crop_box_override)))
             return f"bin-for-{image_id}-crop-{tuple(crop_box_override)}".encode()
         return f"bin-for-{image_id}".encode()
+
+    async def async_get_original(self, image_id):
+        if self._original_bytes is None:
+            raise FileNotFoundError(f"no original bytes configured for {image_id}")
+        return self._original_bytes, "image/png"
 
 
 @pytest.fixture
@@ -581,3 +587,69 @@ async def test_send_mappings_image_crop_missing_fields_rejected(
 
     assert result["results"][0]["success"] is False
     assert "Invalid mapping" in result["results"][0]["message"]
+
+
+def _half_and_half_image_bytes(width=800, height=600):
+    """A source image whose left and right halves are visibly different --
+    unlike a solid-color fixture, cropping distinct halves of this must
+    produce distinct preview bytes, which is exactly what this test needs
+    to prove per-frame crops aren't being collapsed into one shared image."""
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (width, height), (200, 30, 30))
+    right_half = Image.new("RGB", (width // 2, height), (30, 30, 200))
+    img.paste(right_half, (width // 2, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def test_send_mappings_image_crop_generates_per_frame_preview_and_omits_image_id(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    """Activating a saved wallpaper scene (image_crop mappings) must render
+    each frame's own cropped preview and pass it as thumbnail, with
+    image_id omitted -- passing both the shared background's image_id AND
+    a distinct per-frame thumbnail violates async_set_last_image's "pass
+    exactly one" contract and made the Walls tab tile fall back to the
+    shared (uncropped) background's thumbnail for every frame, even though
+    each frame's own bin_bytes (the actual wire payload) were already
+    correctly cropped. Mirrors the same fix in walls_http.py's immediate
+    "Send to Frames Now" push."""
+    entries = library_and_coordinators(count=2)
+    hass.data[DOMAIN]["_library"] = _FakeLibrary(original_bytes=_half_and_half_image_bytes())
+
+    sent = []
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        sent.append({"image_id": image_id, "thumbnail": thumbnail})
+        return {"success": True, "queued": False}
+
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {
+        entries[0].entry_id: {
+            "type": "image_crop",
+            "image_id": "banner-1",
+            "crop_box": [0.0, 0.0, 0.5, 1.0],
+        },
+        entries[1].entry_id: {
+            "type": "image_crop",
+            "image_id": "banner-1",
+            "crop_box": [0.5, 0.0, 1.0, 1.0],
+        },
+    }
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    assert all(r["success"] for r in result["results"])
+    assert len(sent) == 2
+    for record in sent:
+        assert record["image_id"] is None
+        assert record["thumbnail"] is not None
+    # Each frame's crop is distinct -- their previews must not be identical
+    # bytes (which would mean both rendered the same, uncropped, region).
+    assert sent[0]["thumbnail"] != sent[1]["thumbnail"]

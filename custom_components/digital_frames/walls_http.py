@@ -382,9 +382,19 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
 
                     coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
                     if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
+                        # image_id deliberately omitted: this frame is
+                        # showing a *crop* of saved_image_id, not the whole
+                        # image, and async_set_last_image's contract is to
+                        # pass exactly one of image_id/thumbnail (the other
+                        # is cleared) -- passing the shared background's
+                        # image_id here previously made every frame on the
+                        # wall's tile thumbnail resolve to that one shared
+                        # (uncropped) image instead of each frame's own
+                        # correctly-cropped preview_png, even though the
+                        # actual wire_bytes sent to each panel were already
+                        # correct.
                         await coordinator.async_send_image_or_queue(
                             wire_bytes,
-                            image_id=saved_image_id,
                             thumbnail=preview_png,
                         )
                     sent = True
