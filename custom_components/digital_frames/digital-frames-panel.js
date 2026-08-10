@@ -307,6 +307,10 @@
       padding-left: 14px;
       padding-right: 14px;
     }
+    .btn-ghost.active {
+      background: var(--primary-color, #03a9f4);
+      color: #fff;
+    }
 
     /* ---- feedback ---- */
     .feedback {
@@ -1901,54 +1905,68 @@
       outline: 3px solid var(--primary-color, #03a9f4);
       outline-offset: 2px;
     }
-    /* Art Factory wallpaper editor: #wall-canvas relocated here wears this
-       skin (see _activateArtFactoryWallpaperCanvas) -- frames are
-       transparent windows over a shared background image, not thumbnail
-       tiles, so the base .wall-tile look is stripped down to a border. */
-    #art-factory-canvas-host {
-      min-height: 420px;
-      display: flex;
-      flex-direction: column;
-    }
-    #art-factory-canvas-host .wall-canvas {
-      flex: 1 1 auto;
-    }
+    /* Wallpaper mode (Walls tab): #wall-canvas wears this skin in place --
+       frames become transparent windows over a shared, independently
+       positioned/scaled background image instead of thumbnail tiles, so
+       the base .wall-tile look is stripped down to a border. Unlike an
+       earlier version of this feature, the background's rect is never
+       derived from the frames' bounding box -- it's its own object on the
+       canvas (see _wallWallpaperEdit) so dragging a frame can never
+       resize, reposition, or distort it. */
     .wall-canvas.wallpaper-mode {
       background-image: none;
       background-color: #0b1120;
     }
-    .af-wallpaper-bg {
+    .wall-wallpaper-bg {
       position: absolute;
       overflow: hidden;
       background: repeating-conic-gradient(#1e293b 0% 25%, #0f172a 0% 50%) 50% / 24px 24px;
+      cursor: grab;
+      touch-action: none;
     }
-    .af-wallpaper-bg img {
+    .wall-wallpaper-bg img {
       width: 100%;
       height: 100%;
       object-fit: fill;
       display: block;
+      pointer-events: none;
     }
-    .af-wallpaper-bg-empty {
-      width: 100%;
-      height: 100%;
+    .wall-wallpaper-resize-handle {
+      position: absolute;
+      right: -7px;
+      bottom: -7px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--primary-color, #03a9f4);
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.5);
+      cursor: nwse-resize;
+      touch-action: none;
+    }
+    .wall-wallpaper-empty-hint {
+      position: absolute;
+      inset: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       color: var(--secondary-text-color, #94a3b8);
-      font-size: 12px;
+      font-size: 13px;
       text-align: center;
+      border: 2px dashed var(--divider-color, rgba(255,255,255,.2));
+      border-radius: 8px;
       padding: 8px;
       box-sizing: border-box;
     }
-    .af-wallpaper-tile {
+    .wall-wallpaper-tile {
       background: transparent !important;
       box-shadow: none !important;
       border: 2px dashed rgba(59, 130, 246, 0.9);
     }
-    .af-wallpaper-tile.selected {
+    .wall-wallpaper-tile.selected {
       border-style: solid;
     }
-    .af-wallpaper-tile-label {
+    .wall-wallpaper-tile-label {
       position: absolute;
       top: 2px;
       left: 2px;
@@ -2363,16 +2381,25 @@
       this._wallExcluded   = [];      // working copy of the active wall's removal tombstones (default wall)
       this._wallDrag        = null;   // in-progress palette/tile pointer drag, or null
 
-      // Art Factory's "wallpaper" editor is a second skin over the exact
-      // same #wall-canvas element/drag machinery the Walls tab uses (see
-      // _activateArtFactoryWallpaperCanvas) -- 'wallpaper' redirects the
-      // handful of shared render call sites (_onWallPointerUp etc) to draw
-      // transparent frame windows over a background image instead of
-      // per-frame thumbnails, via _renderActiveWallCanvas().
-      this._wallCanvasMode = 'normal';        // 'normal' | 'wallpaper'
-      this._afBackgroundImageId = null;       // library image_id used as the wallpaper background
-      this._afBackgroundImageName = null;     // its filename, purely for the "Background: ..." label
-      this._afLoadedSceneId = null;           // scene_id currently being edited, or null for "new scene"
+      // Wallpaper mode: a second skin over the same #wall-canvas/drag
+      // machinery below (_wallBeginDrag, _onWallPointerUp, ...) -- frames
+      // become transparent windows over one shared background image
+      // instead of per-frame thumbnails. A "wallpaper" isn't a separate
+      // entity: saving one just creates/updates an ordinary Scene whose
+      // mappings are image_crop entries sharing this image_id, plus a
+      // `wallpaper` field recording the image's rect (see Scene.wallpaper
+      // in scenes.py) purely so re-opening this editor restores it.
+      this._wallWallpaperMode = false;   // are we currently in wallpaper-editing view?
+      // The background image's rect is completely independent of frame
+      // placement -- {imageId, x, y, width, height, aspectRatio, sceneId,
+      // sceneName (the scene being edited in place, or null/null for
+      // "new")} in the same wall-canvas-px space as _wallPlacements. Dragging a frame
+      // only changes which part of this fixed rect its window reveals; it
+      // never changes the rect itself (an earlier version of this feature
+      // stretched the "image" to fit the frames' bounding box, which
+      // resized/distorted it every time a frame moved -- a real bug).
+      this._wallWallpaperEdit = null;
+      this._wallpaperDrag = null;        // in-progress image pan/resize pointer drag, or null
       this._wallActiveSceneId = null;    // scene_id loaded for preview on this wall, or null
       this._wallPendingMappings = {};    // entry_id -> image_id ('' = explicitly cleared) touched this session,
                                           // overlaid on the active scene's own mappings -- see _wallEffectiveMapping
@@ -2390,6 +2417,8 @@
       this._onWallKeydown     = this._onWallKeydown.bind(this);
       this._onWallMarqueeMove = this._onWallMarqueeMove.bind(this);
       this._onWallMarqueeUp   = this._onWallMarqueeUp.bind(this);
+      this._onWallpaperImagePointerMove = this._onWallpaperImagePointerMove.bind(this);
+      this._onWallpaperImagePointerUp   = this._onWallpaperImagePointerUp.bind(this);
 
       // Embedded config/options flow state (the panel drives HA's own
       // data_entry_flow REST API instead of navigating to Settings).
@@ -2831,7 +2860,7 @@
     _setTab(name, skipPushState = false) {
       this._activeTab = name;
       const root = this.shadowRoot;
-      ['walls', 'my_gallery', 'art_gallery', 'art_factory', 'widgets', 'expansion_packs'].forEach(tab => {
+      ['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs'].forEach(tab => {
         const content = root.getElementById(`tab-${tab}`);
         const btn     = root.querySelector(`.tab-btn[data-tab="${tab}"]`);
         if (content) content.classList.toggle('active', tab === name);
@@ -2844,10 +2873,6 @@
 
       // Fire-and-forget: keeps the tab switch itself synchronous/instant,
       // re-rendering once the (throttled) refetch resolves.
-      if (name === 'art_factory') {
-        this._initArtFactoryTab();
-        this._activateArtFactoryWallpaperCanvas();
-      }
       if (name === 'expansion_packs') this._refreshScenePacksIfStale();
       if (name === 'my_gallery' || name === 'art_gallery') {
         this._currentAlbum = null;
@@ -2858,15 +2883,9 @@
         this._loadXotdInstances().then(() => this._renderXotdInstances());
       }
       if (name === 'walls') {
-        // Both branches route through _renderWallsSubview (directly or via
-        // _openWall), which reclaims #wall-canvas from the wallpaper editor
-        // -- it may have spent the last visit relocated into Art Factory's
-        // layout wearing the wallpaper skin.
         const active = this._activeWall();
         if (active && active.kind === 'default') {
           this._openWall(this._activeWallId);
-        } else {
-          this._renderWallsSubview();
         }
       }
     }
@@ -2879,7 +2898,6 @@
           <button class="tab-btn active" data-tab="walls">Walls</button>
           <button class="tab-btn" data-tab="my_gallery">My Gallery</button>
           <button class="tab-btn" data-tab="art_gallery">Art Gallery</button>
-          <button class="tab-btn" data-tab="art_factory">🎨 Art Factory</button>
           <button class="tab-btn" data-tab="widgets">Widgets</button>
           <button class="tab-btn" data-tab="expansion_packs">Expansion Packs</button>
         </div>
@@ -2916,7 +2934,13 @@
           </p>
           <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
+            <button class="btn-ghost" id="wall-wallpaper-btn" title="Place one image across this wall's frames as a shared, independently zoomable/pannable background">🖼 Wallpaper</button>
+            <button class="btn-ghost" id="wall-wallpaper-choose-btn" style="display:none" title="Choose (or change) the wallpaper image">🖼 Choose Image…</button>
           </div>
+          <p id="wall-wallpaper-hint" style="display:none;font-size:12px;color:var(--secondary-text-color);margin:-6px 0 10px">
+            💡 Drag the image to pan it, drag its blue corner handle to zoom (aspect ratio locked) -- moving a
+            <em>frame</em> only changes which part of the image that frame shows, never the image itself.
+          </p>
           <!-- Appears when 2+ tiles are selected (shift-click or a
                rubber-band drag on empty canvas). Alignment is to the
                selection's own extent -- outermost edge, or the bounding
@@ -3038,197 +3062,6 @@
           </div>
         </div><!-- /tab-art_gallery -->
 
-        <div class="tab-content" id="tab-art_factory">
-          <div class="lib-toolbar">
-            <h3 style="margin:0;flex:1 1 auto">🎨 Art Factory — AI Image & Wall Spanning Studio</h3>
-            <div id="art-factory-engine-badge" style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:12px;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3)">
-              🤖 Loading AI Engine…
-            </div>
-          </div>
-          <p style="font-size:13px;color:var(--secondary-text-color);margin:0 0 16px">
-            Generate custom artwork from text prompts, arrange wall frames over the image to position on-screen crops, send spanned art to all frames, or save as a Home Assistant Scene.
-          </p>
-          <div class="feedback" id="art-factory-fb" style="display:none"></div>
-
-          <div style="display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start">
-            <!-- Left Column: Controls & Inputs -->
-            <div style="background:var(--card-background-color,#1e293b);padding:20px;border-radius:8px;border:1px solid var(--divider-color,rgba(255,255,255,0.1))">
-              <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:6px">
-                Prompt
-              </label>
-              <textarea id="art-factory-prompt" rows="4" placeholder="Describe the artwork you want to create... (e.g. 'A vibrant cyberpunk skyline at night with neon reflections')" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-family:inherit;font-size:14px;resize:vertical;box-sizing:border-box"></textarea>
-
-              <!-- Quick Presets / Style Pills -->
-              <div style="margin-top:14px">
-                <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:6px">
-                  Quick Prompt Ideas
-                </label>
-                <div style="display:flex;flex-wrap:wrap;gap:6px" id="art-factory-presets">
-                  <button class="btn-ghost art-preset-pill" data-prompt="Vibrant mountain sunset over a serene alpine lake, dramatic golden hour lighting" data-style="plain" style="font-size:11px;padding:3px 8px">🏔 Mountain Sunset</button>
-                  <button class="btn-ghost art-preset-pill" data-prompt="Futuristic cyberpunk city street with glowing neon signs and rain-slicked pavement" data-style="neon_noir" style="font-size:11px;padding:3px 8px">🌃 Cyberpunk City</button>
-                  <button class="btn-ghost art-preset-pill" data-prompt="Minimalist Japanese zen garden with maple trees, koi pond, and bamboo fountain" data-style="nature_zen" style="font-size:11px;padding:3px 8px">🌿 Zen Garden</button>
-                  <button class="btn-ghost art-preset-pill" data-prompt="Abstract 1960s pop art color block typography poster" data-style="pop_art" style="font-size:11px;padding:3px 8px">🎨 Pop Art Poster</button>
-                </div>
-              </div>
-
-              <!-- Style Selector & Orientation -->
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
-                <div>
-                  <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:4px">Artistic Style</label>
-                  <select id="art-factory-style" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit">
-                    <option value="plain">Clean Art Poster</option>
-                    <option value="movie_poster">Cinematic Movie Poster</option>
-                    <option value="pop_art">1960s Pop Art</option>
-                    <option value="neon_noir">Neon Cyberpunk</option>
-                    <option value="nature_zen">Minimalist Nature Zen</option>
-                    <option value="chalkboard">Cafe Chalkboard</option>
-                    <option value="gothic_gold">Gothic Gold Filigree</option>
-                    <option value="ad_50s">50s Retro Sign</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);margin-bottom:4px">Canvas Size</label>
-                  <select id="art-factory-size" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit">
-                    <option value="1024x1024">Square (1024x1024)</option>
-                    <option value="1200x1600">Portrait (1200x1600)</option>
-                    <option value="1600x1200">Landscape (1600x1200)</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Options Checkbox -->
-              <div style="margin-top:16px">
-                <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-                  <input type="checkbox" id="art-factory-save-lib-cb" checked>
-                  Save generated image to Library ("AI Art" album)
-                </label>
-              </div>
-
-              <!-- Generate Button -->
-              <button class="btn-primary" id="art-factory-generate-btn" style="width:100%;margin-top:20px;padding:12px;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px">
-                🎨 Generate Image
-              </button>
-            </div>
-
-            <!-- Right Column: Last Result + Wallpaper Editor -->
-            <div style="display:flex;flex-direction:column;gap:16px">
-
-              <!-- Last Generated Result: standalone, not tied to any wall --
-                   generation never locks an image to a wall; this strip is
-                   just the most recent output, usable for a single-frame
-                   send, a download, or (via the button below) as a
-                   wallpaper background. -->
-              <div id="art-factory-last-result" style="display:none;background:var(--card-background-color,#1e293b);padding:16px;border-radius:8px;border:1px solid var(--divider-color,rgba(255,255,255,0.1));gap:12px">
-                <div style="display:flex;gap:12px">
-                  <img id="art-factory-preview-img" style="width:96px;height:96px;object-fit:cover;border-radius:6px;background:#000;flex:0 0 auto" src="">
-                  <div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:6px">
-                    <div style="font-size:11px;color:var(--secondary-text-color)" id="art-factory-engine-info"></div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
-                      <button class="btn-primary" id="art-factory-use-as-bg-btn" style="font-size:12px;padding:6px 10px">🧱 Use as Wallpaper Background</button>
-                      <a id="art-factory-download-btn" download="ai_art.png" class="btn-ghost" style="text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:4px">💾 Download</a>
-                    </div>
-                    <div style="display:flex;gap:6px;align-items:center">
-                      <select id="art-factory-target-frame" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-size:12px">
-                        <!-- Populated dynamically with single frames -->
-                      </select>
-                      <button class="btn-ghost" id="art-factory-send-btn" style="font-size:12px">Send Single</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Wallpaper Editor -->
-              <div style="background:var(--card-background-color,#1e293b);padding:20px;border-radius:8px;border:1px solid var(--divider-color,rgba(255,255,255,0.1))">
-                <h4 style="margin:0 0 12px">🧱 Wallpaper Mode</h4>
-                <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 14px">
-                  Pick a wall (the same one the Walls tab edits) and a background image, then drag frames to
-                  position their window into it. Nothing about the image moves -- only the frames do.
-                </p>
-
-                <!-- Toolbar: Wall Select & Bezel Gap Toggle -->
-                <div style="display:flex;gap:12px;width:100%;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap">
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <span style="font-size:12px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase">Wall:</span>
-                    <select id="art-factory-wall-select" style="padding:6px 12px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-weight:600">
-                      <!-- Populated dynamically with walls -->
-                    </select>
-                    <button class="btn-ghost" id="art-factory-new-wall-btn" style="font-size:12px">＋ New Wall</button>
-                  </div>
-                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--secondary-text-color);cursor:pointer">
-                    <input type="checkbox" id="art-factory-bezel-cb" checked>
-                    Compensate Bezel Gaps
-                  </label>
-                </div>
-
-                <!-- Background picker -->
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
-                  <span style="font-size:12px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase">Background:</span>
-                  <span id="art-factory-bg-name" style="font-size:12px;color:var(--secondary-text-color)">None selected</span>
-                  <button class="btn-ghost" id="art-factory-choose-bg-btn" style="font-size:12px">🖼 Choose from Library…</button>
-                </div>
-
-                <!-- Wall-sized generation hint: a fresh generation is never
-                     locked to a wall, but this wall's full aggregate pixel
-                     size (not one frame's) is available to plug into the
-                     generator above, so a spanning image can be requested
-                     at a resolution that doesn't need upscaling per-frame. -->
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-                  <span id="art-factory-wall-size-hint" style="font-size:11px;color:var(--secondary-text-color)"></span>
-                  <button class="btn-ghost" id="art-factory-use-wall-size-btn" style="font-size:11px">📐 Use This Wall's Size for Generation</button>
-                </div>
-
-                <!-- The Walls tab's real #wall-canvas is relocated in here
-                     while this tab is active (see
-                     _activateArtFactoryWallpaperCanvas) -- same element,
-                     same drag code, same saved wall record. -->
-                <div id="art-factory-canvas-host"></div>
-
-                <div style="margin-top:8px;font-size:11px;color:var(--secondary-text-color)" id="art-factory-canvas-hint">
-                  💡 Drag a frame's outline to reposition it -- edits save to the shared wall automatically.
-                </div>
-
-                <!-- Action Controls -->
-                <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <span style="font-size:12px;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase;white-space:nowrap">Scene:</span>
-                    <select id="art-factory-scene-select" style="flex:1;padding:6px 12px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-weight:600">
-                      <option value="">＋ New Scene…</option>
-                      <!-- Populated dynamically with existing wallpaper scenes -->
-                    </select>
-                  </div>
-                  <input type="text" id="art-factory-scene-name" placeholder="Scene name (e.g. Living Room Wallpaper)" style="padding:8px;border-radius:6px;border:1px solid var(--divider-color,rgba(255,255,255,0.15));background:rgba(0,0,0,0.2);color:inherit;font-size:12px">
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <button class="btn-primary" id="art-factory-save-scene-btn" style="padding:10px 16px;font-weight:600;font-size:14px;background:#8b5cf6;border-color:#7c3aed;display:flex;align-items:center;justify-content:center;gap:6px">
-                      🎬 Save as Scene
-                    </button>
-                    <button class="btn-primary" id="art-factory-send-span-btn" style="padding:10px 16px;font-weight:600;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">
-                      🚀 Send to Frames Now
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="modal-overlay" id="art-factory-bg-picker-overlay">
-            <div class="modal-box" style="max-width:520px">
-              <h3>Choose Background Image</h3>
-              <div class="feedback" id="art-factory-bg-picker-fb"></div>
-              <div id="art-factory-bg-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(90px, 1fr));gap:8px;max-height:360px;overflow:auto"></div>
-              <div class="modal-actions">
-                <button class="btn-ghost" id="art-factory-bg-picker-cancel">Cancel</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- History / Recent Generations Strip -->
-          <div style="margin-top:28px">
-            <h4 style="margin:0 0 12px">Recent Generations</h4>
-            <div id="art-factory-history-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));gap:12px">
-              <div style="color:var(--secondary-text-color);font-size:12px;grid-column:1/-1">Generations in this session will appear here.</div>
-            </div>
-          </div>
-        </div><!-- /tab-art_factory -->
 
         <div class="tab-content" id="tab-widgets">
           <div class="lib-toolbar">
@@ -3324,6 +3157,17 @@
         <!-- Modals live outside the tab-content divs -- they're position:fixed
              overlays, so a tab switch (which sets display:none on an ancestor)
              must never be able to hide one while it's open. -->
+        <div class="modal-overlay" id="wall-wallpaper-picker-overlay">
+          <div class="modal-box" style="max-width:520px">
+            <h3>Choose Wallpaper Image</h3>
+            <div class="feedback" id="wall-wallpaper-picker-fb"></div>
+            <div id="wall-wallpaper-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(90px, 1fr));gap:8px;max-height:360px;overflow:auto"></div>
+            <div class="modal-actions">
+              <button class="btn-ghost" id="wall-wallpaper-picker-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
         <div class="modal-overlay" id="upload-modal-overlay">
           <div class="modal-box">
             <h3>Upload to Library</h3>
@@ -8255,6 +8099,13 @@
       this.shadowRoot.getElementById('wall-send-btn').addEventListener('click', () => this._sendWallToFrames());
       this.shadowRoot.getElementById('wall-schedule-btn').addEventListener('click', () => this._scheduleFromWall());
       this.shadowRoot.getElementById('wall-grid-align-btn').addEventListener('click', () => this._alignWallToGrid());
+      this.shadowRoot.getElementById('wall-wallpaper-btn').addEventListener('click', () => this._toggleWallWallpaperMode());
+      this.shadowRoot.getElementById('wall-wallpaper-choose-btn').addEventListener('click', () => this._openWallWallpaperPicker());
+      this.shadowRoot.getElementById('wall-wallpaper-picker-cancel').addEventListener('click', () => this._closeWallWallpaperPicker());
+      const wallpaperPickerOverlay = this.shadowRoot.getElementById('wall-wallpaper-picker-overlay');
+      wallpaperPickerOverlay.addEventListener('click', (e) => {
+        if (e.target === wallpaperPickerOverlay) this._closeWallWallpaperPicker();
+      });
 
       // Rubber-band multi-select starts on the canvas background (tiles
       // handle their own pointerdown, so this only fires on empty space).
@@ -8556,22 +8407,10 @@
       return this._walls.find(w => w.kind === 'default') || null;
     }
 
-    // Called both from the Walls tab's own actions AND from the app-wide
-    // startup render (_renderDashboard) regardless of which tab is actually
-    // showing -- so which skin #wall-canvas wears here must follow
-    // this._activeTab, not assume "Walls tab" just because this ran.
-    // Without that check, a startup landing on the art_factory tab (a
-    // restored deep link) would get its canvas yanked back into the
-    // (hidden) Walls tab the moment wall data finished loading.
     _renderWallsSubview() {
       this._renderWallStrip();
       this._renderWallScenePicker();
-      if (this._activeTab === 'art_factory') {
-        this._activateArtFactoryWallpaperCanvas();
-      } else {
-        this._deactivateArtFactoryWallpaperCanvas();
-        this._renderWallCanvas();
-      }
+      this._renderWallCanvas();
     }
 
     _renderWallStrip() {
@@ -8640,10 +8479,6 @@
         (active && active.kind !== 'default') ? '' : 'none';
     }
 
-    // Shared by _openWall (Walls tab) and _openWallForArtFactory (wallpaper
-    // editor) -- both views edit the one shared wall record, so switching
-    // which wall is "active" must reset exactly the same working-copy state
-    // regardless of which view triggered the switch.
     _setActiveWall(wallId) {
       // With the backend-guaranteed default wall there's no "no wall"
       // state anymore -- fall back to it instead of an unsaveable draft.
@@ -8658,6 +8493,12 @@
       this._wallPendingMappings = {};
       this._wallPendingPickAlbum = {};
       this._wallSelection = new Set();
+      // A wallpaper edit's rect is expressed in the previous wall's canvas
+      // coordinates and only makes sense against its frames -- clear it
+      // rather than carry stale positioning into a different wall (staying
+      // in wallpaper *mode*, if that's where the user was, just prompts
+      // for a fresh image on this wall).
+      this._wallWallpaperEdit = null;
       if (wall && wall.kind === 'default') {
         this._defaultWallOriginalPlacements = JSON.parse(JSON.stringify(wall.placements || {}));
       } else {
@@ -8670,14 +8511,6 @@
       this._setActiveWall(wallId);
       this._renderWallsSubview();
       this._updateWallOfferBanner();
-    }
-
-    // Art Factory's wall-select dropdown switches the same shared active
-    // wall (see _setActiveWall) but re-renders the wallpaper skin instead
-    // of the Walls tab's own canvas.
-    _openWallForArtFactory(wallId) {
-      this._setActiveWall(wallId);
-      this._renderArtFactoryWallpaperCanvas();
     }
 
     async _createWall() {
@@ -8965,6 +8798,14 @@
       }
 
       canvas.innerHTML = '';
+      canvas.classList.toggle('wallpaper-mode', this._wallWallpaperMode);
+      if (this._wallWallpaperMode) {
+        this._renderWallWallpaperTiles(canvas);
+        this._updateWallSaveToSceneAvailability();
+        this._updateWallAlignToolbar();
+        if (this._hass) this._tickAllStatus();
+        return;
+      }
       for (const entryId of Object.keys(this._wallPlacements)) {
         const frame = this._frames.find(f => f.entryId === entryId);
         if (!frame) continue; // frame removed/reconfigured since this wall was laid out
@@ -9088,69 +8929,82 @@
     }
 
     // -------------------------------------------------------------------
-    // Art Factory wallpaper editor
+    // Wallpaper mode
     //
-    // The wallpaper view is deliberately NOT a second canvas implementation:
-    // it relocates the Walls tab's actual #wall-canvas element into Art
-    // Factory's layout and draws a different tile skin over it (transparent
-    // windows over a shared background image instead of per-frame
-    // thumbnails). Every drag/marquee/collision helper above
+    // Not a second canvas implementation: _renderWallCanvas (above) just
+    // branches to _renderWallWallpaperTiles instead of its normal per-tile
+    // thumbnail loop. Every drag/marquee/collision helper elsewhere
     // (_wallBeginDrag, _onWallPointerUp, _wallSnapCandidate, ...) keeps
-    // working completely unmodified because it looks the element up by id
-    // and reads/writes this._wallPlacements -- the same wall record the
-    // Walls tab edits. That's what makes an edit in one view show up
-    // immediately in the other: there is only ever one canvas element and
-    // one placements object, just presented two different ways.
+    // working completely unmodified, because it looks #wall-canvas up by
+    // id and reads/writes this._wallPlacements -- the same wall record the
+    // rest of the Walls tab edits. A "wallpaper" is not a separate entity:
+    // saving one just creates/updates an ordinary Scene whose mappings are
+    // image_crop entries sharing one image_id (see Scene.wallpaper in
+    // scenes.py).
+    //
+    // The background image's rect (this._wallWallpaperEdit) is completely
+    // independent of frame placement -- dragging a frame only changes
+    // which part of that fixed rect its window reveals. Panning/resizing
+    // the image is a separate pointer-drag interaction on the image layer
+    // itself (_wallpaperImageBeginDrag), never a side effect of a frame
+    // moving (an earlier version of this feature stretched the image to
+    // fit the frames' bounding box, which resized/distorted it every time
+    // a frame moved -- a real bug).
     // -------------------------------------------------------------------
 
-    // Every shared drag/remove call site should render through here instead
-    // of calling _renderWallCanvas() directly, so it draws the right skin
-    // regardless of which tab triggered it.
-    _renderActiveWallCanvas() {
-      if (this._wallCanvasMode === 'wallpaper') {
-        this._renderArtFactoryWallpaperCanvas();
-      } else {
-        this._renderWallCanvas();
+    // Toggled by the "Wallpaper" button next to Align Wall to Grid. Seeds
+    // the edit from the currently-active scene's stored transform if it
+    // has one (see Scene.wallpaper); otherwise starts empty, prompting for
+    // an image.
+    _toggleWallWallpaperMode() {
+      this._wallWallpaperMode = !this._wallWallpaperMode;
+      if (this._wallWallpaperMode) {
+        const scene = this._wallActiveSceneId
+          && this._scenes.find(s => s.scene_id === this._wallActiveSceneId);
+        this._wallWallpaperEdit = null;
+        if (scene && scene.wallpaper) {
+          this._loadWallWallpaperFromScene(scene);
+        }
       }
+      this._renderWallCanvas();
+      this._updateWallWallpaperButton();
     }
 
-    // Moves the real #wall-canvas node into Art Factory's host container
-    // and switches the shared render dispatcher to wallpaper mode. Safe to
-    // call repeatedly (e.g. every time the Art Factory tab is shown).
-    _activateArtFactoryWallpaperCanvas() {
-      const root = this.shadowRoot;
-      const canvas = root.getElementById('wall-canvas');
-      const host = root.getElementById('art-factory-canvas-host');
-      if (!canvas || !host) return;
-      if (canvas.parentElement !== host) {
-        this._wallCanvasHomeParent = canvas.parentElement;
-        this._wallCanvasHomeNextSibling = canvas.nextSibling;
-        host.appendChild(canvas);
+    async _loadWallWallpaperFromScene(scene) {
+      const wp = scene.wallpaper;
+      if (!wp || !wp.image_id) return;
+      let aspectRatio = wp.width / wp.height;
+      try {
+        aspectRatio = await this._wallpaperImageAspectRatio(wp.image_id);
+      } catch (err) {
+        // Fall back to the stored rect's own ratio -- still self-consistent.
       }
-      canvas.classList.add('wallpaper-mode');
-      this._wallCanvasMode = 'wallpaper';
-      this._renderArtFactoryWallpaperCanvas();
+      this._wallWallpaperEdit = {
+        imageId: wp.image_id,
+        sceneId: scene.scene_id,
+        sceneName: scene.name,
+        x: wp.x, y: wp.y, width: wp.width, height: wp.height,
+        aspectRatio,
+      };
+      this._renderWallCanvas();
     }
 
-    // Moves #wall-canvas back to its normal home in the Walls tab and
-    // switches the dispatcher back. Called whenever the Walls tab is shown;
-    // safe to call even if the canvas was never relocated.
-    _deactivateArtFactoryWallpaperCanvas() {
-      const root = this.shadowRoot;
-      const canvas = root.getElementById('wall-canvas');
-      if (canvas && this._wallCanvasHomeParent) {
-        this._wallCanvasHomeParent.insertBefore(canvas, this._wallCanvasHomeNextSibling);
-      }
-      if (canvas) canvas.classList.remove('wallpaper-mode');
-      this._wallCanvasMode = 'normal';
+    _updateWallWallpaperButton() {
+      const btn = this.shadowRoot.getElementById('wall-wallpaper-btn');
+      if (!btn) return;
+      btn.classList.toggle('active', this._wallWallpaperMode);
+      btn.textContent = this._wallWallpaperMode ? '🖼 Exit Wallpaper' : '🖼 Wallpaper';
+      const chooseBtn = this.shadowRoot.getElementById('wall-wallpaper-choose-btn');
+      if (chooseBtn) chooseBtn.style.display = this._wallWallpaperMode ? '' : 'none';
+      const hint = this.shadowRoot.getElementById('wall-wallpaper-hint');
+      if (hint) hint.style.display = this._wallWallpaperMode ? '' : 'none';
     }
 
-    // The wall's content bounding box in canvas px (min/max of every placed
-    // tile's extent) -- the same span wall_geometry.py's
-    // compute_2d_wall_canvas_geometry bounds its aggregate canvas to. The
-    // background image is displayed stretched to fill exactly this box
-    // (not the whole, often much larger, scrollable canvas viewport) so
-    // what's on screen matches what a save/send will actually crop.
+    // The wall's content bounding box in canvas px (min/max of every
+    // placed tile's extent) -- used only to seed a sensible default
+    // position/size the first time an image is chosen; never consulted
+    // again afterward (that's the whole point -- see the section banner
+    // above).
     _wallContentBoundingBox() {
       const entries = Object.keys(this._wallPlacements);
       if (!entries.length) return null;
@@ -9169,44 +9023,139 @@
       return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
     }
 
-    // Renders the wallpaper skin into the (possibly just-relocated)
-    // #wall-canvas: a background-image layer sized to the wall's content
-    // bounding box, plus one transparent, border-only, draggable tile per
-    // placed frame -- no palette, no per-tile thumbnail/footer/quadrants,
-    // since a wallpaper frame has no image of its own to assign.
-    _renderArtFactoryWallpaperCanvas() {
+    // Fetches (and caches on the edit state) the image's native aspect
+    // ratio, via the same authenticated thumbnail blob _loadThumbnail uses
+    // -- a plain <img src=API URL> would 401. Only the *ratio* matters
+    // here, so a downscaled thumbnail is exactly as good as the original.
+    async _wallpaperImageAspectRatio(imageId) {
+      const resp = await fetch(`/api/digital_frames/library/image/${encodeURIComponent(imageId)}?thumb=480`, {
+        headers: this._authHeaders(),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      try {
+        return await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img.naturalWidth / img.naturalHeight);
+          img.onerror = () => reject(new Error('failed to decode image'));
+          img.src = url;
+        });
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    // Sets the wallpaper image, seeding a sensible default rect (fit to
+    // the wall's current content bounding box, preserving native aspect
+    // ratio) the first time an image is chosen for this editing session.
+    // Picking a *different* image while editing an existing wallpaper
+    // scene keeps editing that same scene (sceneId/sceneName carry over).
+    async _selectWallWallpaperImage(imageId) {
+      let aspectRatio = 1;
+      try {
+        aspectRatio = await this._wallpaperImageAspectRatio(imageId);
+      } catch (err) {
+        console.error('[fraimic-panel] Failed to read wallpaper image dimensions:', err);
+      }
+      const box = this._wallContentBoundingBox() || { minX: 40, minY: 40, width: 400, height: 300 };
+      const height = box.height || 300;
+      const width = height * aspectRatio;
+      const centerX = box.minX + (box.width || 400) / 2;
+      const centerY = box.minY + (box.height || 300) / 2;
+      const prior = this._wallWallpaperEdit;
+      this._wallWallpaperEdit = {
+        imageId, aspectRatio,
+        sceneId: (prior && prior.sceneId) || null,
+        sceneName: (prior && prior.sceneName) || null,
+        x: centerX - width / 2,
+        y: centerY - height / 2,
+        width, height,
+      };
+      this._closeWallWallpaperPicker();
+      this._renderWallCanvas();
+    }
+
+    async _openWallWallpaperPicker() {
       const root = this.shadowRoot;
-      const canvas = root.getElementById('wall-canvas');
-      if (!canvas) return;
-
-      canvas.innerHTML = '';
-
-      const box = this._wallContentBoundingBox();
-      if (box) {
-        const bg = document.createElement('div');
-        bg.className = 'af-wallpaper-bg';
-        bg.style.left = `${box.minX}px`;
-        bg.style.top = `${box.minY}px`;
-        bg.style.width = `${box.width}px`;
-        bg.style.height = `${box.height}px`;
-        if (this._afBackgroundImageId) {
-          // Authenticated fetch -> blob URL, cached -- a plain <img src=API
-          // URL> would 401 (the library endpoint needs auth headers).
-          this._loadThumbnail(this._afBackgroundImageId, bg);
-        } else {
-          bg.innerHTML = `<div class="af-wallpaper-bg-empty">Pick or generate a background image</div>`;
+      const overlay = root.getElementById('wall-wallpaper-picker-overlay');
+      const grid = root.getElementById('wall-wallpaper-picker-grid');
+      const fb = root.getElementById('wall-wallpaper-picker-fb');
+      if (!overlay || !grid) return;
+      fb.style.display = 'none';
+      grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">Loading…</div>';
+      overlay.style.display = 'flex';
+      try {
+        const resp = await fetch('/api/digital_frames/library/list?sort=uploaded_desc', { headers: this._authHeaders() });
+        const result = await resp.json();
+        const images = result.images || [];
+        grid.innerHTML = '';
+        if (!images.length) {
+          grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">No images in your library yet.</div>';
+          return;
         }
+        for (const image of images) {
+          const cell = document.createElement('div');
+          cell.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;background:#000;cursor:pointer;border:2px solid transparent';
+          cell.title = image.filename || '';
+          const thumb = document.createElement('div');
+          thumb.style.cssText = 'width:100%;height:100%';
+          cell.appendChild(thumb);
+          this._loadThumbnail(image.image_id, thumb);
+          cell.addEventListener('click', () => this._selectWallWallpaperImage(image.image_id));
+          grid.appendChild(cell);
+        }
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = `Failed to load library: ${err.message}`;
+        fb.style.display = 'block';
+      }
+    }
+
+    _closeWallWallpaperPicker() {
+      const overlay = this.shadowRoot.getElementById('wall-wallpaper-picker-overlay');
+      if (overlay) overlay.style.display = 'none';
+    }
+
+    // Renders the wallpaper skin into #wall-canvas: a background-image
+    // layer at its own independent rect, plus one transparent, border-only,
+    // draggable tile per placed frame -- no palette-thumbnail content,
+    // since a wallpaper frame has no image of its own to assign (until an
+    // image is chosen, a tile shows its own current on-frame thumbnail
+    // instead, same as normal mode would).
+    _renderWallWallpaperTiles(canvas) {
+      const edit = this._wallWallpaperEdit;
+
+      if (edit && edit.imageId) {
+        const bg = document.createElement('div');
+        bg.className = 'wall-wallpaper-bg';
+        bg.style.left = `${edit.x}px`;
+        bg.style.top = `${edit.y}px`;
+        bg.style.width = `${edit.width}px`;
+        bg.style.height = `${edit.height}px`;
+        const imgWrap = document.createElement('div');
+        imgWrap.style.cssText = 'width:100%;height:100%';
+        // Authenticated fetch -> blob URL, cached -- a plain <img src=API
+        // URL> would 401 (the library endpoint needs auth headers).
+        this._loadThumbnail(edit.imageId, imgWrap);
+        imgWrap.addEventListener('pointerdown', (e) => this._wallpaperImageBeginDrag(e, 'move'));
+        bg.appendChild(imgWrap);
+
+        const handle = document.createElement('div');
+        handle.className = 'wall-wallpaper-resize-handle';
+        handle.title = 'Drag to zoom (aspect ratio locked)';
+        handle.addEventListener('pointerdown', (e) => this._wallpaperImageBeginDrag(e, 'resize'));
+        bg.appendChild(handle);
+
         canvas.appendChild(bg);
+      } else {
+        const hint = document.createElement('div');
+        hint.className = 'wall-wallpaper-empty-hint';
+        hint.textContent = 'Choose an image above to use as this wall’s wallpaper';
+        canvas.appendChild(hint);
       }
 
-      // Until a background is chosen, a frame's window has nothing to show
-      // through to -- show what's actually on that physical frame right
-      // now instead of an empty box, same as the Walls tab would. The
-      // instant a background is picked, every tile drops its thumbnail and
-      // becomes a transparent window (below), since there's a wallpaper to
-      // show through it instead.
-      const hasBackground = !!this._afBackgroundImageId;
-
+      const hasImage = !!(edit && edit.imageId);
       for (const entryId of Object.keys(this._wallPlacements)) {
         const frame = this._frames.find(f => f.entryId === entryId);
         if (!frame) continue;
@@ -9222,19 +9171,183 @@
         tile.title = frame.title;
         tile.tabIndex = 0;
 
-        if (hasBackground) {
-          tile.className = 'wall-tile af-wallpaper-tile';
-          tile.innerHTML = `<div class="af-wallpaper-tile-label">${this._esc(frame.title)}</div>`;
+        if (hasImage) {
+          tile.className = 'wall-tile wall-wallpaper-tile';
+          tile.innerHTML = `<div class="wall-wallpaper-tile-label">${this._esc(frame.title)}</div>`;
         } else {
           tile.className = 'wall-tile';
           tile.innerHTML = `
             <img src="/api/digital_frames/frame/${this._esc(entryId)}/thumbnail" alt="" style="width:100%;height:100%;object-fit:cover">
-            <div class="af-wallpaper-tile-label">${this._esc(frame.title)}</div>
+            <div class="wall-wallpaper-tile-label">${this._esc(frame.title)}</div>
           `;
         }
         if (this._wallSelection.has(entryId)) tile.classList.add('selected');
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
         canvas.appendChild(tile);
+      }
+    }
+
+    // Pans (kind='move') or zooms (kind='resize', uniform + aspect-locked,
+    // anchored at the image's top-left) the wallpaper image. A free-form
+    // pointer drag like _wallBeginDrag's, but with no grid snap and no
+    // collision detection -- the image can be panned/scaled anywhere,
+    // including past the canvas's visible edges.
+    _wallpaperImageBeginDrag(e, kind) {
+      e.preventDefault();
+      e.stopPropagation(); // don't let this bubble into the canvas's marquee-select handler
+      const edit = this._wallWallpaperEdit;
+      if (!edit) return;
+      this._wallpaperDrag = {
+        kind,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startX: edit.x, startY: edit.y,
+        startWidth: edit.width, startHeight: edit.height,
+      };
+      window.addEventListener('pointermove', this._onWallpaperImagePointerMove, { signal: this._abort.signal });
+      window.addEventListener('pointerup', this._onWallpaperImagePointerUp, { signal: this._abort.signal });
+    }
+
+    _onWallpaperImagePointerMove(e) {
+      const drag = this._wallpaperDrag;
+      const edit = this._wallWallpaperEdit;
+      if (!drag || !edit) return;
+      const dx = e.clientX - drag.startClientX;
+      const dy = e.clientY - drag.startClientY;
+      if (drag.kind === 'move') {
+        edit.x = drag.startX + dx;
+        edit.y = drag.startY + dy;
+      } else {
+        const width = Math.max(20, drag.startWidth + dx);
+        edit.width = width;
+        edit.height = width / edit.aspectRatio;
+      }
+      // Direct style mutation (not a full re-render) keeps the drag smooth
+      // and avoids reloading the background <img> on every pointer move.
+      const bg = this.shadowRoot.getElementById('wall-canvas').querySelector('.wall-wallpaper-bg');
+      if (bg) {
+        bg.style.left = `${edit.x}px`;
+        bg.style.top = `${edit.y}px`;
+        bg.style.width = `${edit.width}px`;
+        bg.style.height = `${edit.height}px`;
+      }
+    }
+
+    _onWallpaperImagePointerUp() {
+      if (!this._wallpaperDrag) return;
+      window.removeEventListener('pointermove', this._onWallpaperImagePointerMove);
+      window.removeEventListener('pointerup', this._onWallpaperImagePointerUp);
+      this._wallpaperDrag = null;
+      // No auto-save here: like the per-frame picker's staged mappings,
+      // the wallpaper edit is local until an explicit Save Scene/Send.
+    }
+
+    // Save (as a scene) and/or send the current wallpaper edit -- called by
+    // the Walls tab's normal Save Scene / Send to Frames buttons, which
+    // dispatch here instead of their usual per-frame-mapping logic while
+    // _wallWallpaperMode is active. pushNow=false ("Save as Scene") builds/
+    // updates a scene without touching hardware; pushNow=true ("Send to
+    // Frames") pushes immediately. Editing a previously-loaded wallpaper
+    // scene (sceneId set) updates it in place rather than creating a
+    // duplicate.
+    async _saveWallWallpaper(pushNow) {
+      const fb = this.shadowRoot.getElementById('wall-scene-fb');
+      const edit = this._wallWallpaperEdit;
+      const wall = this._activeWall();
+
+      if (!wall || !edit || !edit.imageId) {
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent = 'Choose a wallpaper image first.';
+          fb.style.display = 'block';
+        }
+        return;
+      }
+
+      let sceneName = edit.sceneName;
+      if (!pushNow && !sceneName) {
+        sceneName = (window.prompt('Name this wallpaper scene:') || '').trim();
+        if (!sceneName) return;
+      }
+
+      const btn = this.shadowRoot.getElementById(pushNow ? 'wall-send-btn' : 'wall-save-scene-btn');
+      const origText = btn ? btn.textContent : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = pushNow ? '⏳ Sending…' : '🎬 Saving…';
+      }
+      if (fb) fb.style.display = 'none';
+
+      try {
+        // The backend computes crop boxes from the wall record it has on
+        // file, not from anything in this request -- flush any in-flight
+        // debounced drag save first so it sees the latest frame positions.
+        await this._flushWallLayoutSave();
+
+        const resp = await fetch(`/api/digital_frames/walls/${wall.wall_id}/wallpaper`, {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_id: edit.imageId,
+            image_rect: { x: edit.x, y: edit.y, width: edit.width, height: edit.height },
+            push_now: pushNow,
+            save_scene: !pushNow,
+            scene_name: sceneName || undefined,
+            scene_id: (!pushNow && edit.sceneId) || undefined,
+          }),
+        });
+
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
+        }
+        if (!pushNow && result.scene_save_error) {
+          throw new Error(result.scene_save_error);
+        }
+
+        if (!pushNow && result.scene_id) {
+          // Now editable in place on the next save, and reselectable from
+          // the scene picker without re-picking it.
+          edit.sceneId = result.scene_id;
+          edit.sceneName = sceneName;
+          await this._loadScenes();
+          this._renderWallScenePicker();
+          const sceneSelect = this.shadowRoot.getElementById('wall-scene-select');
+          if (sceneSelect) sceneSelect.value = result.scene_id;
+        }
+
+        if (fb) {
+          const failedCount = result.frames_failed || 0;
+          if (pushNow && failedCount > 0) {
+            const failedFrames = (result.results || [])
+              .filter(r => !r.sent)
+              .map(r => {
+                const frame = this._frames.find(f => f.entryId === r.entry_id);
+                return `${frame ? frame.title : r.entry_id}${r.message ? `: ${r.message}` : ''}`;
+              })
+              .join('; ');
+            fb.className = 'feedback err';
+            fb.textContent = `⚠ Sent to ${result.frames_updated - failedCount} of ${result.frames_updated} frames -- failed: ${failedFrames}`;
+          } else {
+            fb.className = 'feedback ok';
+            fb.textContent = pushNow
+              ? '🚀 Wallpaper sent to all wall frames successfully!'
+              : `🎬 Saved Home Assistant Scene "${sceneName}" successfully!`;
+          }
+          fb.style.display = 'block';
+        }
+      } catch (err) {
+        console.error('[fraimic-panel] Wallpaper save/send failed:', err);
+        if (fb) {
+          fb.className = 'feedback err';
+          fb.textContent = `Action failed: ${err.message}`;
+          fb.style.display = 'block';
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
       }
     }
 
@@ -9296,6 +9409,8 @@
     }
 
     async _sendWallToFrames() {
+      if (this._wallWallpaperMode) return this._saveWallWallpaper(true);
+
       const fb  = this.shadowRoot.getElementById('wall-scene-fb');
       const btn = this.shadowRoot.getElementById('wall-send-btn');
 
@@ -9835,7 +9950,7 @@
         if (drag.kind === 'palette') {
           // Dropped outside the wall -- treat as a cancel rather than
           // snapping it onto whichever edge happens to be nearest.
-          this._renderActiveWallCanvas();
+          this._renderWallCanvas();
         } else {
           // Dragging a placed tile off the wall removes it -- the drag
           // twin of the tile's ✕ button.
@@ -9853,7 +9968,7 @@
           tileEl.style.left = `${drag.startLeft}px`;
           tileEl.style.top  = `${drag.startTop}px`;
         } else {
-          this._renderActiveWallCanvas();
+          this._renderWallCanvas();
         }
         return;
       }
@@ -9863,17 +9978,15 @@
       // lifts its tombstone, or the backend would keep it off at the next
       // reconcile.
       this._wallExcluded = this._wallExcluded.filter(id => id !== drag.entryId);
-      if (drag.kind === 'tile' && tileEl && this._wallCanvasMode !== 'wallpaper') {
+      if (drag.kind === 'tile' && tileEl) {
         // Repositioning changes nothing structural (same tiles, same
-        // palette, same mappings) -- move the one tile in place instead of
-        // tearing down and rebuilding the whole canvas. Skipped in
-        // wallpaper mode: the background layer's bounding box can change
-        // with any tile's position, so that skin always does a full
-        // re-render on drop (see _renderArtFactoryWallpaperCanvas).
+        // palette, same mappings, and -- in wallpaper mode -- the same
+        // independent background rect) -- move the one tile in place
+        // instead of tearing down and rebuilding the whole canvas.
         tileEl.style.left = `${x}px`;
         tileEl.style.top  = `${y}px`;
       } else {
-        this._renderActiveWallCanvas();
+        this._renderWallCanvas();
       }
       this._scheduleWallLayoutSave();
     }
@@ -9891,7 +10004,7 @@
         this._wallExcluded.push(entryId);
       }
       this._wallSelection.delete(entryId);
-      this._renderActiveWallCanvas();
+      this._renderWallCanvas();
       this._updateWallAlignToolbar();
       this._scheduleWallLayoutSave();
     }
@@ -10033,6 +10146,21 @@
       this._wallPendingPickAlbum = {};
       // Toggles the Delete Scene button too -- see _renderWallScenePicker.
       this._renderWallScenePicker();
+      if (this._wallWallpaperMode) {
+        // Picking a different scene while already in the wallpaper editor
+        // re-seeds it from that scene's stored transform, if it has one
+        // (see Scene.wallpaper) -- otherwise there's nothing wallpaper-
+        // shaped to load, so just clear back to "choose an image".
+        const scene = this._wallActiveSceneId
+          && this._scenes.find(s => s.scene_id === this._wallActiveSceneId);
+        if (scene && scene.wallpaper) {
+          this._loadWallWallpaperFromScene(scene);
+        } else {
+          this._wallWallpaperEdit = null;
+          this._renderWallCanvas();
+        }
+        return;
+      }
       this._renderWallCanvas();
     }
 
@@ -10550,6 +10678,8 @@
     // is what gets saved -- not just frames placed on this wall's canvas,
     // since a frame works the same on or off it.
     async _saveWallScene() {
+      if (this._wallWallpaperMode) return this._saveWallWallpaper(false);
+
       const fb = this.shadowRoot.getElementById('wall-scene-fb');
 
       if (!this._wallActiveSceneId) {
@@ -11347,619 +11477,6 @@
       return el;
     }
 
-    async _initArtFactoryTab() {
-      const root = this.shadowRoot;
-      const engineBadge = root.getElementById('art-factory-engine-badge');
-      const targetSelect = root.getElementById('art-factory-target-frame');
-      const wallSelect = root.getElementById('art-factory-wall-select');
-      const generateBtn = root.getElementById('art-factory-generate-btn');
-      const promptEl = root.getElementById('art-factory-prompt');
-      const styleEl = root.getElementById('art-factory-style');
-      const sizeEl = root.getElementById('art-factory-size');
-      const saveLibCb = root.getElementById('art-factory-save-lib-cb');
-      const fb = root.getElementById('art-factory-fb');
-      const lastResult = root.getElementById('art-factory-last-result');
-      const previewImg = root.getElementById('art-factory-preview-img');
-      const engineInfo = root.getElementById('art-factory-engine-info');
-      const sendBtn = root.getElementById('art-factory-send-btn');
-      const sendSpanBtn = root.getElementById('art-factory-send-span-btn');
-      const saveSceneBtn = root.getElementById('art-factory-save-scene-btn');
-      const downloadBtn = root.getElementById('art-factory-download-btn');
-      const useAsBgBtn = root.getElementById('art-factory-use-as-bg-btn');
-      const newWallBtn = root.getElementById('art-factory-new-wall-btn');
-      const chooseBgBtn = root.getElementById('art-factory-choose-bg-btn');
-      const bgPickerOverlay = root.getElementById('art-factory-bg-picker-overlay');
-      const bgPickerCancel = root.getElementById('art-factory-bg-picker-cancel');
-      const useWallSizeBtn = root.getElementById('art-factory-use-wall-size-btn');
-      const sceneSelect = root.getElementById('art-factory-scene-select');
-
-      if (!this._artFactoryHistory) this._artFactoryHistory = [];
-
-      // 1. Load engine status
-      try {
-        const resp = await fetch('/api/digital_frames/art_factory/status', { headers: this._authHeaders() });
-        const data = await resp.json().catch(() => ({}));
-        if (engineBadge && data.active_engine) {
-          engineBadge.textContent = `🤖 ${data.active_engine}`;
-        }
-      } catch (err) {
-        if (engineBadge) engineBadge.textContent = '🤖 Public AI Generator';
-      }
-
-      // 2. Populate wall select & target frame select -- re-run every time
-      // this tab is shown (not gated behind a _bound flag), since wall/
-      // frame data loaded during startup can land after the first call.
-      const populateSelects = () => {
-        if (targetSelect) {
-          targetSelect.innerHTML = '';
-          (this._frames || []).forEach(f => {
-            const id = f.entryId || f.entry_id;
-            if (!id) return;
-            const opt = document.createElement('option');
-            opt.value = id;
-            opt.textContent = `🖥 ${f.title || id}`;
-            targetSelect.appendChild(opt);
-          });
-        }
-        if (wallSelect) {
-          wallSelect.innerHTML = '';
-          const walls = this._walls || [];
-          walls.forEach(w => {
-            const opt = document.createElement('option');
-            opt.value = w.wall_id;
-            opt.textContent = w.kind === 'default' ? '🖼 All Frames Wall' : `🧱 ${w.name}`;
-            if (w.wall_id === this._activeWallId) opt.selected = true;
-            wallSelect.appendChild(opt);
-          });
-        }
-        if (sceneSelect) {
-          sceneSelect.innerHTML = '<option value="">＋ New Scene…</option>';
-          (this._scenes || []).forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s.scene_id;
-            opt.textContent = s.name;
-            sceneSelect.appendChild(opt);
-          });
-          sceneSelect.value = this._afLoadedSceneId || '';
-        }
-        this._updateArtFactoryBgLabel();
-        this._updateArtFactoryWallSizeHint();
-      };
-      populateSelects();
-
-      if (wallSelect && !wallSelect._bound) {
-        wallSelect._bound = true;
-        // Switches the one shared active wall (see _setActiveWall) -- the
-        // Walls tab sees this exact same change the next time it's shown.
-        wallSelect.onchange = () => {
-          this._openWallForArtFactory(wallSelect.value);
-          this._updateArtFactoryWallSizeHint();
-          // A loaded scene's mappings were validated against the previous
-          // wall's frames -- switching walls starts a fresh "New Scene"
-          // rather than silently retargeting the old scene at a different
-          // wall's frames. The background image itself is left as-is; it
-          // can still be reused on the new wall, just as a new scene.
-          this._afLoadedSceneId = null;
-          if (sceneSelect) sceneSelect.value = '';
-          const sceneNameInput = root.getElementById('art-factory-scene-name');
-          if (sceneNameInput) sceneNameInput.value = '';
-        };
-      }
-
-      if (sceneSelect && !sceneSelect._bound) {
-        sceneSelect._bound = true;
-        sceneSelect.onchange = () => this._loadArtFactoryScene(sceneSelect.value);
-      }
-
-      if (useWallSizeBtn && !useWallSizeBtn._bound) {
-        useWallSizeBtn._bound = true;
-        useWallSizeBtn.onclick = () => this._useArtFactoryWallSizeForGeneration();
-      }
-
-      if (newWallBtn && !newWallBtn._bound) {
-        newWallBtn._bound = true;
-        newWallBtn.onclick = async () => {
-          // _createWall() -> _openWall() already re-renders the wallpaper
-          // canvas (see _renderWallsSubview's active-tab check); this just
-          // needs to refresh this tab's own wall <select> options.
-          await this._createWall();
-          populateSelects();
-        };
-      }
-
-      if (chooseBgBtn && !chooseBgBtn._bound) {
-        chooseBgBtn._bound = true;
-        chooseBgBtn.onclick = () => this._openArtFactoryBgPicker();
-      }
-      if (bgPickerCancel && !bgPickerCancel._bound) {
-        bgPickerCancel._bound = true;
-        bgPickerCancel.onclick = () => this._closeArtFactoryBgPicker();
-      }
-      if (bgPickerOverlay && !bgPickerOverlay._bound) {
-        bgPickerOverlay._bound = true;
-        bgPickerOverlay.addEventListener('click', (e) => {
-          if (e.target === bgPickerOverlay) this._closeArtFactoryBgPicker();
-        });
-      }
-
-      // 3. Quick preset pills click handlers
-      root.querySelectorAll('#art-factory-presets .art-preset-pill').forEach(pill => {
-        pill.onclick = () => {
-          if (promptEl) promptEl.value = pill.dataset.prompt;
-          if (styleEl && pill.dataset.style) styleEl.value = pill.dataset.style;
-        };
-      });
-
-      // 4. Generate Button click handler. Generation is always standalone --
-      // it produces one library image, full stop, never "for" a particular
-      // wall. Turning a result into a wallpaper background is a separate,
-      // explicit step (button 5 below) so any generated (or previously
-      // generated, via the history strip) image can be used that way later,
-      // and picking an existing library image works exactly as well as a
-      // fresh generation.
-      if (generateBtn && !generateBtn._bound) {
-        generateBtn._bound = true;
-        generateBtn.onclick = async () => {
-          const prompt = (promptEl.value || '').trim();
-          if (!prompt) {
-            if (fb) {
-              fb.className = 'feedback err';
-              fb.textContent = 'Please enter a prompt first.';
-              fb.style.display = 'block';
-            }
-            return;
-          }
-
-          if (fb) fb.style.display = 'none';
-          generateBtn.disabled = true;
-          const origText = generateBtn.textContent;
-          generateBtn.textContent = '✨ Generating Artwork...';
-
-          const [wStr, hStr] = (sizeEl.value || '1024x1024').split('x');
-
-          try {
-            const resp = await fetch('/api/digital_frames/art_factory/generate', {
-              method: 'POST',
-              headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt,
-                style: styleEl.value,
-                width: parseInt(wStr, 10),
-                height: parseInt(hStr, 10),
-                save_to_library: saveLibCb.checked,
-              }),
-            });
-
-            const result = await resp.json().catch(() => ({}));
-            if (!resp.ok || !result.success) {
-              throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
-            }
-
-            this._showArtFactoryResult(result);
-            this._lastArtFactoryResult = result;
-
-            // Add to session history
-            this._artFactoryHistory.unshift(result);
-            if (this._artFactoryHistory.length > 8) this._artFactoryHistory.pop();
-            this._renderArtFactoryHistory();
-
-          } catch (err) {
-            console.error('[fraimic-panel] Art Factory generation failed:', err);
-            if (fb) {
-              fb.className = 'feedback err';
-              fb.textContent = `Generation failed: ${err.message}`;
-              fb.style.display = 'block';
-            }
-          } finally {
-            generateBtn.disabled = false;
-            generateBtn.textContent = origText;
-          }
-        };
-      }
-
-      // 5. Use the last generated result as this wall's wallpaper background
-      if (useAsBgBtn && !useAsBgBtn._bound) {
-        useAsBgBtn._bound = true;
-        useAsBgBtn.onclick = () => {
-          if (!this._lastArtFactoryResult || !this._lastArtFactoryResult.image_id) return;
-          this._selectArtFactoryBackground(
-            this._lastArtFactoryResult.image_id,
-            this._lastArtFactoryResult.prompt || 'Generated image'
-          );
-        };
-      }
-
-      // 6. Save as Scene / Send to Frames Now (wallpaper editor)
-      if (saveSceneBtn && !saveSceneBtn._bound) {
-        saveSceneBtn._bound = true;
-        saveSceneBtn.onclick = () => this._sendArtFactoryWallpaper(false);
-      }
-      if (sendSpanBtn && !sendSpanBtn._bound) {
-        sendSpanBtn._bound = true;
-        sendSpanBtn.onclick = () => this._sendArtFactoryWallpaper(true);
-      }
-
-      // 7. Send Single Frame button
-      if (sendBtn && !sendBtn._bound) {
-        sendBtn._bound = true;
-        sendBtn.onclick = async () => {
-          if (!this._lastArtFactoryResult) return;
-          if (targetSelect && !targetSelect.children.length) populateSelects();
-          const targetEntryId = targetSelect ? targetSelect.value : null;
-          if (!targetEntryId) return;
-
-          sendBtn.disabled = true;
-          const origText = sendBtn.textContent;
-          sendBtn.textContent = '🚀 Sending...';
-
-          try {
-            if (this._lastArtFactoryResult.image_id) {
-              await fetch('/api/digital_frames/library/send', {
-                method: 'POST',
-                headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  entry_id: targetEntryId,
-                  image_id: this._lastArtFactoryResult.image_id,
-                }),
-              });
-            }
-            if (fb) {
-              fb.className = 'feedback ok';
-              fb.textContent = 'Artwork sent to single frame successfully!';
-              fb.style.display = 'block';
-            }
-          } catch (err) {
-            if (fb) {
-              fb.className = 'feedback err';
-              fb.textContent = `Send failed: ${err.message}`;
-              fb.style.display = 'block';
-            }
-          } finally {
-            sendBtn.disabled = false;
-            sendBtn.textContent = origText;
-          }
-        };
-      }
-
-      this._renderArtFactoryHistory();
-      if (this._lastArtFactoryResult) {
-        this._showArtFactoryResult(this._lastArtFactoryResult);
-      }
-    }
-
-    // Populates the small "last generated result" strip -- shared by a
-    // fresh generation and re-clicking an older history thumbnail.
-    _showArtFactoryResult(result) {
-      const root = this.shadowRoot;
-      const lastResult = root.getElementById('art-factory-last-result');
-      const previewImg = root.getElementById('art-factory-preview-img');
-      const engineInfo = root.getElementById('art-factory-engine-info');
-      const downloadBtn = root.getElementById('art-factory-download-btn');
-      const useAsBgBtn = root.getElementById('art-factory-use-as-bg-btn');
-      if (lastResult) lastResult.style.display = 'flex';
-      if (previewImg) previewImg.src = result.preview_url;
-      if (engineInfo) engineInfo.textContent = `Generated via ${result.engine_used}`;
-      if (downloadBtn) downloadBtn.href = result.preview_url;
-      if (useAsBgBtn) useAsBgBtn.disabled = !result.image_id;
-    }
-
-    _updateArtFactoryBgLabel() {
-      const label = this.shadowRoot.getElementById('art-factory-bg-name');
-      if (!label) return;
-      label.textContent = this._afBackgroundImageName || 'None selected';
-    }
-
-    // Loads a previously-saved wallpaper scene back into the editor so it
-    // can be re-adjusted and re-saved in place -- there was previously no
-    // way to reopen one at all (its background/crop mapping only ever got
-    // *written*, never read back). A scene built here always maps each of
-    // this wall's frames to the same shared image_id via an "image_crop"
-    // mapping (see _sendArtFactoryWallpaper) -- that's what's searched for
-    // among the scene's mappings, restricted to entries actually on the
-    // current wall (a scene could span a different wall's frames, or be an
-    // ordinary per-frame Walls-tab scene with no wallpaper background at
-    // all, in which case there's nothing to load).
-    _loadArtFactoryScene(sceneId) {
-      const root = this.shadowRoot;
-      const sceneNameInput = root.getElementById('art-factory-scene-name');
-      const fb = root.getElementById('art-factory-fb');
-
-      if (!sceneId) {
-        this._afLoadedSceneId = null;
-        if (sceneNameInput) sceneNameInput.value = '';
-        return;
-      }
-
-      const scene = (this._scenes || []).find(s => s.scene_id === sceneId);
-      if (!scene) return;
-
-      const wallEntryIds = new Set(Object.keys(this._wallPlacements));
-      let backgroundImageId = null;
-      for (const [entryId, mapping] of Object.entries(scene.mappings || {})) {
-        if (wallEntryIds.has(entryId) && mapping && typeof mapping === 'object' && mapping.type === 'image_crop') {
-          backgroundImageId = mapping.image_id;
-          break;
-        }
-      }
-
-      if (!backgroundImageId) {
-        if (fb) {
-          fb.className = 'feedback err';
-          fb.textContent = `"${scene.name}" has no wallpaper background for this wall's frames -- pick a different scene, or switch to the wall it was built for.`;
-          fb.style.display = 'block';
-        }
-        this._afLoadedSceneId = null;
-        const sceneSelect = root.getElementById('art-factory-scene-select');
-        if (sceneSelect) sceneSelect.value = '';
-        if (sceneNameInput) sceneNameInput.value = '';
-        return;
-      }
-
-      this._afLoadedSceneId = sceneId;
-      if (sceneNameInput) sceneNameInput.value = scene.name;
-      this._selectArtFactoryBackground(backgroundImageId, scene.name);
-    }
-
-    // Fetches the active wall's aggregate spanned-canvas size (the same
-    // geometry a save/send will compute) purely to show it -- generation
-    // itself stays completely decoupled from any wall (see the generate
-    // button's own handler): this is just a number the user can act on.
-    async _updateArtFactoryWallSizeHint() {
-      const hint = this.shadowRoot.getElementById('art-factory-wall-size-hint');
-      if (!hint) return;
-      const wall = this._activeWall();
-      if (!wall) {
-        hint.textContent = '';
-        return;
-      }
-      hint.textContent = 'Checking wall size…';
-      try {
-        const geometry = await this._fetchArtFactoryWallGeometry(wall.wall_id);
-        this._afWallGeometry = geometry;
-        hint.textContent = `This wall spans ${geometry.canvas_width}×${geometry.canvas_height}px.`;
-      } catch (err) {
-        this._afWallGeometry = null;
-        hint.textContent = '';
-      }
-    }
-
-    async _fetchArtFactoryWallGeometry(wallId) {
-      const bezelCb = this.shadowRoot.getElementById('art-factory-bezel-cb');
-      const preserveBezelGaps = bezelCb ? bezelCb.checked : true;
-      const resp = await fetch(
-        `/api/digital_frames/walls/${wallId}/geometry?preserve_bezel_gaps=${preserveBezelGaps}`,
-        { headers: this._authHeaders() }
-      );
-      const result = await resp.json().catch(() => ({}));
-      if (!resp.ok || !result.success) {
-        throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
-      }
-      return result;
-    }
-
-    // Injects (or reuses) a "Wall Size" option in the Canvas Size dropdown
-    // set to this wall's exact aggregate pixel dimensions, and selects it --
-    // one click to size the *next* generation for spanning this wall,
-    // without generation itself ever being locked to it.
-    async _useArtFactoryWallSizeForGeneration() {
-      const root = this.shadowRoot;
-      const wall = this._activeWall();
-      const sizeEl = root.getElementById('art-factory-size');
-      const fb = root.getElementById('art-factory-fb');
-      if (!wall || !sizeEl) return;
-      try {
-        const geometry = this._afWallGeometry && this._afWallGeometry.wall_id === wall.wall_id
-          ? this._afWallGeometry
-          : await this._fetchArtFactoryWallGeometry(wall.wall_id);
-        this._afWallGeometry = geometry;
-        const value = `${geometry.canvas_width}x${geometry.canvas_height}`;
-        let option = [...sizeEl.options].find(o => o.dataset.wallSize === 'true');
-        if (!option) {
-          option = document.createElement('option');
-          option.dataset.wallSize = 'true';
-          sizeEl.appendChild(option);
-        }
-        option.value = value;
-        option.textContent = `Wall Size (${value})`;
-        sizeEl.value = value;
-      } catch (err) {
-        if (fb) {
-          fb.className = 'feedback err';
-          fb.textContent = `Couldn't read wall size: ${err.message}`;
-          fb.style.display = 'block';
-        }
-      }
-    }
-
-    // Sets the wallpaper background (from the picker or "Use as Wallpaper
-    // Background") and redraws the canvas immediately if it's showing.
-    _selectArtFactoryBackground(imageId, name) {
-      this._afBackgroundImageId = imageId;
-      this._afBackgroundImageName = name || null;
-      this._updateArtFactoryBgLabel();
-      this._closeArtFactoryBgPicker();
-      if (this._wallCanvasMode === 'wallpaper') this._renderArtFactoryWallpaperCanvas();
-    }
-
-    async _openArtFactoryBgPicker() {
-      const root = this.shadowRoot;
-      const overlay = root.getElementById('art-factory-bg-picker-overlay');
-      const grid = root.getElementById('art-factory-bg-picker-grid');
-      const fb = root.getElementById('art-factory-bg-picker-fb');
-      if (!overlay || !grid) return;
-      fb.style.display = 'none';
-      grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">Loading…</div>';
-      overlay.style.display = 'flex';
-      try {
-        const resp = await fetch('/api/digital_frames/library/list?sort=uploaded_desc', { headers: this._authHeaders() });
-        const result = await resp.json();
-        const images = result.images || [];
-        grid.innerHTML = '';
-        if (!images.length) {
-          grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">No images in your library yet -- generate one first.</div>';
-          return;
-        }
-        for (const image of images) {
-          const cell = document.createElement('div');
-          cell.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;background:#000;cursor:pointer;border:2px solid transparent';
-          cell.title = image.filename || '';
-          const thumb = document.createElement('div');
-          thumb.style.cssText = 'width:100%;height:100%';
-          cell.appendChild(thumb);
-          this._loadThumbnail(image.image_id, thumb);
-          cell.addEventListener('click', () => this._selectArtFactoryBackground(image.image_id, image.filename));
-          grid.appendChild(cell);
-        }
-      } catch (err) {
-        fb.className = 'feedback err';
-        fb.textContent = `Failed to load library: ${err.message}`;
-        fb.style.display = 'block';
-      }
-    }
-
-    _closeArtFactoryBgPicker() {
-      const overlay = this.shadowRoot.getElementById('art-factory-bg-picker-overlay');
-      if (overlay) overlay.style.display = 'none';
-    }
-
-    // "Save as Scene" (pushNow=false) builds/updates a crop-based scene
-    // without touching hardware; "Send to Frames Now" (pushNow=true) pushes
-    // immediately without necessarily saving a scene -- same distinction
-    // (and the same backend push_now flag) the Walls tab's own Save Scene
-    // vs Send to Frames buttons draw.
-    async _sendArtFactoryWallpaper(pushNow) {
-      const root = this.shadowRoot;
-      const fb = root.getElementById('art-factory-fb');
-      const bezelCb = root.getElementById('art-factory-bezel-cb');
-      const sceneNameInput = root.getElementById('art-factory-scene-name');
-      const sendSpanBtn = root.getElementById('art-factory-send-span-btn');
-      const saveSceneBtn = root.getElementById('art-factory-save-scene-btn');
-
-      const wall = this._activeWall();
-      const targetBtn = pushNow ? sendSpanBtn : saveSceneBtn;
-
-      if (!wall || !this._afBackgroundImageId) {
-        if (fb) {
-          fb.className = 'feedback err';
-          fb.textContent = 'Pick a wall and a background image first.';
-          fb.style.display = 'block';
-        }
-        return;
-      }
-
-      const sceneName = sceneNameInput ? (sceneNameInput.value || '').trim() : '';
-      if (fb) fb.style.display = 'none';
-      if (targetBtn) {
-        targetBtn.disabled = true;
-        targetBtn.textContent = pushNow ? '🚀 Sending...' : '🎬 Saving Scene...';
-      }
-
-      try {
-        // The backend computes crop boxes from the wall record it has on
-        // file, not from anything in this request -- flush any in-flight
-        // debounced drag save first so it sees the latest positions.
-        await this._flushWallLayoutSave();
-
-        const resp = await fetch(`/api/digital_frames/walls/${wall.wall_id}/span_image`, {
-          method: 'POST',
-          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_type: 'library',
-            image_id: this._afBackgroundImageId,
-            preserve_bezel_gaps: bezelCb ? bezelCb.checked : true,
-            push_now: pushNow,
-            save_scene: !pushNow,
-            scene_name: sceneName || undefined,
-            // Editing a previously-loaded scene updates it in place instead
-            // of colliding with its own name as a "new" scene (see
-            // _loadArtFactoryScene / walls_http.py's existing_scene_id).
-            scene_id: (!pushNow && this._afLoadedSceneId) || undefined,
-          }),
-        });
-
-        const result = await resp.json().catch(() => ({}));
-        if (!resp.ok || !result.success) {
-          throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
-        }
-
-        if (!pushNow && result.scene_save_error) {
-          throw new Error(result.scene_save_error);
-        }
-
-        if (!pushNow && result.scene_id) {
-          // Now editable in place on the next save, and selectable again
-          // (e.g. after switching walls and back) without re-picking it.
-          this._afLoadedSceneId = result.scene_id;
-          await this._loadScenes();
-          const sceneSelect = root.getElementById('art-factory-scene-select');
-          if (sceneSelect) {
-            sceneSelect.innerHTML = '<option value="">＋ New Scene…</option>';
-            this._scenes.forEach(s => {
-              const opt = document.createElement('option');
-              opt.value = s.scene_id;
-              opt.textContent = s.name;
-              sceneSelect.appendChild(opt);
-            });
-            sceneSelect.value = result.scene_id;
-          }
-        }
-
-        if (fb) {
-          const failedCount = result.frames_failed || 0;
-          if (pushNow && failedCount > 0) {
-            const failedFrames = (result.results || [])
-              .filter(r => !r.sent)
-              .map(r => {
-                const frame = this._frames.find(f => f.entryId === r.entry_id);
-                return `${frame ? frame.title : r.entry_id}${r.message ? `: ${r.message}` : ''}`;
-              })
-              .join('; ');
-            fb.className = 'feedback err';
-            fb.textContent = `⚠ Sent to ${result.frames_updated - failedCount} of ${result.frames_updated} frames -- failed: ${failedFrames}`;
-          } else {
-            fb.className = 'feedback ok';
-            fb.textContent = pushNow
-              ? '🚀 Wallpaper sent to all wall frames successfully!'
-              : `🎬 Saved Home Assistant Scene "${sceneName || wall.name + ' Wallpaper'}" successfully!`;
-          }
-          fb.style.display = 'block';
-        }
-      } catch (err) {
-        console.error('[fraimic-panel] Wallpaper action failed:', err);
-        if (fb) {
-          fb.className = 'feedback err';
-          fb.textContent = `Action failed: ${err.message}`;
-          fb.style.display = 'block';
-        }
-      } finally {
-        if (targetBtn) {
-          targetBtn.disabled = false;
-          targetBtn.textContent = pushNow ? '🚀 Send to Frames Now' : '🎬 Save as Scene';
-        }
-      }
-    }
-
-    _renderArtFactoryHistory() {
-      const root = this.shadowRoot;
-      const grid = root.getElementById('art-factory-history-grid');
-      if (!grid) return;
-      if (!this._artFactoryHistory || this._artFactoryHistory.length === 0) {
-        grid.innerHTML = '<div style="color:var(--secondary-text-color);font-size:12px;grid-column:1/-1">Generations in this session will appear here.</div>';
-        return;
-      }
-
-      grid.innerHTML = '';
-      this._artFactoryHistory.forEach(item => {
-        const div = document.createElement('div');
-        div.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;background:#000;cursor:pointer;border:2px solid transparent;position:relative';
-        div.innerHTML = `<img src="${item.preview_url}" style="width:100%;height:100%;object-fit:cover" title="${this._esc(item.prompt)}">`;
-        div.onclick = () => {
-          this._lastArtFactoryResult = item;
-          this._showArtFactoryResult(item);
-        };
-        grid.appendChild(div);
-      });
-    }
 
     async _loadXotdInstances() {
       const fb = this.shadowRoot.getElementById('xotd-fb');

@@ -274,22 +274,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     from .walls_http import (  # noqa: PLC0415
         DigitalFramesWallsView,
         DigitalFramesWallView,
-        DigitalFramesWallGeometryView,
-        DigitalFramesWallSpanImageView,
+        DigitalFramesWallWallpaperView,
     )
 
     hass.http.register_view(DigitalFramesWallsView())
     hass.http.register_view(DigitalFramesWallView())
-    hass.http.register_view(DigitalFramesWallGeometryView())
-    hass.http.register_view(DigitalFramesWallSpanImageView())
-
-    from .art_factory_http import (  # noqa: PLC0415
-        DigitalFramesArtFactoryStatusView,
-        DigitalFramesArtFactoryGenerateView,
-    )
-
-    hass.http.register_view(DigitalFramesArtFactoryStatusView())
-    hass.http.register_view(DigitalFramesArtFactoryGenerateView())
+    hass.http.register_view(DigitalFramesWallWallpaperView())
 
     # Scene packs: curated bundles of public-domain images + an auto-built
     # scene, installable from the panel with no manual setup. Built on top

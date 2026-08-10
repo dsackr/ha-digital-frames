@@ -169,11 +169,13 @@ async def test_live_follow_device_orientation_wins_over_stale_option(
     assert geometry.canvas_height == 1200
 
 
-async def test_2d_wall_canvas_geometry_multiline_grid(hass, make_frame_entry):
-    """A 2x2 grid of frames with physical gaps computes 2D spatial crop boxes."""
-    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
+async def test_wallpaper_crop_boxes_independent_of_frame_bounding_box(hass, make_frame_entry):
+    """The defining property: image_rect is whatever the caller says it is
+    -- crop boxes are the frames' own overlap with it, never a canvas
+    stretched/refit to the frames' bounding box (the bug this replaced:
+    dragging a frame used to resize/distort the "image" to match)."""
+    from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
 
-    # 4 frames: row 1 at y=40 (x=40, x=200), row 2 at y=200 (x=40, x=200)
     # Tile dims for 1200x1600 portrait tile: width=105, height=140
     placements = {
         "e1": {"x": 40.0, "y": 40.0},
@@ -186,55 +188,87 @@ async def test_2d_wall_canvas_geometry_multiline_grid(hass, make_frame_entry):
         entry.add_to_hass(hass)
 
     wall = _wall(placements)
-    geometry = compute_2d_wall_canvas_geometry(hass, wall, preserve_bezel_gaps=True)
+    # A generously large image rect that fully contains every frame --
+    # picked independently of the frames' own span (40..305, 40..340).
+    image_rect = {"x": 0.0, "y": 0.0, "width": 1000.0, "height": 1000.0}
+    crop_boxes = compute_wallpaper_crop_boxes(hass, wall, image_rect)
 
-    # All placed frames used by default
-    assert set(geometry.crop_boxes.keys()) == {"e1", "e2", "e3", "e4"}
+    assert set(crop_boxes.keys()) == {"e1", "e2", "e3", "e4"}
+    # e1 at (40,40)-(145,180) within a 1000x1000 image.
+    c_e1 = crop_boxes["e1"]
+    assert c_e1[0] == pytest.approx(40 / 1000)
+    assert c_e1[1] == pytest.approx(40 / 1000)
+    assert c_e1[2] == pytest.approx(145 / 1000)
+    assert c_e1[3] == pytest.approx(180 / 1000)
 
-    # Top-left tile e1 (x: 40..145, y: 40..180) vs total span (x: 40..305, y: 40..340 => span_w=265, span_h=300)
-    c_e1 = geometry.crop_boxes["e1"]
-    assert c_e1[0] == 0.0
-    assert c_e1[1] == 0.0
-    assert 0.38 < c_e1[2] < 0.42
-    assert 0.45 < c_e1[3] < 0.48
-
-    # Bottom-right tile e4 ends at 1.0, 1.0
-    c_e4 = geometry.crop_boxes["e4"]
-    assert c_e4[2] == 1.0
-    assert c_e4[3] == 1.0
-
-
-async def test_2d_wall_canvas_geometry_gapless_packing(hass, make_frame_entry):
-    """Setting preserve_bezel_gaps=False produces tight rank-ordered crop slices."""
-    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
-
-    placements = {
-        "e1": {"x": 40.0, "y": 40.0},
-        "e2": {"x": 200.0, "y": 40.0},
-    }
-    for eid in ("e1", "e2"):
-        entry = make_frame_entry(entry_id=eid, width=1200, height=1600)
-        entry.add_to_hass(hass)
-
-    wall = _wall(placements)
-    geometry = compute_2d_wall_canvas_geometry(hass, wall, preserve_bezel_gaps=False)
-
-    assert geometry.crop_boxes["e1"] == (0.0, 0.0, 0.5, 1.0)
-    assert geometry.crop_boxes["e2"] == (0.5, 0.0, 1.0, 1.0)
+    # Moving e4 far away must not change e1's crop box at all -- unlike the
+    # old bounding-box-stretch model, where every frame's crop shifted
+    # whenever *any* frame moved.
+    wall.placements["e4"] = {"x": 900.0, "y": 900.0}
+    crop_boxes_after_move = compute_wallpaper_crop_boxes(hass, wall, image_rect)
+    assert crop_boxes_after_move["e1"] == c_e1
 
 
-async def test_2d_wall_canvas_geometry_unplaced_or_missing_entry_raises(hass, make_frame_entry):
+async def test_wallpaper_crop_boxes_partial_overlap_clamped_not_stretched(hass, make_frame_entry):
+    """A frame hanging off the image's edge shows exactly what overlaps,
+    clamped to [0, 1] -- never stretched to cover the rest of the frame."""
+    from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
+
+    entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
+    entry.add_to_hass(hass)
+    # Frame spans (40,40)-(145,180); image only covers up to x=100.
+    wall = _wall({"e1": {"x": 40.0, "y": 40.0}})
+    image_rect = {"x": 0.0, "y": 0.0, "width": 100.0, "height": 1000.0}
+
+    crop_boxes = compute_wallpaper_crop_boxes(hass, wall, image_rect)
+
+    c_e1 = crop_boxes["e1"]
+    assert c_e1[0] == pytest.approx(40 / 100)
+    assert c_e1[2] == 1.0  # clamped, not extrapolated past the image's edge
+
+
+async def test_wallpaper_crop_boxes_no_overlap_is_none(hass, make_frame_entry):
+    """A frame entirely outside the image rect gets None, not a degenerate
+    or clamped-to-nothing crop box -- the caller should exclude it from
+    the resulting scene's mappings rather than send it empty content."""
+    from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
+
+    entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
+    entry.add_to_hass(hass)
+    wall = _wall({"e1": {"x": 500.0, "y": 500.0}})
+    image_rect = {"x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0}
+
+    crop_boxes = compute_wallpaper_crop_boxes(hass, wall, image_rect)
+    assert crop_boxes["e1"] is None
+
+
+async def test_wallpaper_crop_boxes_unplaced_or_missing_entry_raises(hass, make_frame_entry):
     """Requesting an unplaced frame or missing entry raises WallGeometryError."""
-    from custom_components.digital_frames.wall_geometry import compute_2d_wall_canvas_geometry
+    from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
+
+    entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
+    entry.add_to_hass(hass)
+    wall = _wall({"e1": {"x": 0.0, "y": 0.0}})
+    image_rect = {"x": 0.0, "y": 0.0, "width": 1000.0, "height": 1000.0}
+
+    with pytest.raises(WallGeometryError, match="not placed"):
+        compute_wallpaper_crop_boxes(hass, wall, image_rect, ["e2"])
+
+    with pytest.raises(WallGeometryError, match="no longer configured"):
+        wall_missing = _wall({"e_gone": {"x": 0.0, "y": 0.0}})
+        compute_wallpaper_crop_boxes(hass, wall_missing, image_rect, ["e_gone"])
+
+
+async def test_wallpaper_crop_boxes_invalid_image_rect_raises(hass, make_frame_entry):
+    from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
 
     entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
     entry.add_to_hass(hass)
     wall = _wall({"e1": {"x": 0.0, "y": 0.0}})
 
-    with pytest.raises(WallGeometryError, match="not placed"):
-        compute_2d_wall_canvas_geometry(hass, wall, ["e2"])
+    with pytest.raises(WallGeometryError, match="positive width/height"):
+        compute_wallpaper_crop_boxes(hass, wall, {"x": 0, "y": 0, "width": 0, "height": 100})
 
-    with pytest.raises(WallGeometryError, match="no longer configured"):
-        wall_missing = _wall({"e_gone": {"x": 0.0, "y": 0.0}})
-        compute_2d_wall_canvas_geometry(hass, wall_missing, ["e_gone"])
+    with pytest.raises(WallGeometryError, match="Invalid wallpaper image_rect"):
+        compute_wallpaper_crop_boxes(hass, wall, {"x": 0, "y": 0})
 

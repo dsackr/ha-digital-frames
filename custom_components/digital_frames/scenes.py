@@ -76,6 +76,26 @@ def _validate_mapping_value(entry_id: str, value: Any) -> str | dict[str, Any]:
     raise SceneError(f"Invalid mapping value for '{entry_id}': {value!r}")
 
 
+def _validate_wallpaper(value: Any) -> dict[str, Any] | None:
+    """Scene.wallpaper is purely descriptive editor state (see its
+    docstring) -- image_id plus a wall-canvas-px rect (x, y, width,
+    height). None means an ordinary, non-wallpaper scene."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value.get("image_id"):
+        raise SceneError(f"Invalid wallpaper value: {value!r}")
+    try:
+        return {
+            "image_id": value["image_id"],
+            "x": float(value["x"]),
+            "y": float(value["y"]),
+            "width": float(value["width"]),
+            "height": float(value["height"]),
+        }
+    except (KeyError, TypeError, ValueError) as err:
+        raise SceneError(f"Invalid wallpaper value: {value!r}") from err
+
+
 @dataclass
 class Scene:
     """A named set of (frame entry_id -> image_id | skill assignment)
@@ -93,6 +113,17 @@ class Scene:
     # scene pack install, see scene_packs.py). Purely descriptive -- the
     # Scenes tab uses it to group cards, sending never consults it.
     source: str = "user"
+    # A "wallpaper" scene is just an ordinary scene whose mappings all
+    # happen to be image_crop entries sharing one background image_id --
+    # there is no separate wallpaper entity. This field records where that
+    # shared image sits on the wall's canvas (wall-canvas px, the same
+    # coordinate space as Wall.placements: x, y, width, height) purely so
+    # the Walls tab's wallpaper editor can restore the exact pan/zoom the
+    # user left it at when this scene is reopened for editing -- like
+    # `album`, it is never consulted when sending/activating the scene;
+    # each frame's own resolved crop_box in `mappings` is what actually
+    # gets sent. None for an ordinary (non-wallpaper) scene.
+    wallpaper: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +133,7 @@ class Scene:
             "created_at": self.created_at,
             "album": self.album,
             "source": self.source,
+            "wallpaper": self.wallpaper,
         }
 
     @classmethod
@@ -113,6 +145,7 @@ class Scene:
             created_at=data.get("created_at", 0.0),
             album=data.get("album"),
             source=data.get("source") or "user",
+            wallpaper=data.get("wallpaper"),
         )
 
 
@@ -160,6 +193,7 @@ class SceneManager:
         scene_id: str | None = None,
         album: str | None = None,
         source: str = "user",
+        wallpaper: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a new scene (scene_id=None) or update an existing one."""
         name = (name or "").strip()
@@ -173,6 +207,8 @@ class SceneManager:
         }
         if not mappings:
             raise SceneError("A scene needs at least one frame/image assignment")
+
+        wallpaper = _validate_wallpaper(wallpaper)
 
         if scene_id is not None and scene_id not in self._scenes:
             # Updating a scene that's gone (e.g. deleted from another tab
@@ -189,6 +225,7 @@ class SceneManager:
             scene.name = name
             scene.mappings = mappings
             scene.album = album
+            scene.wallpaper = wallpaper
             # source deliberately untouched -- editing a scene shouldn't
             # reclassify a pack-created scene as user-made or vice versa.
         else:
@@ -199,6 +236,7 @@ class SceneManager:
                 created_at=time.time(),
                 album=album,
                 source=source,
+                wallpaper=wallpaper,
             )
             self._scenes[scene.scene_id] = scene
 

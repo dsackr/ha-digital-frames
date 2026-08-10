@@ -127,21 +127,35 @@ def compute_wall_canvas_geometry(
     )
 
 
-def compute_2d_wall_canvas_geometry(
+def compute_wallpaper_crop_boxes(
     hass: "HomeAssistant",
     wall: "Wall",
+    image_rect: dict[str, float],
     member_entry_ids: list[str] | None = None,
-    preserve_bezel_gaps: bool = True,
-) -> WallCanvasGeometry:
-    """Compute a 2D shared master canvas size + per-frame crop slices for *wall*'s
-    member frames (or all placed frames on *wall* if member_entry_ids is None).
+) -> dict[str, tuple[float, float, float, float] | None]:
+    """Each target frame's crop_box (x0, y0, x1, y1) as a fraction of the
+    wallpaper *image's own rect* -- not of the frames' bounding box.
 
-    Supports freeform 2D arrangements (multi-row, multi-column, staggered, mixed orientations).
-    When preserve_bezel_gaps is True (default), physical gaps between frames on the wall canvas
-    are mapped into the spanned canvas coordinate space so image content over physical gaps
-    is skipped, producing a seamless continuous visual flow across physical frames.
+    *image_rect* (``{"x", "y", "width", "height"}``) is the background
+    image's position/size in the same wall-canvas-px coordinate space as
+    ``Wall.placements`` -- entirely independent of where any frame sits.
+    That independence is the point: dragging a frame only changes which
+    part of this fixed rect its window reveals; it never changes the
+    rect's own position, size, or aspect ratio (an earlier version of this
+    function stretched a shared canvas to exactly fit the frames' bounding
+    box, which made the "image" resize/distort every time a frame moved --
+    a real bug once users could reposition frames after placing the
+    wallpaper). Scaling the image (the user's "zoom") is a deliberate,
+    separate action that changes *image_rect* directly, never a side
+    effect of frame placement.
+
+    A frame that doesn't overlap image_rect at all gets `None` (nothing of
+    the image falls behind it -- the caller should exclude it from the
+    resulting scene's mappings, not send it a degenerate/empty crop). A
+    partial overlap (the frame hangs off an edge of the image) is clamped
+    to [0, 1] per edge -- exactly what's actually behind the frame, with
+    no stretching to cover the rest of it.
     """
-    from .helpers import render_spec_for_hass_entry  # noqa: PLC0415
     from .walls import tile_dims  # noqa: PLC0415
 
     target_ids = (
@@ -149,13 +163,20 @@ def compute_2d_wall_canvas_geometry(
         if member_entry_ids is not None
         else list(wall.placements.keys())
     )
-
     if not target_ids:
-        raise WallGeometryError("No frames given to compute 2D wall canvas geometry")
+        raise WallGeometryError("No frames given to compute wallpaper crop boxes for")
 
-    frame_boxes: dict[str, tuple[float, float, float, float]] = {}
-    specs = {}
+    try:
+        img_x = float(image_rect["x"])
+        img_y = float(image_rect["y"])
+        img_w = float(image_rect["width"])
+        img_h = float(image_rect["height"])
+    except (KeyError, TypeError, ValueError) as err:
+        raise WallGeometryError(f"Invalid wallpaper image_rect: {image_rect!r}") from err
+    if img_w <= 0 or img_h <= 0:
+        raise WallGeometryError("Wallpaper image_rect must have positive width/height")
 
+    crop_boxes: dict[str, tuple[float, float, float, float] | None] = {}
     for entry_id in target_ids:
         placement = wall.placements.get(entry_id)
         if placement is None:
@@ -166,54 +187,25 @@ def compute_2d_wall_canvas_geometry(
         if entry is None:
             raise WallGeometryError(f"Frame '{entry_id}' is no longer configured")
 
-        spec = render_spec_for_hass_entry(hass, entry)
-        specs[entry_id] = spec
-
         t_w, t_h = tile_dims(entry)
-        x = float(placement.get("x", 0.0))
-        y = float(placement.get("y", 0.0))
-        frame_boxes[entry_id] = (x, y, x + t_w, y + t_h)
+        fx = float(placement.get("x", 0.0))
+        fy = float(placement.get("y", 0.0))
 
-    min_x = min(box[0] for box in frame_boxes.values())
-    min_y = min(box[1] for box in frame_boxes.values())
-    max_x = max(box[2] for box in frame_boxes.values())
-    max_y = max(box[3] for box in frame_boxes.values())
+        x0 = (fx - img_x) / img_w
+        y0 = (fy - img_y) / img_h
+        x1 = (fx + t_w - img_x) / img_w
+        y1 = (fy + t_h - img_y) / img_h
 
-    span_w = max_x - min_x
-    span_h = max_y - min_y
+        if x1 <= 0.0 or y1 <= 0.0 or x0 >= 1.0 or y0 >= 1.0:
+            crop_boxes[entry_id] = None
+            continue
 
-    if span_w <= 0 or span_h <= 0:
-        raise WallGeometryError("Wall target frames produce degenerate zero-size canvas bounding box")
+        crop_boxes[entry_id] = (
+            max(0.0, min(1.0, x0)),
+            max(0.0, min(1.0, y0)),
+            max(0.0, min(1.0, x1)),
+            max(0.0, min(1.0, y1)),
+        )
 
-    max_frame_res = max(max(s.width, s.height) for s in specs.values())
-    scale = max(2400.0 / max(span_w, span_h), 1.0)
-    canvas_width = max(round(span_w * scale), max_frame_res)
-    canvas_height = max(round(span_h * scale), max_frame_res)
-
-    crop_boxes: dict[str, tuple[float, float, float, float]] = {}
-
-    if preserve_bezel_gaps:
-        for entry_id, (left, top, right, bottom) in frame_boxes.items():
-            x0 = (left - min_x) / span_w
-            y0 = (top - min_y) / span_h
-            x1 = (right - min_x) / span_w
-            y1 = (bottom - min_y) / span_h
-            crop_boxes[entry_id] = (
-                max(0.0, min(1.0, x0)),
-                max(0.0, min(1.0, y0)),
-                max(0.0, min(1.0, x1)),
-                max(0.0, min(1.0, y1)),
-            )
-    else:
-        # Gapless tight packing: normalize frames based on rank order
-        ordered = sorted(target_ids, key=lambda eid: (frame_boxes[eid][1], frame_boxes[eid][0]))
-        n = len(ordered)
-        for i, entry_id in enumerate(ordered):
-            crop_boxes[entry_id] = (i / n, 0.0, (i + 1) / n, 1.0)
-
-    return WallCanvasGeometry(
-        canvas_width=canvas_width,
-        canvas_height=canvas_height,
-        crop_boxes=crop_boxes,
-    )
+    return crop_boxes
 

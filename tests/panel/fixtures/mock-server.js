@@ -95,8 +95,7 @@ function createMockServer({
   let nextSkillId = skillList.length + 1;
   const skillSendCalls = []; // { skill_id, entry_id } per /skills/:id/send POST
   const messageSendCalls = []; // request body per /messages/send POST
-  const wallSpanCalls = []; // request body per /walls/:id/span_image POST
-  const artFactoryCalls = []; // request body per /art_factory/generate POST
+  const wallpaperCalls = []; // { wall_id, body } per /walls/:id/wallpaper POST
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -703,28 +702,6 @@ function createMockServer({
       }
     }
 
-    if (p === '/api/digital_frames/art_factory/status') {
-      return json(res, 200, {
-        success: true,
-        has_ha_ai: true,
-        ai_entity_id: 'ai_task.mock_generator',
-        active_engine: 'Home Assistant AI Task (ai_task.mock_generator)',
-      });
-    }
-
-    if (p === '/api/digital_frames/art_factory/generate' && req.method === 'POST') {
-      const parsed = await readJsonBody(req);
-      artFactoryCalls.push(parsed);
-      return json(res, 200, {
-        success: true,
-        prompt: parsed.prompt,
-        style: parsed.style || 'plain',
-        engine_used: 'Home Assistant AI Task (ai_task.mock_generator)',
-        image_id: 'img_art_123',
-        preview_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      });
-    }
-
     if (p === '/api/digital_frames/walls') {
       if (req.method === 'GET') return json(res, 200, { walls: wallList });
       if (req.method === 'POST') {
@@ -734,41 +711,71 @@ function createMockServer({
         return json(res, 200, { success: true, wall });
       }
     }
-    const geometryMatch = p.match(/^\/api\/digital_frames\/walls\/([^/]+)\/geometry$/);
-    if (geometryMatch && req.method === 'GET') {
-      const wallId = geometryMatch[1];
+
+    const wallpaperMatch = p.match(/^\/api\/digital_frames\/walls\/([^/]+)\/wallpaper$/);
+    if (wallpaperMatch && req.method === 'POST') {
+      const wallId = wallpaperMatch[1];
+      const parsed = await readJsonBody(req);
+      wallpaperCalls.push({ wall_id: wallId, body: parsed });
+
       const wall = wallList.find((w) => w.wall_id === wallId);
       if (!wall) return json(res, 404, { message: `Wall '${wallId}' not found` });
+      if (!parsed.image_id) return json(res, 400, { message: 'image_id is required' });
+      if (!parsed.image_rect) return json(res, 400, { message: 'image_rect is required' });
+
       const memberIds = Object.keys(wall.placements || {});
-      if (!memberIds.length) return json(res, 400, { message: 'No frames given to compute 2D wall canvas geometry' });
-      // Simplified stand-in for wall_geometry.py's real bounding-box math --
-      // plausible, deterministic numbers are enough for panel-side tests,
-      // which never assert exact pixel values here (those live in the
-      // Python test suite against the real implementation).
+      // Simplified stand-in for wall_geometry.py's real independent-image-
+      // rect intersection math -- plausible, deterministic numbers are
+      // enough for panel-side tests, which never assert exact pixel values
+      // here (those live in the Python test suite against the real
+      // implementation).
       const cropBoxes = {};
       memberIds.forEach((id, i) => { cropBoxes[id] = [i / memberIds.length, 0, (i + 1) / memberIds.length, 1]; });
-      return json(res, 200, {
-        success: true,
-        wall_id: wallId,
-        canvas_width: 1200 * memberIds.length,
-        canvas_height: 1600,
-        crop_boxes: cropBoxes,
-      });
-    }
 
-    const spanMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)\/span_image$/);
-    if (spanMatch && req.method === 'POST') {
-      const wallId = spanMatch[1];
-      const contentType = req.headers['content-type'] || '';
-      const parsed = contentType.includes('multipart/form-data') ? await readFormBody(req) : await readJsonBody(req);
-      wallSpanCalls.push({ wall_id: wallId, body: parsed });
+      const pushNow = parsed.push_now !== false;
+      const results = memberIds.map((id) => ({ entry_id: id, crop_box: cropBoxes[id], sent: pushNow }));
+
+      let sceneId = null;
+      if (parsed.save_scene) {
+        const mappings = {};
+        memberIds.forEach((id) => {
+          mappings[id] = { type: 'image_crop', image_id: parsed.image_id, crop_box: cropBoxes[id] };
+        });
+        const wallpaperMeta = { image_id: parsed.image_id, ...parsed.image_rect };
+        if (parsed.scene_id) {
+          const existing = sceneList.find((s) => s.scene_id === parsed.scene_id);
+          if (existing) {
+            existing.name = parsed.scene_name;
+            existing.mappings = mappings;
+            existing.wallpaper = wallpaperMeta;
+            sceneId = existing.scene_id;
+          }
+        } else {
+          const nameCollision = sceneList.some((s) => s.name === parsed.scene_name);
+          if (nameCollision) {
+            return json(res, 200, {
+              success: true, wall_id: wallId, scene_id: null,
+              frames_updated: results.length, crop_boxes: cropBoxes, results, frames_failed: 0,
+              scene_save_error: `A scene named '${parsed.scene_name}' already exists`,
+            });
+          }
+          const scene = {
+            scene_id: `scene_${nextSceneId++}`, name: parsed.scene_name, mappings,
+            created_at: 0, album: 'Wallpapers', source: 'user', wallpaper: wallpaperMeta,
+          };
+          sceneList.push(scene);
+          sceneId = scene.scene_id;
+        }
+      }
+
       return json(res, 200, {
         success: true,
         wall_id: wallId,
-        saved_image_id: 'img_spanned_123',
-        scene_id: parsed.save_scene ? 'scene_spanned_123' : null,
-        frames_updated: frames.length || 2,
-        crop_boxes: {},
+        scene_id: sceneId,
+        frames_updated: results.length,
+        crop_boxes: cropBoxes,
+        results,
+        frames_failed: pushNow ? 0 : 0,
       });
     }
 
@@ -838,8 +845,7 @@ function createMockServer({
     get skills() { return skillList; },
     skillSendCalls,
     messageSendCalls,
-    wallSpanCalls,
-    artFactoryCalls,
+    wallpaperCalls,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },

@@ -271,7 +271,7 @@ async def test_auto_layout_does_not_overlap_after_removing_and_readding_a_frame(
 
 
 # ---------------------------------------------------------------------------
-# tile_dims(): physical-scale on-canvas sizing (KPF: Art Factory wallpaper mode)
+# tile_dims(): physical-scale on-canvas sizing (KPF: wallpaper mode)
 # ---------------------------------------------------------------------------
 
 

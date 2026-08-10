@@ -46,7 +46,7 @@ test.describe('Consolidated dashboard', () => {
         widgetsTabHidden: widgetsBtn.style.display === 'none',
       };
     });
-    expect(state.tabs).toEqual(['walls', 'my_gallery', 'art_gallery', 'art_factory', 'widgets', 'expansion_packs']);
+    expect(state.tabs).toEqual(['walls', 'my_gallery', 'art_gallery', 'widgets', 'expansion_packs']);
     expect(state.activeContent).toBe(true);
     expect(state.headerButtons).toEqual([true, true, true]);
     expect(state.widgetsTabHidden).toBe(false);
