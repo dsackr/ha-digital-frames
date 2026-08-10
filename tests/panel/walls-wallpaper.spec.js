@@ -273,4 +273,43 @@ test.describe('Wallpaper mode (Walls tab)', () => {
 
     expect(pageErrors).toHaveLength(0);
   });
+
+  test('previewing a wallpaper scene on the normal Walls tab (not editing mode) shows one shared background behind transparent frame windows, not a full image per tile', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openDashboard(page);
+    // Deliberately NOT entering wallpaper-editing mode -- this is the
+    // ordinary Walls tab scene-preview path (KPF 19), which previously
+    // showed every frame's tile as the same full, uncropped background
+    // image (there was "no crop-rendering endpoint") instead of each
+    // frame's own slice.
+    await selectWallScene(page, 'scene_wallpaper_1');
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.querySelector('.wall-wallpaper-bg') !== null;
+    });
+
+    const state = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const bg = root.querySelector('.wall-wallpaper-bg');
+      const tiles = [...root.querySelectorAll('.wall-tile')];
+      return {
+        wallpaperModeActive: document.getElementById('panel')._wallWallpaperMode,
+        bgLeft: bg ? bg.style.left : null,
+        bgTop: bg ? bg.style.top : null,
+        tilesAreWindows: tiles.every((t) => t.classList.contains('wall-wallpaper-tile')),
+        tilesHaveFooters: tiles.every((t) => !!t.querySelector('.wall-tile-footer')),
+      };
+    });
+
+    expect(state.wallpaperModeActive).toBe(false); // still the ordinary Walls tab, not the editor
+    expect(state.bgLeft).toBe('10px');
+    expect(state.bgTop).toBe('20px');
+    expect(state.tilesAreWindows).toBe(true);
+    // Unlike the editing-mode tiles, normal-mode tiles keep their footer
+    // (name/status) and hover quadrants -- this is a read-only preview
+    // skin layered onto the ordinary tile, not a different tile type.
+    expect(state.tilesHaveFooters).toBe(true);
+
+    expect(pageErrors).toHaveLength(0);
+  });
 });

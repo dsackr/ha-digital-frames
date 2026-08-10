@@ -243,6 +243,41 @@ async def test_wallpaper_frame_outside_image_rect_excluded_from_scene(
     assert set(scene.mappings.keys()) == {"frame-1"}
 
 
+async def test_wallpaper_partial_overlap_saves_non_full_dest_box(
+    hass, wallpaper_client, make_frame_entry, sample_image_bytes
+):
+    """A frame that only partly overlaps the image rect must persist a
+    dest_box narrower than the whole frame -- otherwise a later send (via
+    encode_for_panel's *dest_box*, KPF 36) has no way to know it should
+    leave part of the frame blank instead of stretching the crop to cover
+    it (the bug this field exists to fix)."""
+    wall_id, image_id = await _make_wall_and_image(
+        hass, make_frame_entry, sample_image_bytes,
+        placements={"frame-1": {"x": 40.0, "y": 40.0}, "frame-2": {"x": 5000.0, "y": 5000.0}},
+    )
+
+    resp = await wallpaper_client.post(
+        f"/api/digital_frames/walls/{wall_id}/wallpaper",
+        json={
+            "image_id": image_id,
+            # Frame-1 spans (40,40)-(145,180); the image only covers x<100,
+            # so only part of frame-1's width is actually behind the image.
+            "image_rect": {"x": 0.0, "y": 0.0, "width": 100.0, "height": 1000.0},
+            "push_now": False,
+            "save_scene": True,
+            "scene_name": "Partial Dest Box Wallpaper",
+        },
+    )
+
+    assert resp.status == 200
+    body = await resp.json()
+    scene_mgr = hass.data[DOMAIN]["_scenes"]
+    scene = await scene_mgr.async_get_scene(body["scene_id"])
+    dest_box = scene.mappings["frame-1"]["dest_box"]
+    assert dest_box[0] == pytest.approx(0.0)
+    assert dest_box[2] < 1.0  # narrower than the whole frame -- not full coverage
+
+
 async def test_wallpaper_re_saving_with_scene_id_updates_in_place(
     hass, wallpaper_client, make_frame_entry, sample_image_bytes
 ):

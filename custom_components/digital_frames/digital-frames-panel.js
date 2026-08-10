@@ -8806,6 +8806,32 @@
         if (this._hass) this._tickAllStatus();
         return;
       }
+
+      // Read-only preview of the active scene's own wallpaper (if any):
+      // the exact same "one absolutely-positioned background div behind
+      // transparent frame windows" trick _renderWallWallpaperTiles uses
+      // while editing, so a loaded wallpaper scene's tiles show their own
+      // correct slice here too instead of each independently fetching and
+      // showing the full, uncropped background (see _wallMappingImageId).
+      // Not draggable -- panning/zooming only happens in wallpaper-editing
+      // mode via the Wallpaper button.
+      const wallpaper = this._wallActiveWallpaper();
+      if (wallpaper) {
+        const bg = document.createElement('div');
+        bg.className = 'wall-wallpaper-bg';
+        bg.style.left = `${wallpaper.x}px`;
+        bg.style.top = `${wallpaper.y}px`;
+        bg.style.width = `${wallpaper.width}px`;
+        bg.style.height = `${wallpaper.height}px`;
+        bg.style.pointerEvents = 'none';
+        bg.style.cursor = 'default';
+        const imgWrap = document.createElement('div');
+        imgWrap.style.cssText = 'width:100%;height:100%';
+        this._loadThumbnail(wallpaper.image_id, imgWrap);
+        bg.appendChild(imgWrap);
+        canvas.appendChild(bg);
+      }
+
       for (const entryId of Object.keys(this._wallPlacements)) {
         const frame = this._frames.find(f => f.entryId === entryId);
         if (!frame) continue; // frame removed/reconfigured since this wall was laid out
@@ -9569,18 +9595,33 @@
 
     // A mapping value is a plain library image_id (string), a skill
     // assignment (handled separately by callers), or an image_crop object
-    // (a wallpaper background + this frame's slice of it, see KPF 38) --
+    // (a wallpaper background + this frame's slice of it, see KPF 36) --
     // this pulls out the library image_id to preview from either shape.
-    // There's no "give me this crop rendered" endpoint (see KPF 36/38), so
-    // an image_crop mapping previews as the *full*, uncropped background
-    // here -- correct-ish and non-broken, unlike passing the raw mapping
-    // object straight into _loadThumbnail (which stringifies it to the
-    // literal "[object Object]" as both a cache key and a fetch URL).
+    // When the image_crop belongs to the *active scene's own* wallpaper,
+    // _renderWallTileContent renders it as a windowed slice instead of
+    // calling _loadThumbnail with this id (which would show the full,
+    // uncropped background) -- this is only reached for image_crop
+    // mappings with no matching wallpaper context (e.g. in the palette, or
+    // previewing a mapping from a scene not currently loaded's wallpaper),
+    // where showing the full background is correct-ish and non-broken,
+    // unlike passing the raw mapping object straight into _loadThumbnail
+    // (which stringifies it to the literal "[object Object]" as both a
+    // cache key and a fetch URL).
     _wallMappingImageId(mapping) {
       if (!mapping) return null;
       if (typeof mapping === 'string') return mapping;
       if (typeof mapping === 'object' && mapping.type === 'image_crop') return mapping.image_id;
       return null;
+    }
+
+    // The active preview scene's wallpaper rect ({image_id, x, y, width,
+    // height} in wall-canvas px), or null for an ordinary scene / no scene
+    // selected. Drives the read-only windowed tile preview in normal
+    // (non-wallpaper-editing) mode -- see _renderWallCanvas.
+    _wallActiveWallpaper() {
+      const scene = this._wallActiveSceneId
+        && this._scenes.find(s => s.scene_id === this._wallActiveSceneId);
+      return (scene && scene.wallpaper) || null;
     }
 
     _renderWallTileContent(tile, entryId, frame) {
@@ -9620,9 +9661,26 @@
         return;
       }
       media.className = 'wall-tile-media';
+      tile.classList.remove('wall-wallpaper-tile');
 
       const imageId = this._wallMappingImageId(mapping);
       if (imageId) {
+        const wallpaper = this._wallActiveWallpaper();
+        if (mapping && typeof mapping === 'object' && mapping.type === 'image_crop'
+            && wallpaper && wallpaper.image_id === mapping.image_id) {
+          // This frame's content is a window into the shared wallpaper
+          // background rendered once behind every tile (see
+          // _renderWallCanvas) -- showing the full uncropped background
+          // here instead (the only thing _loadThumbnail could do) would
+          // make every wallpaper frame look identical rather than each
+          // showing its own slice.
+          media.innerHTML = '';
+          tile.classList.add('wall-wallpaper-tile');
+          badge.textContent = stagedThisSession ? 'staged' : 'scene';
+          badge.dataset.kind = stagedThisSession ? 'staged' : 'scene';
+          badge.style.display = '';
+          return;
+        }
         media.innerHTML = '';
         // _loadThumbnail paints synchronously on a cache hit and dedupes
         // concurrent fetches, so repeated renders and same-image tiles are

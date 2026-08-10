@@ -113,12 +113,21 @@ class _FakeLibrary:
         self._original_bytes = original_bytes
 
     async def async_get_bin_for_send(
-        self, image_id, spec, pack_method=None, codec_id=None, crop_box_override=None, entry=None
+        self,
+        image_id,
+        spec,
+        pack_method=None,
+        codec_id=None,
+        crop_box_override=None,
+        dest_box_override=None,
+        entry=None,
     ):
         if image_id == "missing-image":
             raise FileNotFoundError(f"no such image: {image_id}")
         if crop_box_override is not None:
-            self.crop_box_override_calls.append((image_id, tuple(crop_box_override)))
+            self.crop_box_override_calls.append(
+                (image_id, tuple(crop_box_override), tuple(dest_box_override) if dest_box_override else None)
+            )
             return f"bin-for-{image_id}-crop-{tuple(crop_box_override)}".encode()
         return f"bin-for-{image_id}".encode()
 
@@ -573,8 +582,8 @@ async def test_send_mappings_image_crop_uses_override_and_bypasses_cache(
     fake_library = hass.data[DOMAIN]["_library"]
     calls = sorted(fake_library.crop_box_override_calls)
     assert calls == [
-        ("banner-1", (0.0, 0.0, 0.5, 1.0)),
-        ("banner-1", (0.5, 0.0, 1.0, 1.0)),
+        ("banner-1", (0.0, 0.0, 0.5, 1.0), None),
+        ("banner-1", (0.5, 0.0, 1.0, 1.0), None),
     ]
 
 
@@ -653,3 +662,76 @@ async def test_send_mappings_image_crop_generates_per_frame_preview_and_omits_im
     # Each frame's crop is distinct -- their previews must not be identical
     # bytes (which would mean both rendered the same, uncropped, region).
     assert sent[0]["thumbnail"] != sent[1]["thumbnail"]
+
+
+async def test_send_mappings_image_crop_dest_box_threaded_to_library_and_preview(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    """A mapping's optional dest_box (KPF 36 -- where within this frame's
+    own canvas the crop belongs, for a frame that only partly overlaps a
+    wallpaper's image rect) must reach both the actual wire-bytes call
+    (library_manager.async_get_bin_for_send) and the preview compose call,
+    not just crop_box."""
+    entries = library_and_coordinators(count=1)
+    fake_library = _FakeLibrary(original_bytes=_half_and_half_image_bytes())
+    hass.data[DOMAIN]["_library"] = fake_library
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        return {"success": True, "queued": False}
+
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {
+        entries[0].entry_id: {
+            "type": "image_crop",
+            "image_id": "banner-1",
+            "crop_box": [0.0, 0.0, 1.0, 1.0],
+            "dest_box": [0.0, 0.0, 0.5, 1.0],
+        },
+    }
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    assert all(r["success"] for r in result["results"])
+    assert fake_library.crop_box_override_calls == [
+        ("banner-1", (0.0, 0.0, 1.0, 1.0), (0.0, 0.0, 0.5, 1.0)),
+    ]
+
+
+async def test_send_mappings_image_crop_preview_failure_still_omits_image_id(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    """A preview-generation failure for a crop mapping must not fail the
+    send (bin_bytes is already resolved) -- but it also must not silently
+    fall back to reporting the shared, uncropped image_id, which would
+    reintroduce the "every frame's tile shows the same shared background"
+    bug that omitting image_id exists to fix. library_manager.
+    async_get_original raising (simulated here by not configuring
+    original_bytes on the fake) must still result in image_id=None."""
+    entries = library_and_coordinators(count=1)
+    hass.data[DOMAIN]["_library"] = _FakeLibrary()  # no original_bytes -> async_get_original raises
+
+    sent = []
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        sent.append({"image_id": image_id, "thumbnail": thumbnail})
+        return {"success": True, "queued": False}
+
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {
+        entries[0].entry_id: {
+            "type": "image_crop",
+            "image_id": "banner-1",
+            "crop_box": [0.0, 0.0, 0.5, 1.0],
+        },
+    }
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    assert all(r["success"] for r in result["results"])
+    assert len(sent) == 1
+    assert sent[0]["image_id"] is None
+    assert sent[0]["thumbnail"] is None

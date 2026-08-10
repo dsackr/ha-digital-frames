@@ -68,11 +68,24 @@ def _validate_mapping_value(entry_id: str, value: Any) -> str | dict[str, Any]:
             crop_box = [float(v) for v in crop_box]
         except (TypeError, ValueError) as err:
             raise SceneError(f"Invalid crop_box for '{entry_id}': {crop_box!r}") from err
-        return {
+        result = {
             "type": "image_crop",
             "image_id": value["image_id"],
             "crop_box": crop_box,
         }
+        # dest_box (KPF 36): where within *this frame's own canvas* the crop
+        # should be placed -- a fraction of the frame, not of the image.
+        # Optional and defaults to full coverage (the whole frame) when
+        # absent, matching every mapping saved before this field existed.
+        dest_box = value.get("dest_box")
+        if dest_box is not None:
+            if not (isinstance(dest_box, (list, tuple)) and len(dest_box) == 4):
+                raise SceneError(f"Invalid dest_box for '{entry_id}': {dest_box!r}")
+            try:
+                result["dest_box"] = [float(v) for v in dest_box]
+            except (TypeError, ValueError) as err:
+                raise SceneError(f"Invalid dest_box for '{entry_id}': {dest_box!r}") from err
+        return result
     raise SceneError(f"Invalid mapping value for '{entry_id}': {value!r}")
 
 
@@ -330,6 +343,7 @@ class SceneManager:
 
             image_id: str
             crop_box_override: tuple[float, ...] | None = None
+            dest_box_override: tuple[float, ...] | None = None
             if isinstance(value, dict):
                 value_type = value.get("type")
 
@@ -412,6 +426,8 @@ class SceneManager:
                         }
                     image_id = value["image_id"]
                     crop_box_override = tuple(value["crop_box"])
+                    if value.get("dest_box"):
+                        dest_box_override = tuple(value["dest_box"])
                 else:
                     return {
                         "entry_id": entry_id,
@@ -433,6 +449,7 @@ class SceneManager:
                     render_spec_for_hass_entry(hass, entry),
                     codec_id=codec_id,
                     crop_box_override=crop_box_override,
+                    dest_box_override=dest_box_override,
                     entry=entry,
                 )
             except Exception as err:  # noqa: BLE001
@@ -447,8 +464,15 @@ class SceneManager:
                 # (uncropped) thumbnail (identical across every frame
                 # sharing the same wallpaper background), and omit image_id
                 # per async_set_last_image's "pass exactly one" contract.
-                # A preview-generation failure must not fail the actual
-                # send -- bin_bytes above is already resolved and correct.
+                # reported_image_id is cleared unconditionally (not only on
+                # preview success): a preview-generation failure must not
+                # fail the actual send -- bin_bytes above is already
+                # resolved and correct -- but it also must not silently
+                # fall back to reporting the shared, uncropped image_id,
+                # which would reintroduce the "every frame's tile shows the
+                # same uncropped background" bug this omission exists to fix
+                # (see DigitalFramesWallWallpaperView's identical comment).
+                reported_image_id = None
                 try:
                     original_bytes, _content_type = await library_manager.async_get_original(image_id)
                     spec = render_spec_for_hass_entry(hass, entry)
@@ -463,9 +487,9 @@ class SceneManager:
                         spec.rotation,
                         spec.locked,
                         crop_box_override,
+                        dest_box_override,
                     )
                     preview_bytes = await hass.async_add_executor_job(_encode_preview_png, composed)
-                    reported_image_id = None
                 except Exception:  # noqa: BLE001
                     preview_bytes = None
 

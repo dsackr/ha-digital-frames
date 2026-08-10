@@ -216,13 +216,15 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
         scene_mappings: dict[str, Any] = {}
         results: list[dict[str, Any]] = []
 
-        for entry_id, crop_box in crop_boxes.items():
-            if crop_box is None:
+        for entry_id, boxes in crop_boxes.items():
+            if boxes is None:
                 # No overlap between this frame and the image rect -- it
                 # isn't part of this wallpaper (see compute_wallpaper_crop_
                 # boxes's docstring); skip it rather than send/store a
                 # degenerate crop.
                 continue
+            crop_box = boxes["crop_box"]
+            dest_box = boxes["dest_box"]
 
             entry = hass.config_entries.async_get_entry(entry_id)
             if entry is None:
@@ -246,6 +248,7 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
                         locked=spec.locked,
                         codec_id=codec_id,
                         crop_box=crop_box,
+                        dest_box=dest_box,
                     )
 
                     coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -279,6 +282,7 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
             result_entry: dict[str, Any] = {
                 "entry_id": entry_id,
                 "crop_box": crop_box,
+                "dest_box": dest_box,
                 "sent": sent,
             }
             if send_error:
@@ -289,6 +293,7 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
                 "type": "image_crop",
                 "image_id": image_id,
                 "crop_box": list(crop_box),
+                "dest_box": list(dest_box),
             }
 
         # Save Scene if requested

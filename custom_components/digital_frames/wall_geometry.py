@@ -132,9 +132,9 @@ def compute_wallpaper_crop_boxes(
     wall: "Wall",
     image_rect: dict[str, float],
     member_entry_ids: list[str] | None = None,
-) -> dict[str, tuple[float, float, float, float] | None]:
-    """Each target frame's crop_box (x0, y0, x1, y1) as a fraction of the
-    wallpaper *image's own rect* -- not of the frames' bounding box.
+) -> dict[str, dict[str, tuple[float, float, float, float]] | None]:
+    """Each target frame's ``{"crop_box", "dest_box"}`` for the wallpaper
+    *image's own rect* -- not the frames' bounding box.
 
     *image_rect* (``{"x", "y", "width", "height"}``) is the background
     image's position/size in the same wall-canvas-px coordinate space as
@@ -152,9 +152,20 @@ def compute_wallpaper_crop_boxes(
     A frame that doesn't overlap image_rect at all gets `None` (nothing of
     the image falls behind it -- the caller should exclude it from the
     resulting scene's mappings, not send it a degenerate/empty crop). A
-    partial overlap (the frame hangs off an edge of the image) is clamped
-    to [0, 1] per edge -- exactly what's actually behind the frame, with
-    no stretching to cover the rest of it.
+    partial overlap (the frame hangs off an edge of the image) yields:
+
+    - ``crop_box``: the overlap expressed as a fraction of the *image*
+      (x0, y0, x1, y1) -- which pixels of the source image are behind
+      this frame at all.
+    - ``dest_box``: the same overlap expressed as a fraction of the
+      *frame's own canvas* -- where within the frame that content should
+      be placed. A frame fully inside the image gets ``(0, 0, 1, 1)``
+      (the content fills the whole frame, same as before this field
+      existed). A frame that only partly overlaps gets a sub-rectangle,
+      telling the renderer to draw the image content there and leave the
+      rest of the frame blank -- not stretch the partial slice to cover
+      the entire frame (see panel_codec._compose_rgb's *dest_box* and
+      image_converter._process_cropped's windowed-placement path).
     """
     from .walls import tile_dims  # noqa: PLC0415
 
@@ -176,7 +187,7 @@ def compute_wallpaper_crop_boxes(
     if img_w <= 0 or img_h <= 0:
         raise WallGeometryError("Wallpaper image_rect must have positive width/height")
 
-    crop_boxes: dict[str, tuple[float, float, float, float] | None] = {}
+    crop_boxes: dict[str, dict[str, tuple[float, float, float, float]] | None] = {}
     for entry_id in target_ids:
         placement = wall.placements.get(entry_id)
         if placement is None:
@@ -191,21 +202,31 @@ def compute_wallpaper_crop_boxes(
         fx = float(placement.get("x", 0.0))
         fy = float(placement.get("y", 0.0))
 
-        x0 = (fx - img_x) / img_w
-        y0 = (fy - img_y) / img_h
-        x1 = (fx + t_w - img_x) / img_w
-        y1 = (fy + t_h - img_y) / img_h
+        # Overlap of the frame's own rect with the image's rect, in
+        # wall-canvas px -- the same rectangle expressed two ways below.
+        ox0 = max(fx, img_x)
+        oy0 = max(fy, img_y)
+        ox1 = min(fx + t_w, img_x + img_w)
+        oy1 = min(fy + t_h, img_y + img_h)
 
-        if x1 <= 0.0 or y1 <= 0.0 or x0 >= 1.0 or y0 >= 1.0:
+        if ox1 <= ox0 or oy1 <= oy0:
             crop_boxes[entry_id] = None
             continue
 
-        crop_boxes[entry_id] = (
-            max(0.0, min(1.0, x0)),
-            max(0.0, min(1.0, y0)),
-            max(0.0, min(1.0, x1)),
-            max(0.0, min(1.0, y1)),
-        )
+        crop_boxes[entry_id] = {
+            "crop_box": (
+                max(0.0, min(1.0, (ox0 - img_x) / img_w)),
+                max(0.0, min(1.0, (oy0 - img_y) / img_h)),
+                max(0.0, min(1.0, (ox1 - img_x) / img_w)),
+                max(0.0, min(1.0, (oy1 - img_y) / img_h)),
+            ),
+            "dest_box": (
+                max(0.0, min(1.0, (ox0 - fx) / t_w)),
+                max(0.0, min(1.0, (oy0 - fy) / t_h)),
+                max(0.0, min(1.0, (ox1 - fx) / t_w)),
+                max(0.0, min(1.0, (oy1 - fy) / t_h)),
+            ),
+        }
 
     return crop_boxes
 

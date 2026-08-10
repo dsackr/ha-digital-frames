@@ -1200,16 +1200,18 @@ def convert_image_bytes_cropped(
     rotation: int = 0,
     pack_method: str = "fast",
     color_pipeline: str = COLOR_PIPELINE_FAST,
+    dest_box: "Tuple[float, float, float, float] | None" = None,
 ) -> bytes:
     """
     Convert raw image bytes to Spectra 6 binary using a manually-chosen crop
     rectangle instead of the automatic letterbox path. See
     :func:`convert_image_cropped` for parameter details and :func:`_process`
-    for *pack_method* / *color_pipeline*.
+    for *pack_method* / *color_pipeline*. *dest_box* -- see
+    :func:`_process_cropped`.
     """
     image = _open_as_rgb(image_data)
     bin_bytes, _quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method, color_pipeline
+        image, width, height, crop_box, rotation, pack_method, color_pipeline, dest_box
     )
     return bin_bytes
 
@@ -1222,6 +1224,7 @@ def convert_image_bytes_cropped_with_preview(
     rotation: int = 0,
     pack_method: str = "fast",
     color_pipeline: str = COLOR_PIPELINE_FAST,
+    dest_box: "Tuple[float, float, float, float] | None" = None,
 ) -> "Tuple[bytes, bytes]":
     """
     Like :func:`convert_image_bytes_cropped`, but also returns a small PNG
@@ -1234,9 +1237,59 @@ def convert_image_bytes_cropped_with_preview(
     """
     image = _open_as_rgb(image_data)
     bin_bytes, quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method, color_pipeline
+        image, width, height, crop_box, rotation, pack_method, color_pipeline, dest_box
     )
     return bin_bytes, _encode_preview_png(quantized)
+
+
+def _dest_pixel_box(
+    dest_box: "Tuple[float, float, float, float] | None",
+    width: int,
+    height: int,
+) -> "Tuple[int, int, int, int] | None":
+    """Pixel rect within a *width*x*height* canvas that cropped content
+    should be placed at, or None when *dest_box* is absent/covers the whole
+    canvas -- the signal callers use to skip windowed placement entirely and
+    keep the plain crop-and-fill-the-canvas behavior. Guaranteed non-empty
+    and within bounds, like :func:`_crop_to_box`."""
+    if dest_box is None:
+        return None
+    dx0, dy0, dx1, dy1 = (float(v) for v in dest_box)
+    dx0, dx1 = sorted((min(max(dx0, 0.0), 1.0), min(max(dx1, 0.0), 1.0)))
+    dy0, dy1 = sorted((min(max(dy0, 0.0), 1.0), min(max(dy1, 0.0), 1.0)))
+    if dx0 <= 1e-9 and dy0 <= 1e-9 and dx1 >= 1.0 - 1e-9 and dy1 >= 1.0 - 1e-9:
+        return None  # full coverage -- nothing to window
+
+    left = int(round(dx0 * width))
+    top = int(round(dy0 * height))
+    right = int(round(dx1 * width))
+    bottom = int(round(dy1 * height))
+    right = max(right, left + 1)
+    bottom = max(bottom, top + 1)
+    right = min(right, width)
+    bottom = min(bottom, height)
+    left = min(left, right - 1)
+    top = min(top, bottom - 1)
+    return (left, top, right, bottom)
+
+
+def _paste_windowed(
+    cropped: "Image.Image",
+    dest_px: "Tuple[int, int, int, int]",
+    width: int,
+    height: int,
+    fill: "Tuple[int, int, int]" = (0, 0, 0),
+) -> "Image.Image":
+    """Resize *cropped* to exactly fill *dest_px* and paste it into an
+    otherwise *fill*-colored *width*x*height* canvas. Used when a frame only
+    partially overlaps a wallpaper's image rect (KPF 36): the part of the
+    frame with no image behind it renders as *fill* instead of stretching
+    the partial slice to cover the whole frame."""
+    dx0, dy0, dx1, dy1 = dest_px
+    resized = cropped.resize((dx1 - dx0, dy1 - dy0), Image.LANCZOS)
+    canvas = Image.new("RGB", (width, height), fill)
+    canvas.paste(resized, (dx0, dy0))
+    return canvas
 
 
 def _process_cropped(
@@ -1247,35 +1300,53 @@ def _process_cropped(
     rotation: int = 0,
     pack_method: str = "fast",
     color_pipeline: str = COLOR_PIPELINE_FAST,
+    dest_box: "Tuple[float, float, float, float] | None" = None,
 ) -> "Tuple[bytes, Image.Image]":
-    img_w, img_h = image.width, image.height
-    x0, y0, x1, y1 = crop_box
-    w = x1 - x0
-    h = y1 - y0
-    if w > 0 and h > 0:
-        cx = (x0 + x1) / 2.0
-        cy = (y0 + y1) / 2.0
-        # Target aspect ratio in normalized coordinates:
-        # nw / nh = (width * img_h) / (height * img_w)
-        target_ar_norm = (width * img_h) / (height * img_w)
+    """*dest_box*, when given, places the crop within only that fraction of
+    the (width, height) canvas and fills the rest black, instead of
+    stretching the crop to cover the whole canvas -- see
+    wall_geometry.compute_wallpaper_crop_boxes for where this comes from and
+    why (a frame that only partly overlaps a wallpaper's image rect)."""
+    dest_px = _dest_pixel_box(dest_box, width, height)
 
-        if w / h > target_ar_norm:
-            # Crop box is too wide, trim the width
-            nh = h
-            nw = h * target_ar_norm
-        else:
-            # Crop box is too tall, trim the height
-            nw = w
-            nh = w / target_ar_norm
+    if dest_px is not None:
+        # Windowed placement: an exact pixel crop, no aspect-ratio
+        # refitting -- the caller (wallpaper mode) has already decided
+        # exactly what's behind this frame and where it goes; refitting the
+        # crop's aspect ratio here (like the branch below does) would throw
+        # that placement away.
+        image = _crop_to_box(image, crop_box)
+        image = _paste_windowed(image, dest_px, width, height)
+    else:
+        img_w, img_h = image.width, image.height
+        x0, y0, x1, y1 = crop_box
+        w = x1 - x0
+        h = y1 - y0
+        if w > 0 and h > 0:
+            cx = (x0 + x1) / 2.0
+            cy = (y0 + y1) / 2.0
+            # Target aspect ratio in normalized coordinates:
+            # nw / nh = (width * img_h) / (height * img_w)
+            target_ar_norm = (width * img_h) / (height * img_w)
 
-        x0 = max(0.0, min(cx - nw / 2.0, 1.0))
-        x1 = max(0.0, min(cx + nw / 2.0, 1.0))
-        y0 = max(0.0, min(cy - nh / 2.0, 1.0))
-        y1 = max(0.0, min(cy + nh / 2.0, 1.0))
-        crop_box = (x0, y0, x1, y1)
+            if w / h > target_ar_norm:
+                # Crop box is too wide, trim the width
+                nh = h
+                nw = h * target_ar_norm
+            else:
+                # Crop box is too tall, trim the height
+                nw = w
+                nh = w / target_ar_norm
 
-    image = _crop_to_box(image, crop_box)
-    image = image.resize((width, height), Image.LANCZOS)
+            x0 = max(0.0, min(cx - nw / 2.0, 1.0))
+            x1 = max(0.0, min(cx + nw / 2.0, 1.0))
+            y0 = max(0.0, min(cy - nh / 2.0, 1.0))
+            y1 = max(0.0, min(cy + nh / 2.0, 1.0))
+            crop_box = (x0, y0, x1, y1)
+
+        image = _crop_to_box(image, crop_box)
+        image = image.resize((width, height), Image.LANCZOS)
+
     if rotation:
         image = image.rotate(rotation, expand=True)
     image = _enhance_for_panel(image)

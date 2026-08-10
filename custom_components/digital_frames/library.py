@@ -2172,6 +2172,7 @@ class LibraryManager:
         pack_method: str | None = None,
         codec_id: str | None = None,
         crop_box_override: tuple[float, ...] | list[float] | None = None,
+        dest_box_override: tuple[float, ...] | list[float] | None = None,
         entry: "ConfigEntry" | None = None,
         color_pipeline: str | None = None,
     ) -> bytes:
@@ -2214,7 +2215,13 @@ class LibraryManager:
         image+resolution+codec alone would let the second frame's send
         silently read back the first frame's crop. Used by the scene
         mapping type {"type": "image_crop", ...} (see scenes.py); never set
-        by the ordinary manual-crop editor path."""
+        by the ordinary manual-crop editor path.
+
+        dest_box_override, when given alongside crop_box_override, places
+        the crop within only that fraction of this frame's own canvas and
+        fills the rest black -- see panel_codec.encode_for_panel's *dest_box*
+        and wall_geometry.compute_wallpaper_crop_boxes (KPF 36: a frame that
+        only partly overlaps a wallpaper's image rect)."""
         record = await self._find_image(image_id)
         if record is None:
             raise LibraryBackendError(f"Image '{image_id}' not found")
@@ -2326,6 +2333,7 @@ class LibraryManager:
             tuple(crop_box) if crop_box else None,
             codec_id,
             color_pipeline,
+            tuple(dest_box_override) if dest_box_override else None,
         )
         if pack_method is None and crop_box_override is None:
             await self._backend.async_save_bin(

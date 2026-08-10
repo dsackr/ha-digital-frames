@@ -157,26 +157,30 @@ def _compose_rgb(
     rotation: int = 0,
     locked: bool = False,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    dest_box: tuple[float, float, float, float] | list[float] | None = None,
 ):
     from .image_converter import (  # noqa: PLC0415
         _auto_rotate,
+        _crop_to_box,
+        _dest_pixel_box,
         _open_as_rgb,
+        _paste_windowed,
         _resize_cover_centered,
     )
     from PIL import Image as PILImage  # noqa: PLC0415
 
     image = _open_as_rgb(source_bytes)
     if crop_box is not None:
-        x0, y0, x1, y1 = [float(v) for v in crop_box]
-        w, h = image.size
-        box = (
-            int(round(x0 * w)),
-            int(round(y0 * h)),
-            int(round(x1 * w)),
-            int(round(y1 * h)),
-        )
-        image = image.crop(box)
-        image = image.resize((width, height), PILImage.LANCZOS)
+        dest_px = _dest_pixel_box(dest_box, width, height)
+        cropped = _crop_to_box(image, tuple(float(v) for v in crop_box))
+        if dest_px is not None:
+            # Windowed placement (KPF 36): this frame only partly overlaps
+            # the wallpaper's image rect, so paste the crop only where it
+            # actually belongs and leave the rest of the canvas black,
+            # instead of stretching the partial slice to cover the frame.
+            image = _paste_windowed(cropped, dest_px, width, height)
+        else:
+            image = cropped.resize((width, height), PILImage.LANCZOS)
     else:
         if not locked:
             image = _auto_rotate(image, width, height)
@@ -196,11 +200,12 @@ def _encode_jpeg_bytes(
     locked: bool = False,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     quality: int = 90,
+    dest_box: tuple[float, float, float, float] | list[float] | None = None,
 ) -> bytes:
     """Compose *source_bytes* to *width*×*height* and encode JPEG, preserving EXIF metadata."""
     from PIL import Image as PILImage, ExifTags  # noqa: PLC0415
 
-    image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box)
+    image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box, dest_box)
     buf = io.BytesIO()
 
     # Extract EXIF from original source_bytes if present to display info card on Meural
@@ -234,9 +239,10 @@ def _encode_png_bytes(
     rotation: int = 0,
     locked: bool = False,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    dest_box: tuple[float, float, float, float] | list[float] | None = None,
 ) -> bytes:
     """Compose *source_bytes* to *width*×*height* and encode PNG."""
-    image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box)
+    image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box, dest_box)
     buf = io.BytesIO()
     image.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -252,6 +258,7 @@ def encode_for_panel(
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     codec_id: str | None = None,
     color_pipeline: str = "fast",
+    dest_box: tuple[float, float, float, float] | list[float] | None = None,
 ) -> bytes:
     """Encode a source image into wire payload for a panel.
 
@@ -263,10 +270,18 @@ def encode_for_panel(
     docs/KEY_PRODUCT_FLOWS.md KPF 7. Ignored for JPEG/PNG codecs (Meural /
     Samsung), which never dither.
 
+    *dest_box* (normalized (x0, y0, x1, y1), fraction of this frame's own
+    *width*x*height* canvas), when given alongside *crop_box*, places the
+    crop only within that sub-rectangle and fills the rest of the canvas
+    black instead of stretching the crop to cover the whole frame -- for a
+    frame that only partly overlaps a wallpaper's image rect (KPF 36; see
+    wall_geometry.compute_wallpaper_crop_boxes). Ignored when *crop_box* is
+    None.
+
     Positional-friendly signature so callers can pass this to
     ``hass.async_add_executor_job`` without kwargs (except trailing
-    *codec_id* / *color_pipeline* should be passed positionally when using
-    the executor with all args).
+    *codec_id* / *color_pipeline* / *dest_box* should be passed positionally
+    when using the executor with all args).
     """
     if codec_id is None:
         # Spectra path: require a registered frame type at this geometry.
@@ -282,6 +297,7 @@ def encode_for_panel(
             locked,
             crop_box,
             quality=90,
+            dest_box=dest_box,
         )
     if codec_id == CODEC_PNG:
         return _encode_png_bytes(
@@ -291,6 +307,7 @@ def encode_for_panel(
             rotation,
             locked,
             crop_box,
+            dest_box,
         )
 
     # Spectra 6 packing — layout from registered frame type.
@@ -310,6 +327,7 @@ def encode_for_panel(
             rotation,
             pack_method,
             color_pipeline,
+            dest_box,
         )
     return convert_image_bytes(
         source_bytes,
@@ -331,6 +349,7 @@ def encode_for_panel_with_preview(
     codec_id: str | None = None,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     color_pipeline: str = "fast",
+    dest_box: tuple[float, float, float, float] | list[float] | None = None,
 ) -> tuple[bytes, bytes]:
     """Like :func:`encode_for_panel`, plus a small PNG of the composed image.
 
@@ -338,7 +357,7 @@ def encode_for_panel_with_preview(
     :func:`encode_for_panel`) is used by wall-banner message sends, where
     each frame's crop into the shared composed canvas is the only thing
     that differs between otherwise-identical calls. See
-    :func:`encode_for_panel` for *color_pipeline*.
+    :func:`encode_for_panel` for *color_pipeline* / *dest_box*.
     """
     if codec_id is None:
         _ = frame_type_for_resolution(width, height)
@@ -347,14 +366,14 @@ def encode_for_panel_with_preview(
     if codec_id in (CODEC_JPEG_Q90, CODEC_PNG):
         from .image_converter import _encode_preview_png  # noqa: PLC0415
 
-        image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box)
+        image = _compose_rgb(source_bytes, width, height, rotation, locked, crop_box, dest_box)
         if codec_id == CODEC_JPEG_Q90:
             wire = _encode_jpeg_bytes(
-                source_bytes, width, height, rotation, locked, crop_box, 90
+                source_bytes, width, height, rotation, locked, crop_box, 90, dest_box
             )
         else:
             wire = _encode_png_bytes(
-                source_bytes, width, height, rotation, locked, crop_box
+                source_bytes, width, height, rotation, locked, crop_box, dest_box
             )
         return wire, _encode_preview_png(image)
 
@@ -370,6 +389,7 @@ def encode_for_panel_with_preview(
             tuple(crop_box),
             rotation,
             color_pipeline=color_pipeline,
+            dest_box=dest_box,
         )
 
     from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415

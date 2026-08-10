@@ -195,36 +195,49 @@ async def test_wallpaper_crop_boxes_independent_of_frame_bounding_box(hass, make
 
     assert set(crop_boxes.keys()) == {"e1", "e2", "e3", "e4"}
     # e1 at (40,40)-(145,180) within a 1000x1000 image.
-    c_e1 = crop_boxes["e1"]
+    c_e1 = crop_boxes["e1"]["crop_box"]
     assert c_e1[0] == pytest.approx(40 / 1000)
     assert c_e1[1] == pytest.approx(40 / 1000)
     assert c_e1[2] == pytest.approx(145 / 1000)
     assert c_e1[3] == pytest.approx(180 / 1000)
+    # e1 is fully inside the image rect, so it's covered edge-to-edge --
+    # the destination window is the whole frame.
+    assert crop_boxes["e1"]["dest_box"] == (0.0, 0.0, 1.0, 1.0)
 
     # Moving e4 far away must not change e1's crop box at all -- unlike the
     # old bounding-box-stretch model, where every frame's crop shifted
     # whenever *any* frame moved.
     wall.placements["e4"] = {"x": 900.0, "y": 900.0}
     crop_boxes_after_move = compute_wallpaper_crop_boxes(hass, wall, image_rect)
-    assert crop_boxes_after_move["e1"] == c_e1
+    assert crop_boxes_after_move["e1"] == crop_boxes["e1"]
 
 
 async def test_wallpaper_crop_boxes_partial_overlap_clamped_not_stretched(hass, make_frame_entry):
     """A frame hanging off the image's edge shows exactly what overlaps,
-    clamped to [0, 1] -- never stretched to cover the rest of the frame."""
+    clamped to [0, 1] -- never stretched to cover the rest of the frame.
+    dest_box says exactly which part of the *frame* that content belongs
+    in, so a renderer can leave the rest of the frame blank instead of
+    stretching this partial slice to cover it (KPF 36)."""
     from custom_components.digital_frames.wall_geometry import compute_wallpaper_crop_boxes
 
     entry = make_frame_entry(entry_id="e1", width=1200, height=1600)
     entry.add_to_hass(hass)
-    # Frame spans (40,40)-(145,180); image only covers up to x=100.
+    # Frame spans (40,40)-(145,180) [tile_dims: 105x140]; image only covers
+    # up to x=100, so only the left ~57% of the frame's width is covered.
     wall = _wall({"e1": {"x": 40.0, "y": 40.0}})
     image_rect = {"x": 0.0, "y": 0.0, "width": 100.0, "height": 1000.0}
 
     crop_boxes = compute_wallpaper_crop_boxes(hass, wall, image_rect)
 
-    c_e1 = crop_boxes["e1"]
+    c_e1 = crop_boxes["e1"]["crop_box"]
     assert c_e1[0] == pytest.approx(40 / 100)
     assert c_e1[2] == 1.0  # clamped, not extrapolated past the image's edge
+
+    d_e1 = crop_boxes["e1"]["dest_box"]
+    assert d_e1[0] == pytest.approx(0.0)
+    assert d_e1[2] == pytest.approx(60 / 105)  # only this much of the frame is covered
+    assert d_e1[1] == pytest.approx(0.0)
+    assert d_e1[3] == pytest.approx(1.0)
 
 
 async def test_wallpaper_crop_boxes_no_overlap_is_none(hass, make_frame_entry):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 
 import pytest
@@ -169,6 +170,73 @@ def test_encode_for_panel_with_preview_no_crop_box_unchanged(sample_image_bytes)
     wire, preview = encode_for_panel_with_preview(source, w, h)
     assert len(wire) == (w * h) // 2
     assert preview[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_encode_for_panel_dest_box_none_or_full_matches_crop_box_alone(sample_image_bytes):
+    """dest_box is opt-in: omitting it, or passing the full (0,0,1,1)
+    frame, must produce byte-identical output to crop_box alone -- no
+    perturbation of every pre-existing crop_box caller (wall-banner
+    messages, the per-frame Adjust Crop editor), which always intend full
+    coverage and never pass dest_box at all."""
+    w, h = 1200, 1600
+    source = sample_image_bytes(400, 300, color=(90, 140, 30))
+    crop_box = (0.1, 0.2, 0.7, 0.8)
+
+    baseline = encode_for_panel(source, w, h, crop_box=crop_box)
+    with_none = encode_for_panel(source, w, h, crop_box=crop_box, dest_box=None)
+    with_full = encode_for_panel(source, w, h, crop_box=crop_box, dest_box=(0.0, 0.0, 1.0, 1.0))
+
+    assert with_none == baseline
+    assert with_full == baseline
+
+
+def test_encode_for_panel_dest_box_windows_spectra_crop_leaves_rest_black(sample_image_bytes):
+    """A frame that only partly overlaps a wallpaper's image rect (KPF 36)
+    must show the covered part where it belongs and leave the rest of the
+    frame black -- not stretch the partial crop to cover the whole frame
+    (the bug this dest_box param exists to fix)."""
+    from PIL import Image
+
+    w, h = 1200, 1600
+    source = sample_image_bytes(400, 300, color=(220, 30, 30))
+    crop_box = (0.0, 0.0, 1.0, 1.0)  # the whole source image is behind this frame...
+    dest_box = (0.0, 0.0, 0.5, 1.0)  # ...but only the left half of the frame overlaps it
+
+    _wire, preview = encode_for_panel_with_preview(
+        source, w, h, codec_id=None, crop_box=crop_box, dest_box=dest_box
+    )
+    img = Image.open(io.BytesIO(preview))
+    pw, ph = img.size
+
+    left = img.getpixel((2, ph // 2))
+    right = img.getpixel((pw - 2, ph // 2))
+    # Spectra quantizes pure black to its nearest 6-color-palette swatch
+    # (not exactly (0,0,0)), so compare against the source color / a
+    # brightness threshold rather than requiring an exact black pixel.
+    assert sum(right) < sum(left) / 2  # uncovered half is dark, not a stretched copy
+    assert left[0] > left[2]  # covered half still reads as the reddish source
+
+
+def test_encode_for_panel_dest_box_windows_jpeg_crop_leaves_rest_black(sample_image_bytes):
+    """Same windowed-placement guarantee on the JPEG/PNG (Meural/Samsung)
+    encode path, not just Spectra."""
+    from PIL import Image
+
+    w, h = 1920, 1080
+    source = sample_image_bytes(400, 300, color=(30, 200, 30))
+    crop_box = (0.0, 0.0, 1.0, 1.0)
+    dest_box = (0.0, 0.0, 0.5, 1.0)
+
+    _wire, preview = encode_for_panel_with_preview(
+        source, w, h, codec_id=CODEC_JPEG_Q90, crop_box=crop_box, dest_box=dest_box
+    )
+    img = Image.open(io.BytesIO(preview))
+    pw, ph = img.size
+
+    left = img.getpixel((2, ph // 2))
+    right = img.getpixel((pw - 2, ph // 2))
+    assert left != (0, 0, 0)
+    assert right == (0, 0, 0)
 
 
 def test_text_skill_payload_spectra_pass_through_with_preview(sample_image_bytes):
