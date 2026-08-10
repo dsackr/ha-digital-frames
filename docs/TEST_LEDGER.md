@@ -179,3 +179,4 @@ Notes on reading it:
 | 2026-08-10 | e53853d | panel-playwright | success | 174 passed | — | CI |
 | 2026-08-10 | e53853d | backend-pytest | failure | 585 passed, 1 error in 232.19s (0:03:52) | 64% | CI |
 | 2026-08-10 | 4cb2c84 | panel-playwright | success | 179 passed | — | CI |
+| 2026-08-10 | 4cb2c84 | backend-pytest | failure | 1 failed, 593 passed, 1 error in 230.65s (0:03:50) | 64% | CI |
