@@ -309,9 +309,38 @@ def test_tile_dims_clone_size_label_parses_same_as_official(make_frame_entry):
     assert tile_dims(official) == tile_dims(clone)
 
 
-def test_tile_dims_non_numeric_size_label_falls_back_to_pixel_formula(make_frame_entry):
-    """Meural/Samsung store a driver label (not an inch figure) in
-    CONF_SIZE -- with no physical size to go on, this must reproduce the
+def test_tile_dims_unrecognized_size_label_falls_back_to_pixel_formula(make_frame_entry):
+    """A truly unrecognized label (not a known driver, not a numeric
+    diagonal) has no physical size to go on -- this must reproduce the
     original longest-pixel-edge formula exactly rather than guess."""
-    entry = make_frame_entry(width=800, height=480, size="meural")
+    entry = make_frame_entry(width=800, height=480, size="some_future_driver")
     assert tile_dims(entry) == (140, 84)
+
+
+def test_tile_dims_meural_uses_known_27in_diagonal(make_frame_entry):
+    """Meural's CONF_SIZE is the driver label "meural", not an inch figure
+    -- but every commercially released Meural Canvas is a 27" panel, so it
+    must still get real physical-scale treatment, not the flat pixel-only
+    fallback. Regression coverage for a user report: a 27" Meural Canvas II
+    rendered the same on-canvas size as an unrelated 13.3" Fraimic panel."""
+    meural = make_frame_entry(entry_id="e-meural", width=1920, height=1080, size="meural")
+    fraimic = make_frame_entry(entry_id="e-fraimic", width=1200, height=1600, size="13.3")
+
+    meural_w, meural_h = tile_dims(meural)
+    fraimic_w, fraimic_h = tile_dims(fraimic)
+
+    # 27" is roughly double 13.3" -- the Meural tile's longest edge should
+    # be substantially larger than the Fraimic tile's, not merely equal
+    # (the pre-fix bug) or arbitrarily different (a units mistake).
+    assert max(meural_w, meural_h) > 1.8 * max(fraimic_w, fraimic_h)
+
+
+def test_tile_dims_samsung_uses_known_32in_diagonal(make_frame_entry):
+    """Samsung's CONF_SIZE is the driver label "samsung" -- DRIVER_SAMSUNG
+    only ever targets the EM32DX (32" class), so it gets real physical-scale
+    treatment the same way Meural does."""
+    entry = make_frame_entry(width=2560, height=1440, size="samsung")
+    w, h = tile_dims(entry)
+    fraimic = make_frame_entry(entry_id="e-fraimic", width=1200, height=1600, size="13.3")
+    fraimic_w, fraimic_h = tile_dims(fraimic)
+    assert max(w, h) > 2 * max(fraimic_w, fraimic_h)

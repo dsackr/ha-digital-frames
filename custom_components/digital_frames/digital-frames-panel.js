@@ -2242,8 +2242,17 @@
   const WALL_REFERENCE_DIAGONAL_IN = 13.3;
   const WALL_REFERENCE_RESOLUTION = [1200, 1600];
 
+  // Meural/Samsung store a driver label in "size", not an inch figure --
+  // but each driver only ever targets one real physical panel size today,
+  // so the label itself implies a known diagonal (mirrors walls.py's
+  // _KNOWN_DRIVER_DIAGONALS_IN -- keep both in sync).
+  const WALL_KNOWN_DRIVER_DIAGONALS_IN = { meural: 27.0, samsung: 32.0 };
+
   function _wallParseDiagonalInches(sizeLabel) {
     if (typeof sizeLabel !== 'string') return null;
+    if (Object.prototype.hasOwnProperty.call(WALL_KNOWN_DRIVER_DIAGONALS_IN, sizeLabel)) {
+      return WALL_KNOWN_DRIVER_DIAGONALS_IN[sizeLabel];
+    }
     const match = sizeLabel.trim().match(/^([\d.]+)/);
     return match ? parseFloat(match[1]) : null;
   }
@@ -8713,16 +8722,12 @@
       this._openWall(null);
     }
 
-    // A frame tile's on-canvas size, aspect-ratio-correct for that frame's
-    // real resolution (orientation-swapped if the frame is orientation-
-    // locked) -- normalized to a fixed longest edge so every tile reads
-    // clearly regardless of the frame's actual native resolution.
-    // Aspect-correct, orientation-aware, and scaled to the panel's true
-    // physical size (see WALL_PX_PER_INCH above) -- the panel twin of
-    // walls.py's tile_dims(). A frame whose size label isn't a parseable
-    // inch figure (Meural/Samsung store a driver label there instead, e.g.
-    // "meural") has no physical size to go on, so it falls back to the
-    // original longest-pixel-edge formula as-is.
+    // A frame tile's on-canvas size, aspect-ratio-correct and orientation-
+    // aware, and scaled to the panel's true physical size (see
+    // WALL_PX_PER_INCH above) -- the panel twin of walls.py's tile_dims().
+    // A truly unrecognized/missing size label (not a known driver, not a
+    // numeric diagonal) has no physical size to go on, so it falls back to
+    // the original longest-pixel-edge formula as-is.
     _wallTileDims(frame) {
       let w = (frame && frame.width) || 1200;
       let h = (frame && frame.height) || 1600;

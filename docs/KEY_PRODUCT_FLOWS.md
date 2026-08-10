@@ -831,11 +831,16 @@ A tile's on-canvas size is scaled to the frame's true physical size
 the resolution's aspect ratio), not just its pixel resolution — a 31.5"
 panel renders visibly larger than a 13.3" one on a wall that mixes frame
 types, instead of both being independently normalized to the same
-longest-pixel-edge length. A frame whose size label isn't a parseable inch
-figure (Meural/Samsung store a driver label there instead) falls back to
-the old longest-pixel-edge formula, which is also what every frame got
-before this fix — so an all-13.3"/default-resolution wall renders pixel
-identical to before.
+longest-pixel-edge length. Meural/Samsung store a driver label in
+`CONF_SIZE` instead of an inch figure (e.g. `"meural"`), but each of those
+drivers only ever targets one real physical panel size today, so the label
+itself maps to a known diagonal (`_KNOWN_DRIVER_DIAGONALS_IN`: Meural
+Canvas/II/III are all 27", `DRIVER_SAMSUNG` only targets the 32"-class
+EM32DX) — fixed after a user reported their 27" Meural Canvas II rendering
+the same on-canvas size as an unrelated 13.3" Fraimic panel. Only a truly
+unrecognized/missing size label falls back to the old longest-pixel-edge
+formula, which is also what every frame got before this fix — so an
+all-13.3"/default-resolution wall renders pixel identical to before.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
   `async_ensure_default_wall`, `async_ensure_placement`, `async_prune_entry`, `tile_dims`), `walls_http.py`,
   `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_setActiveWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`, `_wallTileDims`).
@@ -896,8 +901,11 @@ identical to before.
   `tile_dims`'s physical-scale sizing — the 13.3"/1200x1600 reference frame
   pinned to its exact pre-fix pixel size, a 31.5" panel rendering visibly
   larger than a 13.3" one, `"13.3_clone"` scaling identically to `"13.3"`,
-  and a non-numeric size label like Meural's falling back to the original
-  longest-pixel-edge formula).
+  Meural's `"meural"` label resolving to its known 27" diagonal (and
+  rendering visibly larger than a 13.3" Fraimic panel), Samsung's
+  `"samsung"` label resolving to its known 32" diagonal, and a truly
+  unrecognized size label falling back to the original longest-pixel-edge
+  formula).
 
 ## 20. Schedules: send a scene or image at a future/recurring time
 User schedules a one-shot or daily/weekly/monthly recurring send; missed

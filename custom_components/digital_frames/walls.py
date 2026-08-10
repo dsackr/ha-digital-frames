@@ -27,8 +27,10 @@ from .const import (
     CONF_WIDTH,
     DOMAIN,
     KIND_SCENES_HUB,
+    MEURAL_SIZE_LABEL,
     ORIENTATION_LANDSCAPE,
     ORIENTATION_PORTRAIT,
+    SAMSUNG_SIZE_LABEL,
     SIGNAL_WALLS_UPDATED,
 )
 
@@ -75,12 +77,27 @@ _SIZE_LEADING_NUMBER_RE = re.compile(r"^([\d.]+)")
 _REFERENCE_DIAGONAL_IN = 13.3
 _REFERENCE_RESOLUTION = (1200, 1600)
 
+# Meural/Samsung store a driver label in CONF_SIZE, not an inch figure --
+# but each of those drivers only ever targets one real physical size today,
+# so the label itself implies a known diagonal: every commercially released
+# Meural Canvas (original, II, III) is a 27" panel, and DRIVER_SAMSUNG only
+# targets the EM32DX (32" class, per its own model number). Reported by a
+# user whose 27" Meural Canvas II rendered the same on-canvas size as an
+# unrelated 13.3" Fraimic panel before this map existed.
+_KNOWN_DRIVER_DIAGONALS_IN: dict[str, float] = {
+    MEURAL_SIZE_LABEL: 27.0,
+    SAMSUNG_SIZE_LABEL: 32.0,
+}
+
 
 def _parse_diagonal_inches(size_label: Any) -> float | None:
-    """Diagonal inches from a CONF_SIZE label (e.g. "31.5", "13.3_clone").
-    None if the label is missing or doesn't start with a number."""
+    """Diagonal inches from a CONF_SIZE label -- a numeric figure (e.g.
+    "31.5", "13.3_clone"), or a known driver label (e.g. "meural", see
+    _KNOWN_DRIVER_DIAGONALS_IN). None if neither matches."""
     if not isinstance(size_label, str):
         return None
+    if size_label in _KNOWN_DRIVER_DIAGONALS_IN:
+        return _KNOWN_DRIVER_DIAGONALS_IN[size_label]
     match = _SIZE_LEADING_NUMBER_RE.match(size_label.strip())
     return float(match.group(1)) if match else None
 
@@ -119,10 +136,12 @@ def tile_dims(entry: "ConfigEntry") -> tuple[int, int]:
     that mixes frame types -- scaling each tile independently to a common
     longest-*pixel*-edge target (the pre-KPF behavior) made a 31.5" panel
     look the same size as a 13.3" one. CONF_SIZE's diagonal-inch label plus
-    the resolution's aspect ratio gives true physical width/height; a frame
-    whose CONF_SIZE isn't a parseable inch figure (Meural/Samsung store a
-    driver label there instead, e.g. "meural") has no physical size to go
-    on, so it falls back to the original longest-pixel-edge formula as-is.
+    the resolution's aspect ratio gives true physical width/height; Meural/
+    Samsung store a driver label there instead (e.g. "meural"), which maps
+    to a known diagonal via _KNOWN_DRIVER_DIAGONALS_IN since each of those
+    drivers only ever targets one real physical panel size today. Only a
+    truly unrecognized/missing size (a malformed or pre-CONF_SIZE legacy
+    entry) falls back to the original longest-pixel-edge formula as-is.
     """
     width = entry.data.get(CONF_WIDTH) or 1200
     height = entry.data.get(CONF_HEIGHT) or 1600
@@ -134,11 +153,10 @@ def tile_dims(entry: "ConfigEntry") -> tuple[int, int]:
 
     diagonal_in = _parse_diagonal_inches(entry.data.get(CONF_SIZE))
     if diagonal_in is None:
-        # No parseable diagonal (Meural/Samsung's CONF_SIZE is a driver
-        # label like "meural", not an inch figure, and a malformed/legacy
-        # entry could have no size at all) -- physical scale is undefined,
-        # so fall back to the original longest-pixel-edge normalization
-        # exactly rather than guessing a diagonal.
+        # Genuinely no diagonal to go on (a malformed entry, or one from
+        # before CONF_SIZE existed) -- physical scale is undefined, so fall
+        # back to the original longest-pixel-edge normalization exactly
+        # rather than guessing.
         scale = _TILE_TARGET_LONGEST / max(width, height)
         return round(width * scale), round(height * scale)
 
