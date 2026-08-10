@@ -181,3 +181,4 @@ Notes on reading it:
 | 2026-08-10 | 4cb2c84 | panel-playwright | success | 179 passed | — | CI |
 | 2026-08-10 | 4cb2c84 | backend-pytest | failure | 1 failed, 593 passed, 1 error in 230.65s (0:03:50) | 64% | CI |
 | 2026-08-10 | ea05344 | panel-playwright | success | 179 passed | — | CI |
+| 2026-08-10 | ea05344 | backend-pytest | failure | 596 passed, 1 error in 229.82s (0:03:49) | 64% | CI |
