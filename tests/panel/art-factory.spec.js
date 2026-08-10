@@ -67,7 +67,7 @@ test.describe('Art Factory AI Generation & Wallpaper Studio (KPF 36, 37, 38)', (
     expect(pageErrors).toHaveLength(0);
   });
 
-  test('wall select populates and the canvas shows one transparent window per placed frame', async ({ page }) => {
+  test('wall select populates and the canvas shows a tile per placed frame', async ({ page }) => {
     const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
     await openArtFactoryTab(page);
 
@@ -92,11 +92,55 @@ test.describe('Art Factory AI Generation & Wallpaper Studio (KPF 36, 37, 38)', (
     const tiles = await getWallTiles(page);
     expect(tiles).toHaveLength(FRAMES.length);
 
-    const allTransparentSkin = await page.evaluate(() => {
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('frames show their own current thumbnail until a background is picked, then drop it for a transparent window', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openArtFactoryTab(page);
+
+    // No wallpaper background yet -- a frame's tile has nothing to show
+    // through, so it shows what's actually on that physical frame right
+    // now (its own live thumbnail), same as the Walls tab would, instead
+    // of an empty transparent box.
+    const beforeBackground = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
-      return [...root.querySelectorAll('.wall-tile')].every((t) => t.classList.contains('af-wallpaper-tile'));
+      return [...root.querySelectorAll('.wall-tile')].map((t) => ({
+        transparent: t.classList.contains('af-wallpaper-tile'),
+        hasThumbnail: !!t.querySelector(`img[src*="/frame/"]`),
+      }));
     });
-    expect(allTransparentSkin).toBe(true);
+    expect(beforeBackground).toHaveLength(FRAMES.length);
+    for (const tile of beforeBackground) {
+      expect(tile.transparent).toBe(false);
+      expect(tile.hasThumbnail).toBe(true);
+    }
+
+    // Pick a background -- every tile drops its thumbnail and becomes a
+    // transparent window instead.
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('art-factory-choose-bg-btn').click();
+    });
+    await page.waitForFunction(() => {
+      const grid = document.getElementById('panel').shadowRoot.getElementById('art-factory-bg-picker-grid');
+      return grid && grid.children.length > 0;
+    });
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('art-factory-bg-picker-grid').firstElementChild.click();
+    });
+
+    const afterBackground = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return [...root.querySelectorAll('.wall-tile')].map((t) => ({
+        transparent: t.classList.contains('af-wallpaper-tile'),
+        hasThumbnail: !!t.querySelector(`img[src*="/frame/"]`),
+      }));
+    });
+    expect(afterBackground).toHaveLength(FRAMES.length);
+    for (const tile of afterBackground) {
+      expect(tile.transparent).toBe(true);
+      expect(tile.hasThumbnail).toBe(false);
+    }
 
     expect(pageErrors).toHaveLength(0);
   });

@@ -9199,6 +9199,14 @@
         canvas.appendChild(bg);
       }
 
+      // Until a background is chosen, a frame's window has nothing to show
+      // through to -- show what's actually on that physical frame right
+      // now instead of an empty box, same as the Walls tab would. The
+      // instant a background is picked, every tile drops its thumbnail and
+      // becomes a transparent window (below), since there's a wallpaper to
+      // show through it instead.
+      const hasBackground = !!this._afBackgroundImageId;
+
       for (const entryId of Object.keys(this._wallPlacements)) {
         const frame = this._frames.find(f => f.entryId === entryId);
         if (!frame) continue;
@@ -9206,7 +9214,6 @@
         const dims = this._wallTileDims(frame);
 
         const tile = document.createElement('div');
-        tile.className = 'wall-tile af-wallpaper-tile';
         tile.dataset.entryId = entryId;
         tile.style.left = `${pos.x}px`;
         tile.style.top = `${pos.y}px`;
@@ -9214,8 +9221,18 @@
         tile.style.height = `${dims.height}px`;
         tile.title = frame.title;
         tile.tabIndex = 0;
+
+        if (hasBackground) {
+          tile.className = 'wall-tile af-wallpaper-tile';
+          tile.innerHTML = `<div class="af-wallpaper-tile-label">${this._esc(frame.title)}</div>`;
+        } else {
+          tile.className = 'wall-tile';
+          tile.innerHTML = `
+            <img src="/api/digital_frames/frame/${this._esc(entryId)}/thumbnail" alt="" style="width:100%;height:100%;object-fit:cover">
+            <div class="af-wallpaper-tile-label">${this._esc(frame.title)}</div>
+          `;
+        }
         if (this._wallSelection.has(entryId)) tile.classList.add('selected');
-        tile.innerHTML = `<div class="af-wallpaper-tile-label">${this._esc(frame.title)}</div>`;
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
         canvas.appendChild(tile);
       }
