@@ -4141,6 +4141,7 @@
         rotation_edge: 'Rotated hanging (which edge is up)',
         rotate_portrait_180: 'Flip Portrait Image',
         rotate_landscape_180: 'Flip Landscape Image',
+        color_pipeline: 'Color pipeline',
         meural_email: 'Meural / Netgear email',
         meural_password: 'Meural / Netgear password',
         meural_unlink_cloud: 'Unlink Meural cloud account',

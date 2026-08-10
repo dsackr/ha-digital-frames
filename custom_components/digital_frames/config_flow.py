@@ -53,6 +53,10 @@ from .const import (
     EDGE_RIGHT,
     CONF_ROTATE_PORTRAIT_180,
     CONF_ROTATE_LANDSCAPE_180,
+    CONF_COLOR_PIPELINE,
+    COLOR_PIPELINE_FAST,
+    COLOR_PIPELINE_VIVID,
+    DEFAULT_COLOR_PIPELINE,
 )
 from .frame_types import FRAME_TYPES
 from .helpers import (
@@ -769,6 +773,9 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         current_rotate_landscape: bool = self.config_entry.options.get(
             CONF_ROTATE_LANDSCAPE_180, default_rotate_landscape_180(self.config_entry)
         )
+        current_color_pipeline: str = self.config_entry.options.get(
+            CONF_COLOR_PIPELINE, DEFAULT_COLOR_PIPELINE
+        )
 
         # Entries created before CONF_SIZE existed have no size on file --
         # rather than guess one (ambiguous once multiple panels share a
@@ -787,6 +794,15 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         edge_options = {
             EDGE_LEFT: "Left edge up (Fraimic default)",
             EDGE_RIGHT: "Right edge up",
+        }
+
+        # Spectra 6 panels only (dithered .bin) -- Meural (JPEG) and Samsung
+        # (PNG) never quantize/dither, so the pipeline choice is meaningless
+        # for them.
+        is_samsung = self.config_entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG
+        color_pipeline_options = {
+            COLOR_PIPELINE_FAST: "Fast (Floyd-Steinberg, default)",
+            COLOR_PIPELINE_VIVID: "Vivid (Fraimic-style Atkinson, slower)",
         }
 
         schema_dict: dict[Any, Any] = {}
@@ -848,6 +864,12 @@ class DigitalFramesOptionsFlow(OptionsFlow):
                     CONF_ROTATE_LANDSCAPE_180, default=current_rotate_landscape
                 )
             ] = bool
+            if not is_samsung:
+                schema_dict[
+                    vol.Optional(
+                        CONF_COLOR_PIPELINE, default=current_color_pipeline
+                    )
+                ] = vol.In(color_pipeline_options)
 
         return self.async_show_form(
             step_id="init",

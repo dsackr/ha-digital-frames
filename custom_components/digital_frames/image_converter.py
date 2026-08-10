@@ -65,7 +65,10 @@ Conversion pipeline
    center -- overflow is cropped
 4. Optionally rotate the finished canvas (90/180/270) -- used for frames
    physically hung in their non-native orientation and/or upside down
-5. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg dithering
+5. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg
+   dithering (default) -- or, opt-in via CONF_COLOR_PIPELINE="vivid", the
+   "vivid" pipeline: see "Vivid color pipeline" below and
+   docs/KEY_PRODUCT_FLOWS.md KPF 7.
 6. Pack pixels into the nibble format described above, using the byte
    ordering that matches the final resolution's physical panel
 """
@@ -74,10 +77,10 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Tuple
+from typing import Any, Tuple
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageEnhance, ImageFilter
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "Pillow is required for image conversion. "
@@ -120,6 +123,76 @@ SPECTRA6_NIBBLE_VALUES: Tuple[int, ...] = (0, 1, 2, 3, 5, 6)
 
 # Sanity check: palette and nibble tables must stay in sync.
 assert len(SPECTRA6_REAL_WORLD_RGB) == len(SPECTRA6_NIBBLE_VALUES)
+
+# Color pipeline selector values (mirrors const.CONF_COLOR_PIPELINE's
+# choices; duplicated here rather than imported to avoid a dependency on HA
+# config plumbing from this module, which is also used standalone/in tests).
+COLOR_PIPELINE_FAST = "fast"
+COLOR_PIPELINE_VIVID = "vivid"
+
+# Bumped whenever the FAST pipeline's output bytes change, so library.py's
+# .bin cache path can include it and old bins miss + regenerate instead of
+# serving stale colors forever (mirrors the historical COLOR_PIPELINE_ID
+# mechanism from the reverted cp2/cp3 experiment -- see KPF 7). "1" was the
+# original Floyd-Steinberg-only pipeline (no enhance chain); "2"
+# (2026-08-09) folded in the Fraimic enhance chain (_enhance_for_panel).
+# Bump again if the fast pipeline's output changes in the future.
+FAST_PIPELINE_CACHE_VERSION = "2"
+
+# ---------------------------------------------------------------------------
+# Fraimic-aligned enhance chain + "Vivid" opt-in dithering
+# (github.com/Fraimic/fraimic_bin_converter; see CONF_COLOR_PIPELINE / const.py)
+#
+# Their reference converter's pre-quantize step is a brightness/contrast/
+# saturation/sharpen enhance chain; their color-matching step is Atkinson
+# dither against idealized 6-color primaries with a tuned RGB+luma distance
+# metric (Section 6 of the EL315 spec explicitly leaves both to "tool
+# authors"). These two pieces have very different costs, so they're split:
+#
+# - The enhance chain (_enhance_for_panel) is near-free (~0.1-0.15s even at
+#   31.5" resolution) and applies to BOTH pipelines below -- it's just part
+#   of the default pipeline now, no opt-in needed.
+# - The idealized-primary Atkinson dither (_quantize_vivid_p) is roughly two
+#   orders of magnitude slower than Floyd-Steinberg (seconds, not
+#   milliseconds, per image -- worse on weaker hardware and during a
+#   library-wide backfill), so it stays opt-in via CONF_COLOR_PIPELINE,
+#   never the default.
+#
+# 2026-07-30 history: an earlier attempt (commits 9679ec5/24367e1, "cp2"/
+# "cp3") shipped a very similar Atkinson port as the new *default* pipeline
+# without benchmarking it at real panel resolution first -- a naive
+# per-pixel loop took 20-40+ seconds per image on the 31.5" panel and got
+# reverted the same day (see docs/KEY_PRODUCT_FLOWS.md KPF 7). This version
+# is LUT-accelerated (~5-10x faster: a precomputed nearest-color lookup
+# replaces the per-pixel 6-way distance calculation), and -- unlike cp2/cp3
+# -- only the genuinely expensive part is gated behind opt-in; the cheap
+# enhance chain was benchmarked separately and folded into the default path.
+# ---------------------------------------------------------------------------
+
+# Fraimic CLI defaults (convert_to_bin_spectra6.py --brightness/--contrast/--saturation).
+_ENHANCE_BRIGHTNESS = 1.1
+_ENHANCE_CONTRAST = 1.2
+_ENHANCE_SATURATION = 1.2
+
+# Idealized 6-color primaries (PALETTE_COLORS in Fraimic's script) used only
+# as the vivid pipeline's internal dither *target*. Packed nibbles and the
+# preview/output image still map through SPECTRA6_REAL_WORLD_RGB above --
+# that's what the panel actually renders for a given nibble regardless of
+# which colors the matching math aimed for while choosing it.
+SPECTRA6_VIVID_TARGET_RGB: Tuple[Tuple[int, int, int], ...] = (
+    (0, 0, 0),        # Black
+    (255, 255, 255),  # White
+    (255, 255, 0),    # Yellow
+    (255, 0, 0),      # Red
+    (0, 0, 255),      # Blue
+    (0, 255, 0),      # Green
+)
+assert len(SPECTRA6_VIVID_TARGET_RGB) == len(SPECTRA6_NIBBLE_VALUES)
+
+# Grid step (out of 256) for the precomputed nearest-vivid-color LUT. Built
+# once per process and cached; smaller steps are more accurate but slower
+# to build and use more memory (step=4 -> 64^3 = 262,144 entries).
+_VIVID_LUT_STEP = 4
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -617,6 +690,161 @@ def _quantize_to_spectra6_p(image: "Image.Image") -> "Image.Image":
     )
 
 
+def _enhance_for_panel(image: "Image.Image") -> "Image.Image":
+    """Fraimic bin-converter's pre-quantize enhance chain: brightness ->
+    contrast -> saturation -> edge-enhance -> smooth -> sharpen, at their
+    CLI's default strengths. Applied unconditionally, before either
+    quantizer (fast or vivid) -- cheap (~0.1-0.15s even at 31.5"
+    resolution), unlike the vivid dither this chain is not opt-in."""
+    image = ImageEnhance.Brightness(image).enhance(_ENHANCE_BRIGHTNESS)
+    image = ImageEnhance.Contrast(image).enhance(_ENHANCE_CONTRAST)
+    image = ImageEnhance.Color(image).enhance(_ENHANCE_SATURATION)
+    image = image.filter(ImageFilter.EDGE_ENHANCE)
+    image = image.filter(ImageFilter.SMOOTH)
+    image = image.filter(ImageFilter.SHARPEN)
+    return image
+
+
+_vivid_lut_cache: "Tuple[Any, int] | None" = None
+
+
+def _build_vivid_lut(step: int) -> "Any":
+    """Precompute the nearest SPECTRA6_VIVID_TARGET_RGB index for a coarse
+    RGB grid using Fraimic's tuned RGB+luma distance metric (port of
+    convert_to_bin_spectra6.closest_palette_color), so the dither loop below
+    does an O(1) array lookup per pixel instead of a 6-way distance
+    calculation -- the main cost cut versus a naive per-pixel port."""
+    n = 256 // step
+    palette = _np.array(SPECTRA6_VIVID_TARGET_RGB, dtype=_np.float32)
+    luma_table = _np.array(
+        [r * 250 + g * 350 + b * 400 for (r, g, b) in SPECTRA6_VIVID_TARGET_RGB],
+        dtype=_np.float32,
+    ) / (255.0 * 1000)
+
+    axis = _np.arange(n, dtype=_np.float32) * step
+    rr, gg, bb = _np.meshgrid(axis, axis, axis, indexing="ij")
+    luma = (rr * 250 + gg * 350 + bb * 400) / (255.0 * 1000)
+
+    best_idx = _np.zeros(rr.shape, dtype=_np.uint8)
+    best_dist = None
+    for i in range(len(SPECTRA6_VIVID_TARGET_RGB)):
+        pr, pg, pb = palette[i]
+        dr, dg, db = rr - pr, gg - pg, bb - pb
+        # boost blue, reduce green a bit and red a little more (Fraimic
+        # closest_palette_color tuning for e-ink/eye sensitivity).
+        rgb_dist = (dr * dr * 0.250 + dg * dg * 0.350 + db * db * 0.400) * 0.75 / (
+            255.0 * 255.0
+        )
+        luma_diff = luma - luma_table[i]
+        total = 1.5 * rgb_dist + 0.60 * luma_diff * luma_diff
+        if best_dist is None:
+            best_dist = total
+        else:
+            better = total < best_dist
+            best_idx = _np.where(better, i, best_idx).astype(_np.uint8)
+            best_dist = _np.where(better, total, best_dist)
+    return best_idx
+
+
+def _vivid_lut() -> "Tuple[Any, int]":
+    """Lazily build and cache the nearest-vivid-color LUT for the process
+    lifetime -- built once, reused by every subsequent vivid-pipeline image."""
+    global _vivid_lut_cache
+    if _vivid_lut_cache is None:
+        _vivid_lut_cache = (_build_vivid_lut(_VIVID_LUT_STEP), _VIVID_LUT_STEP)
+    return _vivid_lut_cache
+
+
+def _quantize_vivid_p(image: "Image.Image") -> "Image.Image":
+    """"Vivid" pipeline: Atkinson dither against idealized primaries using
+    the tuned RGB+luma metric (LUT-accelerated — see _build_vivid_lut and
+    the module docstring above). Expects *image* to already have gone
+    through _enhance_for_panel (both pipelines share that step -- see
+    _process/_process_cropped). Returns a P-mode image whose *embedded*
+    palette is still SPECTRA6_REAL_WORLD_RGB, so downstream packing/preview
+    code is identical to the default pipeline; only which index gets chosen
+    per pixel differs.
+
+    Pure-Python pixel loop: Atkinson's error diffusion (each pixel's target
+    depends on accumulated error from pixels already processed) is
+    inherently sequential and can't be fully vectorized. Plain Python lists
+    are used for the working buffer rather than numpy scalar indexing, which
+    profiles significantly slower for millions of individual element
+    accesses.
+    """
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    width, height = image.size
+
+    if _np is None:  # pragma: no cover -- numpy ships with this integration
+        return _quantize_to_spectra6_p(image)
+
+    lut, step = _vivid_lut()
+    n = lut.shape[0]
+    working = _np.asarray(image, dtype=_np.float32).tolist()
+    palette = [list(rgb) for rgb in SPECTRA6_VIVID_TARGET_RGB]
+    indices = bytearray(width * height)
+
+    for y in range(height):
+        row = working[y]
+        next_row = working[y + 1] if y + 1 < height else None
+        row_off = y * width
+        for x in range(width):
+            r, g, b = row[x]
+            if r < 0.0:
+                r = 0.0
+            elif r > 255.0:
+                r = 255.0
+            if g < 0.0:
+                g = 0.0
+            elif g > 255.0:
+                g = 255.0
+            if b < 0.0:
+                b = 0.0
+            elif b > 255.0:
+                b = 255.0
+            ri = int(r) // step
+            gi = int(g) // step
+            bi = int(b) // step
+            if ri >= n:
+                ri = n - 1
+            if gi >= n:
+                gi = n - 1
+            if bi >= n:
+                bi = n - 1
+            idx = int(lut[ri, gi, bi])
+            indices[row_off + x] = idx
+
+            pr, pg, pb = palette[idx]
+            er = r - pr
+            eg = g - pg
+            eb = b - pb
+            if x + 1 < width:
+                nx = row[x + 1]
+                nx[0] += er * 0.125
+                nx[1] += eg * 0.125
+                nx[2] += eb * 0.125
+            if next_row is not None:
+                if x - 1 >= 0:
+                    nl = next_row[x - 1]
+                    nl[0] += er * 0.125
+                    nl[1] += eg * 0.125
+                    nl[2] += eb * 0.125
+                nc = next_row[x]
+                nc[0] += er * 0.25
+                nc[1] += eg * 0.25
+                nc[2] += eb * 0.25
+                if x + 1 < width:
+                    nr = next_row[x + 1]
+                    nr[0] += er * 0.125
+                    nr[1] += eg * 0.125
+                    nr[2] += eb * 0.125
+
+    out = Image.frombytes("P", (width, height), bytes(indices))
+    out.putpalette(_build_palette_image().getpalette())
+    return out
+
+
 def _open_as_rgb(source: "str | bytes") -> "Image.Image":
     """
     Open an image from a file path or raw bytes and return it in RGB mode.
@@ -724,17 +952,18 @@ def convert_image_bytes(
     rotation: int = 0,
     locked: bool = False,
     pack_method: str = "fast",
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> bytes:
     """
     Convert raw image bytes to the raw Spectra 6 binary format.
 
     Accepts any image format that Pillow can decode (JPEG, PNG, WebP, GIF,
     BMP, TIFF, …). See :func:`convert_image` for parameter details and
-    :func:`_process` for *pack_method*.
+    :func:`_process` for *pack_method* / *color_pipeline*.
     """
     image = _open_as_rgb(image_data)
     bin_bytes, _quantized = _process(
-        image, width, height, rotation, locked, pack_method
+        image, width, height, rotation, locked, pack_method, color_pipeline
     )
     return bin_bytes
 
@@ -745,6 +974,7 @@ def convert_image_bytes_with_preview(
     height: int,
     rotation: int = 0,
     locked: bool = False,
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> "Tuple[bytes, bytes]":
     """
     Like :func:`convert_image_bytes`, but also returns a small PNG preview of
@@ -755,7 +985,9 @@ def convert_image_bytes_with_preview(
     :returns: ``(bin_bytes, preview_png_bytes)``.
     """
     image = _open_as_rgb(image_data)
-    bin_bytes, quantized = _process(image, width, height, rotation, locked)
+    bin_bytes, quantized = _process(
+        image, width, height, rotation, locked, color_pipeline=color_pipeline
+    )
     return bin_bytes, _encode_preview_png(quantized)
 
 
@@ -795,6 +1027,7 @@ def _process(
     rotation: int = 0,
     locked: bool = False,
     pack_method: str = "fast",
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> "Tuple[bytes, Image.Image]":
     """Shared implementation used by both public entry points. Returns the
     packed bytes alongside the final quantized image so preview-generating
@@ -805,7 +1038,14 @@ def _process(
     escape hatch (reachable via the panel's ?packer=legacy override). The
     two produce identical bytes -- proven by scripts/verify_packing.py and
     confirmed pixel-identical on real frames (2026-07) -- so legacy plus
-    the A/B switches can be removed in a future release."""
+    the A/B switches can be removed in a future release.
+
+    color_pipeline selects the quantizer/dither: COLOR_PIPELINE_FAST
+    (default, Floyd-Steinberg against measured real-world panel colors) or
+    COLOR_PIPELINE_VIVID (opt-in, idealized-primary Atkinson dither -- see
+    the module docstring above _quantize_vivid_p, meaningfully slower,
+    never the default). Both pipelines share the same pre-quantize enhance
+    chain (_enhance_for_panel) -- it's cheap enough to always run."""
     if not locked:
         # The Fraimic way: a mismatched image lies sideways at full size.
         image = _auto_rotate(image, width, height)
@@ -814,6 +1054,10 @@ def _process(
     image = _resize_cover_centered(image, width, height)
     if rotation:
         image = image.rotate(rotation, expand=True)
+    image = _enhance_for_panel(image)
+    if color_pipeline == COLOR_PIPELINE_VIVID:
+        p_image = _quantize_vivid_p(image)
+        return _pack_p_image_fast(p_image), p_image.convert("RGB")
     if pack_method == "fast":
         p_image = _quantize_to_spectra6_p(image)
         return _pack_p_image_fast(p_image), p_image.convert("RGB")
@@ -955,16 +1199,17 @@ def convert_image_bytes_cropped(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> bytes:
     """
     Convert raw image bytes to Spectra 6 binary using a manually-chosen crop
     rectangle instead of the automatic letterbox path. See
     :func:`convert_image_cropped` for parameter details and :func:`_process`
-    for *pack_method*.
+    for *pack_method* / *color_pipeline*.
     """
     image = _open_as_rgb(image_data)
     bin_bytes, _quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method
+        image, width, height, crop_box, rotation, pack_method, color_pipeline
     )
     return bin_bytes
 
@@ -976,6 +1221,7 @@ def convert_image_bytes_cropped_with_preview(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> "Tuple[bytes, bytes]":
     """
     Like :func:`convert_image_bytes_cropped`, but also returns a small PNG
@@ -988,7 +1234,7 @@ def convert_image_bytes_cropped_with_preview(
     """
     image = _open_as_rgb(image_data)
     bin_bytes, quantized = _process_cropped(
-        image, width, height, crop_box, rotation, pack_method
+        image, width, height, crop_box, rotation, pack_method, color_pipeline
     )
     return bin_bytes, _encode_preview_png(quantized)
 
@@ -1000,6 +1246,7 @@ def _process_cropped(
     crop_box: "Tuple[float, float, float, float]",
     rotation: int = 0,
     pack_method: str = "fast",
+    color_pipeline: str = COLOR_PIPELINE_FAST,
 ) -> "Tuple[bytes, Image.Image]":
     img_w, img_h = image.width, image.height
     x0, y0, x1, y1 = crop_box
@@ -1031,6 +1278,10 @@ def _process_cropped(
     image = image.resize((width, height), Image.LANCZOS)
     if rotation:
         image = image.rotate(rotation, expand=True)
+    image = _enhance_for_panel(image)
+    if color_pipeline == COLOR_PIPELINE_VIVID:
+        p_image = _quantize_vivid_p(image)
+        return _pack_p_image_fast(p_image), p_image.convert("RGB")
     if pack_method == "fast":
         p_image = _quantize_to_spectra6_p(image)
         return _pack_p_image_fast(p_image), p_image.convert("RGB")

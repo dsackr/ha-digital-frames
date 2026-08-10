@@ -96,15 +96,27 @@ and in `render_spec_for_entry`'s actual rotation when the option has never
 been explicitly saved. Community clones (`13.3_clone`, `7.3`) and Meural/
 Samsung are unaffected and still default off. Saving the options form with
 the box unticked (an explicit `False`) always overrides the default.
+
+**Color pipeline** (`CONF_COLOR_PIPELINE`, Spectra panels only — hidden for
+Meural/Samsung, which never dither): per-frame choice between the default
+**Fast** (Floyd-Steinberg) and opt-in **Vivid** (Fraimic-style Atkinson) — see
+KPF 7 for what each pipeline actually does and why it's per-frame rather
+than global or default-on.
 - **Entry points**: `config_flow.py` (`DigitalFramesOptionsFlow.async_step_init`), `digital-frames-panel.js` (`_renderFlowStep`, `_flowFieldLabelFallback`), `helpers.py` (`default_rotate_landscape_180`).
 - **If it silently breaks**: settings don't stick, labels show snake_case
   keys, Frame Type reappears for normal entries, the orientation lock
   resets when saving an unrelated field, or landscape images on official
   Fraimic panels are upside down again by default.
-- **Test status**: Panel-tested (`flow-renderer.spec.js`, `frame-manage.spec.js`).
+- **Test status**: Panel-tested (`flow-renderer.spec.js`, `frame-manage.spec.js`
+  — generic schema-driven form rendering, re-run 2026-08-09 to confirm the new
+  color-pipeline select field renders through the existing generic path with
+  no dedicated panel test needed).
   **Backend-tested** — `tests/python/config_flow/test_config_flow_options.py`
   (including `test_official_fraimic_sizes_default_landscape_flip_on`,
-  `test_clone_size_does_not_default_landscape_flip_on`).
+  `test_clone_size_does_not_default_landscape_flip_on`,
+  `test_color_pipeline_field_defaults_to_fast_for_spectra_frame`,
+  `test_color_pipeline_field_reflects_saved_vivid_choice`,
+  `test_color_pipeline_field_hidden_for_samsung`).
 
 ## 3. Coordinator polling & IP self-healing
 Each frame is polled periodically for battery/wifi/firmware/dimensions; if
@@ -364,6 +376,61 @@ further. If revisiting Fraimic-parity color matching, budget real
 hardware-resolution performance testing *before* changing any default, and
 land it as an opt-in `dither=` value first, not a default-path change.
 
+**2026-08-09: Fraimic enhance chain adopted by default; "Vivid" Atkinson
+dither shipped as opt-in — following the cp2/cp3 lesson above.** Fraimic
+published its own reference converter
+(`github.com/Fraimic/fraimic_bin_converter`) publicly; comparing it against
+this repo's independently reverse-engineered 31.5" wire format found the
+*byte layout* already matches their spec exactly (confirmed by hand-tracing
+both formulas — no packing changes needed). Where the two differ is the
+color pipeline, which their own spec leaves to "tool authors": a
+brightness/contrast/saturation/sharpen enhance chain, plus idealized
+6-color primaries with a tuned RGB/luma distance metric and Atkinson
+dither, vs. this repo's prior default of plain Floyd-Steinberg against
+measured real-world panel colors with no enhance step. These two pieces
+have very different costs, so — unlike cp2/cp3, which bundled everything
+into one *default*-path change without measuring it first — they were
+benchmarked and shipped separately:
+- **Enhance chain**: ~0.1-0.15s even at 31.5" resolution. Cheap enough to
+  fold straight into the default pipeline (`image_converter._enhance_for_panel`,
+  called from `_process`/`_process_cropped` for both the fast and vivid
+  quantizers). This changed the *default* pipeline's output bytes, so the
+  library `.bin` cache path for the fast pipeline carries
+  `image_converter.FAST_PIPELINE_CACHE_VERSION` (mirrors the historical
+  `COLOR_PIPELINE_ID` mechanism from cp2/cp3) — existing cached "fast" bins
+  from before this change simply miss and regenerate rather than serving
+  stale (non-enhanced) colors indefinitely.
+- **Idealized-primary Atkinson dither**: a naive per-pixel port of
+  Fraimic's algorithm took ~22s (13.3") / ~42s (31.5") on dev hardware. A
+  LUT-accelerated version (precomputed nearest-color lookup replacing the
+  per-pixel 6-way distance calc; ~95.6% pixel agreement with the naive/exact
+  version on a cross-check image, disagreement only at palette-boundary
+  pixels that are visually indistinguishable after dithering) cut that to
+  ~1.2s / ~2.3s — still roughly two orders of magnitude slower than
+  Floyd-Steinberg's ~0.03-0.05s, and real HA hardware (HA Green-class boxes
+  especially) will likely be worse. This part stays opt-in via
+  `CONF_COLOR_PIPELINE` (`fast` default | `vivid`), **per-frame** (not
+  global) since mixed-hardware setups may want it on for a capable box and
+  off for a weaker one, and **never on the default path**.
+
+Library `.bin` caching keys vivid renders under a distinct codec-id suffix
+(`library._cache_codec_id`, e.g. `spectra6_split_half_vivid`) so flipping
+the option per frame never serves stale bytes from the other pipeline, and
+background backfill (KPF 11) reads each configured frame's own pipeline
+choice via `library._all_render_targets`. The vivid dither's internal
+*target* is idealized primaries (`image_converter.SPECTRA6_VIVID_TARGET_RGB`),
+but packed nibbles and preview images still map through the same
+`SPECTRA6_REAL_WORLD_RGB` palette as the default pipeline — that's what the
+panel actually renders for a given nibble regardless of which colors the
+matching math aimed for while choosing it. **Gap:** the text-skill repack
+path (`panel_codec.text_skill_payload_for_codec`'s `need_repack` branch,
+used for rotated/wrong-size xOTD/daily-agenda sends) intentionally does
+*not* run the enhance chain or offer the vivid dither — those renderers
+compose from exact palette colors on purpose, and blur/sharpen/contrast
+filters would degrade crisp text and shift those exact colors; it always
+quantizes with plain Floyd-Steinberg against real-world colors regardless
+of a frame's `CONF_COLOR_PIPELINE`.
+
 Call sites that produce wire payload for a send should use
 `panel_codec.encode_for_panel*` (codec selection by panel geometry);
 packing primitives remain in `image_converter.py`. Also the reverse
@@ -375,8 +442,14 @@ renderer — see KPF 28/29).
   `image_converter.py` (`convert_image*`, `_process`, `_process_cropped`,
   `_pack_to_spectra6_bin` / `_pack_p_image_fast`,
   `_pack_split_8_bands_vchunks` (+ `_fast`), `wire_size_for_layout`,
-  `default_cover_crop_box`, `unpack_spectra6_bin`, `preview_png_from_bin`),
-  `__init__.async_setup_entry` (31.5" stored-resolution migration).
+  `default_cover_crop_box`, `unpack_spectra6_bin`, `preview_png_from_bin`,
+  `_quantize_vivid_p`, `_build_vivid_lut`, `_enhance_for_panel`,
+  `FAST_PIPELINE_CACHE_VERSION`), `__init__.async_setup_entry`
+  (31.5" stored-resolution migration), `library.py`
+  (`_cache_codec_id`, `_color_pipeline_for_entry`, `_all_render_targets`,
+  `_known_codec_ids`, `async_get_bin_for_send`, `_backfill_one`),
+  `config_flow.py` (`DigitalFramesOptionsFlow` — `CONF_COLOR_PIPELINE`
+  field, Spectra frames only).
 - **If it silently breaks**: this is the "garbled/duplicated image on the
   physical frame" failure the module's own docstring calls out — no
   exception, just a wrong picture on real hardware. A broken unpacker is
@@ -405,6 +478,23 @@ renderer — see KPF 28/29).
   real photos when touching either packer — run 2026-08-04 for the 31.5"
   layout (33 checks, 0 failures) alongside an on-glass photo verification
   on the physical panel.
+  **Vivid color pipeline** (2026-08-09) — `tests/python/unit/test_image_converter.py`
+  (output size/palette validity for both registered resolutions, default
+  omission is byte-identical to explicit `color_pipeline="fast"`, vivid
+  differs from fast on a non-uniform image, packed/preview colors stay on
+  `SPECTRA6_REAL_WORLD_RGB` regardless of the internal dither target),
+  `tests/python/unit/test_panel_codec.py` (`encode_for_panel` default/opt-in
+  parity, positional-arg plumbing to the packer, no-op for JPEG/PNG codecs),
+  `tests/python/config_flow/test_config_flow_options.py` (field present +
+  defaults to fast for Spectra frames, reflects a saved vivid choice, hidden
+  for Samsung), `tests/python/library/test_library_crop_albums_backfill.py`
+  (fast/vivid cached under distinct codec-id suffixes, a second vivid call
+  hits cache instead of re-encoding, pipeline resolved from the frame's own
+  config-entry option vs. defaulting to fast when no entry is available,
+  backfill writes into the frame's configured pipeline's cache slot). Panel
+  rendering of the new options-flow field verified via the existing generic
+  suites (`flow-renderer.spec.js`, `frame-manage.spec.js`) — no dedicated
+  panel test needed since the form renderer is schema-driven.
 
 ## 8. Shared image library: upload, list, stream original, thumbnail, voice name, tags, orientation lock
 Users upload photos into one shared pool; images are listed/streamed for

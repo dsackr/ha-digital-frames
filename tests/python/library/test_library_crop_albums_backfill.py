@@ -172,11 +172,39 @@ async def test_backfill_generates_bin_for_configured_frame_resolution(
     await hass.async_block_till_done()
 
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
 
     cached = await library_manager._backend.async_get_bin(
-        record["image_id"], 1200, 1600, "", CODEC_SPECTRA6_SPLIT_HALF
+        record["image_id"], 1200, 1600, "", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
     )
     assert cached is not None
+
+
+async def test_backfill_respects_frame_color_pipeline_option(
+    hass, library_manager, make_frame_entry, sample_image_bytes
+):
+    """A frame configured for the vivid pipeline (CONF_COLOR_PIPELINE) must
+    have backfill write into its own vivid-suffixed cache slot, not the
+    default fast one -- otherwise a background backfill would silently
+    pre-populate the wrong colors for that frame's next send."""
+    from custom_components.digital_frames.const import CONF_COLOR_PIPELINE
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
+
+    entry = make_frame_entry(width=1200, height=1600, options={CONF_COLOR_PIPELINE: "vivid"})
+    entry.add_to_hass(hass)
+
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(2000, 2000))
+    await hass.async_block_till_done()
+
+    vivid_cached = await library_manager._backend.async_get_bin(
+        record["image_id"], 1200, 1600, "", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "vivid")
+    )
+    assert vivid_cached is not None
+    fast_cached = await library_manager._backend.async_get_bin(
+        record["image_id"], 1200, 1600, "", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+    )
+    assert fast_cached is None
 
 
 async def test_async_shutdown_cancels_in_flight_backfill_task(
@@ -217,6 +245,30 @@ async def test_async_shutdown_cancels_in_flight_backfill_task(
     release.set()  # don't leave the fake worker's await dangling
 
 
+async def test_get_bin_for_send_old_unversioned_fast_bin_is_a_cache_miss(
+    library_manager, sample_image_bytes
+):
+    """2026-08-09 folded the enhance chain into the default pipeline,
+    changing what "fast" produces -- a bin cached under the pre-change
+    (unversioned) codec path must be treated as stale and regenerated, not
+    served forever, mirroring the historical COLOR_PIPELINE_ID mechanism
+    from cp2/cp3 (KPF 7)."""
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
+    image_id = record["image_id"]
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+
+    # Simulate a bin left over from before the version tag existed.
+    await library_manager._backend.async_save_bin(
+        image_id, 1200, 1600, b"stale-pre-enhance-bin", spec.variant, CODEC_SPECTRA6_SPLIT_HALF
+    )
+
+    bin_bytes = await library_manager.async_get_bin_for_send(image_id, spec)
+    assert bin_bytes != b"stale-pre-enhance-bin"
+    assert len(bin_bytes) == (1200 * 1600) // 2
+
+
 async def test_get_bin_for_send_generates_on_the_fly_when_uncached(
     library_manager, sample_image_bytes
 ):
@@ -226,11 +278,13 @@ async def test_get_bin_for_send_generates_on_the_fly_when_uncached(
     bin_bytes = await library_manager.async_get_bin_for_send(record["image_id"], spec)
     assert len(bin_bytes) == (1200 * 1600) // 2
 
-    # Cached under the Phase-2 codec-keyed path (13.3" → spectra6_split_half).
+    # Cached under the Phase-2 codec-keyed path (13.3" → spectra6_split_half),
+    # tagged with the current fast-pipeline cache version.
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
 
     cached = await library_manager._backend.async_get_bin(
-        record["image_id"], 1200, 1600, spec.variant, CODEC_SPECTRA6_SPLIT_HALF
+        record["image_id"], 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
     )
     assert cached == bin_bytes
 
@@ -270,9 +324,10 @@ async def test_get_bin_for_send_pack_method_override_bypasses_cache(
 
     # The override must not have polluted the cache with anything different.
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
 
     cached = await library_manager._backend.async_get_bin(
-        record["image_id"], 1200, 1600, spec.variant, CODEC_SPECTRA6_SPLIT_HALF
+        record["image_id"], 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
     )
     assert cached == normal
 
@@ -314,9 +369,10 @@ async def test_get_bin_for_send_crop_box_override_wins_and_bypasses_cache(
     assert left_half != right_half  # distinct crops, not one clobbering the other
 
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
 
     cached = await library_manager._backend.async_get_bin(
-        image_id, 1200, 1600, spec.variant, CODEC_SPECTRA6_SPLIT_HALF
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
     )
     # Neither override call polluted the cache -- it stays whatever the
     # manual-crop path last wrote (None here, since async_set_crop
@@ -386,6 +442,7 @@ async def test_get_bin_for_send_writes_codec_keyed_path(
     library_manager, sample_image_bytes
 ):
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SEQUENTIAL
+    from custom_components.digital_frames.library import _cache_codec_id
 
     record = await library_manager.async_upload("photo.jpg", sample_image_bytes(400, 300))
     # 7.3" geometry → sequential codec.
@@ -396,9 +453,119 @@ async def test_get_bin_for_send_writes_codec_keyed_path(
     assert len(bin_bytes) == (800 * 480) // 2
 
     codec_path = await library_manager._backend.async_get_bin(
-        record["image_id"], 800, 480, "", CODEC_SPECTRA6_SEQUENTIAL
+        record["image_id"], 800, 480, "", _cache_codec_id(CODEC_SPECTRA6_SEQUENTIAL, "fast")
     )
     assert codec_path == bin_bytes
     # Must not only live on the legacy path.
     # (Legacy empty get without codec still reads only the old layout.)
     # After Phase-2 writes, the primary location is the codec subdir.
+
+
+# ---------------------------------------------------------------------------
+# "Vivid" color pipeline (opt-in, CONF_COLOR_PIPELINE -- KPF 7): cached under
+# a distinct codec-id suffix so flipping the option per frame never serves a
+# stale bin generated by the other pipeline.
+# ---------------------------------------------------------------------------
+
+
+async def test_get_bin_for_send_vivid_cached_separately_from_fast(
+    library_manager, sample_image_bytes
+):
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
+
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
+    image_id = record["image_id"]
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+
+    fast_bytes = await library_manager.async_get_bin_for_send(image_id, spec)
+    vivid_bytes = await library_manager.async_get_bin_for_send(
+        image_id, spec, color_pipeline="vivid"
+    )
+
+    fast_cached = await library_manager._backend.async_get_bin(
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+    )
+    vivid_cached = await library_manager._backend.async_get_bin(
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "vivid")
+    )
+    assert fast_cached == fast_bytes
+    assert vivid_cached == vivid_bytes
+    # Distinct cache slots -- one pipeline's bytes must never satisfy a
+    # lookup for the other, or flipping the option would silently serve
+    # stale colors until something else invalidates the cache.
+    assert fast_cached != vivid_cached
+
+
+async def test_get_bin_for_send_vivid_second_call_hits_cache_not_recompute(
+    library_manager, sample_image_bytes, monkeypatch
+):
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+    await library_manager.async_get_bin_for_send(
+        record["image_id"], spec, color_pipeline="vivid"
+    )
+
+    from custom_components.digital_frames import image_converter
+
+    calls = []
+    monkeypatch.setattr(
+        image_converter,
+        "convert_image_bytes",
+        lambda *a, **kw: calls.append(1) or b"should-not-be-used",
+    )
+
+    cached = await library_manager.async_get_bin_for_send(
+        record["image_id"], spec, color_pipeline="vivid"
+    )
+    assert calls == []
+    assert cached != b"should-not-be-used"
+
+
+async def test_get_bin_for_send_resolves_color_pipeline_from_entry_options(
+    hass, library_manager, make_frame_entry, sample_image_bytes
+):
+    """When color_pipeline isn't passed explicitly, it's read from the
+    frame's own CONF_COLOR_PIPELINE option (per-frame, since mixed-hardware
+    setups may want it on for a capable box and off for a weaker one)."""
+    from custom_components.digital_frames.const import CONF_COLOR_PIPELINE
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
+
+    entry = make_frame_entry(width=1200, height=1600, options={CONF_COLOR_PIPELINE: "vivid"})
+    entry.add_to_hass(hass)
+
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
+    image_id = record["image_id"]
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+
+    bin_bytes = await library_manager.async_get_bin_for_send(image_id, spec, entry=entry)
+
+    vivid_cached = await library_manager._backend.async_get_bin(
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "vivid")
+    )
+    assert vivid_cached == bin_bytes
+    fast_cached = await library_manager._backend.async_get_bin(
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+    )
+    assert fast_cached is None
+
+
+async def test_get_bin_for_send_no_entry_defaults_color_pipeline_to_fast(
+    library_manager, sample_image_bytes
+):
+    """No config entry to resolve an option from (legacy call sites) must
+    not silently opt into the slower pipeline."""
+    from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
+    from custom_components.digital_frames.library import _cache_codec_id
+
+    record = await library_manager.async_upload("photo.jpg", sample_image_bytes(1500, 2000))
+    image_id = record["image_id"]
+    spec = RenderSpec(width=1200, height=1600, rotation=0, locked=False)
+
+    bin_bytes = await library_manager.async_get_bin_for_send(image_id, spec)
+
+    fast_cached = await library_manager._backend.async_get_bin(
+        image_id, 1200, 1600, spec.variant, _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+    )
+    assert fast_cached == bin_bytes

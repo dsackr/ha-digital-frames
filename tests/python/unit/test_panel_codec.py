@@ -88,6 +88,42 @@ def test_encode_for_panel_rejects_unknown_resolution(sample_image_bytes):
         encode_for_panel(sample_image_bytes(10, 10), 9999, 9999)
 
 
+def test_encode_for_panel_color_pipeline_defaults_to_fast(sample_image_bytes):
+    """color_pipeline must be opt-in: omitting it produces the same bytes as
+    explicitly passing "fast" (see KPF 7 -- a default-path change is exactly
+    what got the cp2/cp3 color-pipeline experiment reverted)."""
+    w, h = FRAME_TYPES["13.3"].resolution
+    source = sample_image_bytes(400, 300)
+    default_out = encode_for_panel(source, w, h)
+    explicit_fast_out = encode_for_panel(source, w, h, color_pipeline="fast")
+    assert default_out == explicit_fast_out
+
+
+def test_encode_for_panel_color_pipeline_vivid_forwards_through(sample_image_bytes):
+    """Smoke test that the *args positional plumbing to convert_image_bytes*
+    is wired correctly end to end (library.py's executor-job calls are
+    positional) -- output is still the layout's exact wire size."""
+    from custom_components.digital_frames.image_converter import wire_size_for_layout
+
+    w, h = FRAME_TYPES["13.3"].resolution
+    out = encode_for_panel(
+        sample_image_bytes(400, 300), w, h, color_pipeline="vivid"
+    )
+    assert len(out) == wire_size_for_layout(
+        FRAME_TYPES["13.3"].byte_layout, w, h
+    )
+
+
+def test_encode_for_panel_color_pipeline_ignored_for_jpeg(sample_image_bytes):
+    """JPEG/PNG codecs never dither -- color_pipeline must be accepted
+    without error and simply have no effect."""
+    w, h = 1920, 1080
+    source = sample_image_bytes(400, 300)
+    fast_out = encode_for_panel(source, w, h, codec_id=CODEC_JPEG_Q90, color_pipeline="fast")
+    vivid_out = encode_for_panel(source, w, h, codec_id=CODEC_JPEG_Q90, color_pipeline="vivid")
+    assert fast_out == vivid_out
+
+
 def test_encode_for_panel_with_preview_spectra_crop_box_matches_encode_for_panel(
     sample_image_bytes,
 ):
@@ -288,7 +324,11 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
     frame is a registered native 1200x1600 panel; this skill's composition
     canvas is landscape 1600x1200 (orientation locked opposite native),
     rotation=90 per helpers.render_spec_for_entry."""
-    from custom_components.digital_frames.image_converter import unpack_spectra6_bin
+    from custom_components.digital_frames.image_converter import (
+        _pack_p_image_fast,
+        _quantize_to_spectra6_p,
+        unpack_spectra6_bin,
+    )
 
     eff_w, eff_h = 1600, 1200  # composition canvas (effective, swapped)
     native_w, native_h = 1200, 1600  # the panel's actual registered buffer
@@ -307,14 +347,22 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
     # relative to what the panel's raster expects.
     assert len(wire) == (native_w * native_h) // 2
 
-    # Content must actually match a correct rotate-then-quantize-then-pack
-    # of the same source (not just be *some* native-sized bytes). The
-    # reference composes at the *effective* size (matching the renderer)
-    # and applies the same canvas rotation image_converter._process would
-    # for an ordinary photo send -- resize/rotate order must not matter
-    # here since the source is built only from exact palette colours.
-    reference_png = _exact_palette_marker_png(eff_w, eff_h)
-    reference_bin = encode_for_panel(reference_png, eff_w, eff_h, rotation=90)
+    # Content must actually match a correct rotate-then-quantize-then-pack.
+    # No rgb_png here, so the repack branch's only source of pixels is
+    # *unrotated_bin* itself (decoded via unpack_spectra6_bin) -- it can't
+    # see the original composition_png. Reference is built the same way
+    # (decode, rotate, quantize, pack) using public/independently-tested
+    # primitives, NOT by calling text_skill_payload_for_codec or its private
+    # _decode_and_rotate helper. Deliberately does NOT re-run
+    # _enhance_for_panel: unrotated_bin's pixels already reflect the one
+    # enhance pass baked in when it was first produced (via encode_for_panel
+    # -> _process), and the repack branch itself never enhances a second
+    # time -- text/graphic renderer compositions are pre-rendered from exact
+    # palette colors on purpose, and blur/sharpen/contrast filters would
+    # degrade crisp text and shift those exact colors.
+    ref_image = unpack_spectra6_bin(unrotated_bin, eff_w, eff_h).rotate(90, expand=True)
+    ref_p_image = _quantize_to_spectra6_p(ref_image)
+    reference_bin = _pack_p_image_fast(ref_p_image)
     assert wire == reference_bin
 
     # And it must actually differ from the (bug's) pass-through bytes --
@@ -329,6 +377,12 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_without_rgb_png():
 def test_text_skill_payload_spectra_rotates_to_native_buffer_with_rgb_png():
     """Same regression, but exercising the rgb_png-present branch (the path
     used whenever the renderer's full RGB composition PNG is available)."""
+    from custom_components.digital_frames.image_converter import (
+        _open_as_rgb,
+        _pack_p_image_fast,
+        _quantize_to_spectra6_p,
+    )
+
     eff_w, eff_h = 1600, 1200
     native_w, native_h = 1200, 1600
 
@@ -340,7 +394,9 @@ def test_text_skill_payload_spectra_rotates_to_native_buffer_with_rgb_png():
     )
 
     assert len(wire) == (native_w * native_h) // 2
-    reference_bin = encode_for_panel(composition_png, eff_w, eff_h, rotation=90)
+    ref_image = _open_as_rgb(composition_png).rotate(90, expand=True)
+    ref_p_image = _quantize_to_spectra6_p(ref_image)
+    reference_bin = _pack_p_image_fast(ref_p_image)
     assert wire == reference_bin
     assert wire != unrotated_bin
     assert preview is not None

@@ -10,6 +10,8 @@ import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.digital_frames.const import (
+    CONF_COLOR_PIPELINE,
+    CONF_DRIVER,
     CONF_FAST_POLL_WHEN_QUEUED,
     CONF_FRAME_ALWAYS_ON,
     CONF_FRAME_SLEEP_MINUTES,
@@ -17,6 +19,7 @@ from custom_components.digital_frames.const import (
     CONF_ROTATE_LANDSCAPE_180,
     CONF_ROTATION_EDGE,
     CONF_SIZE,
+    DRIVER_SAMSUNG,
     EDGE_RIGHT,
     ORIENTATION_PORTRAIT,
 )
@@ -79,6 +82,64 @@ async def test_clone_size_does_not_default_landscape_flip_on(hass, make_frame_en
         str(k): k.default() for k in schema if getattr(k, "default", None) is not None
     }
     assert defaults[CONF_ROTATE_LANDSCAPE_180] is False
+
+
+async def test_color_pipeline_field_defaults_to_fast_for_spectra_frame(
+    hass, make_frame_entry
+):
+    """CONF_COLOR_PIPELINE (KPF 7's opt-in Fraimic-style Atkinson pipeline)
+    must be offered for a plain Spectra frame and default to "fast" when
+    never saved -- omitting the option must never silently opt a frame into
+    the slower pipeline."""
+    entry = make_frame_entry(size="13.3")
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    field_names = {str(k) for k in schema}
+    assert CONF_COLOR_PIPELINE in field_names
+    defaults = {
+        str(k): k.default() for k in schema if getattr(k, "default", None) is not None
+    }
+    assert defaults[CONF_COLOR_PIPELINE] == "fast"
+
+
+async def test_color_pipeline_field_reflects_saved_vivid_choice(hass, make_frame_entry):
+    entry = make_frame_entry(size="31.5", options={CONF_COLOR_PIPELINE: "vivid"})
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    defaults = {
+        str(k): k.default() for k in schema if getattr(k, "default", None) is not None
+    }
+    assert defaults[CONF_COLOR_PIPELINE] == "vivid"
+
+
+async def test_color_pipeline_field_hidden_for_samsung(hass):
+    """Samsung (PNG codec) never dithers -- the field would be meaningless
+    and misleading there, so it must not appear on that driver's form."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.digital_frames.const import DOMAIN, SAMSUNG_SIZE_LABEL
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_DRIVER: DRIVER_SAMSUNG,
+            "host": "192.168.1.60",
+            "name": "Samsung Display",
+            "width": 2560,
+            "height": 1440,
+            "size": SAMSUNG_SIZE_LABEL,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    field_names = {str(k) for k in schema}
+    assert CONF_COLOR_PIPELINE not in field_names
 
 
 async def test_official_form_defaults_use_detected_keep_awake(

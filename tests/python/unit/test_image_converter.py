@@ -227,9 +227,23 @@ def test_31_5_wire_size_is_2304000_not_4bpp(sample_image_bytes):
 def test_31_5_single_pixel_lands_at_derived_wire_position(pack_method):
     """Pack single-red-pixel canvases and assert the red nibble lands exactly
     where the independently derived byte-index formula says it must -- one
-    probe pixel per structural feature (corners, both halves, a thin band)."""
+    probe pixel per structural feature (corners, both halves, a thin band).
+
+    Quantizes/packs directly (bypassing convert_image_bytes' _enhance_for_panel
+    step) -- this test isolates the *packing byte-position formula*, not
+    color-pipeline behavior, and the enhance chain's spatial filters
+    (edge-enhance/smooth/sharpen) would blur a single isolated probe pixel
+    into its neighbors, breaking the "exact color in -> exact nibble out"
+    oracle this test relies on for a reason that has nothing to do with
+    packing correctness."""
     from PIL import Image
     import io
+
+    from custom_components.digital_frames.image_converter import (
+        _pack_p_image_fast,
+        _pack_to_spectra6_bin,
+        _quantize_to_spectra6_p,
+    )
 
     width, height = OFFICIAL_31_5
     red, white = (178, 19, 24), (232, 232, 232)
@@ -242,9 +256,10 @@ def test_31_5_single_pixel_lands_at_derived_wire_position(pack_method):
     for x, y in probes:
         img = Image.new("RGB", (width, height), white)
         img.putpixel((x, y), red)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        out = convert_image_bytes(buf.getvalue(), width, height, pack_method=pack_method)
+        if pack_method == "fast":
+            out = _pack_p_image_fast(_quantize_to_spectra6_p(img))
+        else:
+            out = _pack_to_spectra6_bin(_quantize_to_spectra6(img))
         idx, is_high = _vc_byte_index(x, y)
         nibble = (out[idx] >> 4) if is_high else (out[idx] & 0xF)
         assert nibble == 3, f"probe ({x},{y}): red nibble not at byte {idx}"
@@ -317,3 +332,96 @@ def test_preview_png_from_bin_is_png():
 
     png = preview_png_from_bin(bytes((800 * 480) // 2), 800, 480)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# "Vivid" color pipeline (opt-in, CONF_COLOR_PIPELINE -- KPF 7). Fraimic's
+# own reference-converter approach (idealized-primary Atkinson dither +
+# enhance chain), LUT-accelerated. Never the default -- see the module
+# docstring above _quantize_vivid_p for the cp2/cp3 history of why a naive
+# per-pixel port isn't safe to ship as one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("width,height", [OFFICIAL_13_3, CLONE_7_3])
+def test_vivid_pipeline_output_length_matches_4bpp_packing(sample_image_bytes, width, height):
+    src = sample_image_bytes(400, 300)
+    out = convert_image_bytes(src, width, height, color_pipeline="vivid")
+    assert len(out) == (width * height) // 2
+
+
+def test_vivid_pipeline_only_uses_valid_palette_nibbles():
+    """Every nibble in the packed output must be one of the six Spectra 6
+    hardware codes (0,1,2,3,5,6) -- 4 and 7-15 are unused by the panel; a
+    stray value there means the vivid quantizer produced an out-of-palette
+    index somewhere upstream of packing."""
+    from PIL import Image
+    import io
+
+    rng_img = Image.new("RGB", (64, 64))
+    pixels = rng_img.load()
+    for y in range(64):
+        for x in range(64):
+            pixels[x, y] = ((x * 4) % 256, (y * 4) % 256, ((x + y) * 3) % 256)
+    buf = io.BytesIO()
+    rng_img.save(buf, format="PNG")
+
+    out = convert_image_bytes(buf.getvalue(), 800, 480, color_pipeline="vivid")
+    valid = {0, 1, 2, 3, 5, 6}
+    for byte in out:
+        assert (byte >> 4) in valid
+        assert (byte & 0xF) in valid
+
+
+def test_color_pipeline_default_stays_fast(sample_image_bytes):
+    """CONF_COLOR_PIPELINE must be strictly opt-in: omitting it (the vast
+    majority of call sites, and every call site that existed before this
+    option) has to produce byte-identical output to explicitly requesting
+    "fast" -- the whole point of shipping this behind a flag (see KPF 7's
+    cp2/cp3 history) is that a default send is never affected."""
+    src = sample_image_bytes(400, 300)
+    default_out = convert_image_bytes(src, 1200, 1600)
+    explicit_fast_out = convert_image_bytes(src, 1200, 1600, color_pipeline="fast")
+    assert default_out == explicit_fast_out
+
+
+def test_vivid_pipeline_differs_from_fast_on_a_photo_like_image():
+    """Sanity check that "vivid" actually does something different from the
+    default -- a colorful gradient (not sample_image_bytes' flat fill,
+    which both pipelines would likely quantize identically) exercises the
+    enhance chain and the idealized-primary dither target."""
+    from PIL import Image
+    import io
+
+    gradient = Image.new("RGB", (64, 64))
+    pixels = gradient.load()
+    for y in range(64):
+        for x in range(64):
+            pixels[x, y] = ((x * 4) % 256, (y * 4) % 256, ((x * 2 + y * 2) % 256))
+    buf = io.BytesIO()
+    gradient.save(buf, format="PNG")
+    src = buf.getvalue()
+
+    fast_out = convert_image_bytes(src, 800, 480, color_pipeline="fast")
+    vivid_out = convert_image_bytes(src, 800, 480, color_pipeline="vivid")
+    assert fast_out != vivid_out
+
+
+def test_vivid_pipeline_preview_uses_real_world_panel_colors():
+    """The vivid pipeline dithers against idealized primaries internally,
+    but the packed/preview colors must still map through the same
+    real-world panel palette as the default pipeline -- that's what the
+    panel actually renders for a given nibble, regardless of which colors
+    the matching math aimed for while choosing it (see _quantize_vivid_p's
+    docstring)."""
+    from custom_components.digital_frames.image_converter import (
+        SPECTRA6_REAL_WORLD_RGB,
+        _quantize_vivid_p,
+    )
+    from PIL import Image
+
+    img = Image.new("RGB", (32, 32), (178, 19, 24))  # solid red-ish
+    p_image = _quantize_vivid_p(img)
+    palette = p_image.getpalette()[: 3 * len(SPECTRA6_REAL_WORLD_RGB)]
+    expected = [v for rgb in SPECTRA6_REAL_WORLD_RGB for v in rgb]
+    assert palette == expected

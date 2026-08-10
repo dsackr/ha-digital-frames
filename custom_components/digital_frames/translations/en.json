@@ -126,6 +126,7 @@
           "rotation_edge": "Rotated hanging (which edge is up)",
           "rotate_portrait_180": "Flip Portrait Image",
           "rotate_landscape_180": "Flip Landscape Image",
+          "color_pipeline": "Color pipeline",
           "meural_email": "Meural / Netgear email",
           "meural_password": "Meural / Netgear password",
           "meural_unlink_cloud": "Unlink Meural cloud account"
@@ -137,6 +138,7 @@
           "frame_sleep_minutes": "Sleep time between check-ins for a new image.",
           "resolution": "Panel profile used for packing images (size / origin). Only shown when the type was never set — it does not change in normal use.",
           "rotation_edge": "Only matters when the frame's Orientation is locked to its non-native orientation (e.g. a portrait frame hung landscape). Official Fraimic frames hang left-edge-up; if images on a rotated clone come out upside down, switch this.",
+          "color_pipeline": "Fast (default) uses Floyd-Steinberg dithering — near-instant. Vivid matches Fraimic's own reference converter (enhance chain + Atkinson dither against idealized primaries) for a punchier look, but takes noticeably longer per image (roughly 1-3+ seconds on typical hardware, more on weaker boxes) — worth testing before enabling on a library with many photos.",
           "meural_email": "Shared Netgear account for all Meural frames. Required for permanent pin (send) and album push. Leave blank to keep the current link.",
           "meural_password": "Required when linking or re-linking. Not stored in this form's options — only used to obtain tokens.",
           "meural_unlink_cloud": "Remove the shared Meural cloud link. Sends fall back to postcard-only until you link again."

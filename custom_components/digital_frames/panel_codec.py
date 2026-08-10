@@ -251,16 +251,22 @@ def encode_for_panel(
     pack_method: str = "fast",
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
     codec_id: str | None = None,
+    color_pipeline: str = "fast",
 ) -> bytes:
     """Encode a source image into wire payload for a panel.
 
     *codec_id* selects Spectra vs JPEG. When omitted, resolved from
     resolution via the Fraimic FRAME_TYPES registry (Spectra panels only).
 
+    *color_pipeline* ("fast" default | "vivid") only affects Spectra
+    targets -- see image_converter.py's vivid-pipeline section and
+    docs/KEY_PRODUCT_FLOWS.md KPF 7. Ignored for JPEG/PNG codecs (Meural /
+    Samsung), which never dither.
+
     Positional-friendly signature so callers can pass this to
     ``hass.async_add_executor_job`` without kwargs (except trailing
-    *codec_id* should be passed positionally when using the executor with
-    all args).
+    *codec_id* / *color_pipeline* should be passed positionally when using
+    the executor with all args).
     """
     if codec_id is None:
         # Spectra path: require a registered frame type at this geometry.
@@ -303,6 +309,7 @@ def encode_for_panel(
             tuple(crop_box),
             rotation,
             pack_method,
+            color_pipeline,
         )
     return convert_image_bytes(
         source_bytes,
@@ -311,6 +318,7 @@ def encode_for_panel(
         rotation,
         locked,
         pack_method,
+        color_pipeline,
     )
 
 
@@ -322,13 +330,15 @@ def encode_for_panel_with_preview(
     locked: bool = False,
     codec_id: str | None = None,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    color_pipeline: str = "fast",
 ) -> tuple[bytes, bytes]:
     """Like :func:`encode_for_panel`, plus a small PNG of the composed image.
 
     *crop_box* (normalized (x0, y0, x1, y1), same semantics as
     :func:`encode_for_panel`) is used by wall-banner message sends, where
     each frame's crop into the shared composed canvas is the only thing
-    that differs between otherwise-identical calls.
+    that differs between otherwise-identical calls. See
+    :func:`encode_for_panel` for *color_pipeline*.
     """
     if codec_id is None:
         _ = frame_type_for_resolution(width, height)
@@ -354,13 +364,18 @@ def encode_for_panel_with_preview(
         )
 
         return convert_image_bytes_cropped_with_preview(
-            source_bytes, width, height, tuple(crop_box), rotation
+            source_bytes,
+            width,
+            height,
+            tuple(crop_box),
+            rotation,
+            color_pipeline=color_pipeline,
         )
 
     from .image_converter import convert_image_bytes_with_preview  # noqa: PLC0415
 
     return convert_image_bytes_with_preview(
-        source_bytes, width, height, rotation, locked
+        source_bytes, width, height, rotation, locked, color_pipeline=color_pipeline
     )
 
 
@@ -372,12 +387,13 @@ def encode_path_for_panel_with_preview(
     locked: bool = False,
     codec_id: str | None = None,
     crop_box: tuple[float, float, float, float] | list[float] | None = None,
+    color_pipeline: str = "fast",
 ) -> tuple[bytes, bytes]:
     """Encode a filesystem path for the panel, with preview PNG."""
     with open(image_path, "rb") as f:
         raw = f.read()
     return encode_for_panel_with_preview(
-        raw, width, height, rotation, locked, codec_id, crop_box
+        raw, width, height, rotation, locked, codec_id, crop_box, color_pipeline
     )
 
 
