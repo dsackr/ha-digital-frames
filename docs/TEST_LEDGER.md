@@ -185,3 +185,4 @@ Notes on reading it:
 | 2026-08-10 | ad1d3ff | panel-playwright | success | 179 passed | — | CI |
 | 2026-08-10 | ad1d3ff | backend-pytest | failure | 596 passed, 1 error in 148.96s (0:02:28) | 64% | CI |
 | 2026-08-10 | 5e8b683 | panel-playwright | success | 182 passed | — | CI |
+| 2026-08-10 | 5e8b683 | backend-pytest | failure | 1 failed, 597 passed, 1 error in 235.80s (0:03:55) | 64% | CI |
