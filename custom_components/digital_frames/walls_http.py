@@ -348,36 +348,52 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             if entry is None:
                 continue
 
+            sent = False
+            send_error: str | None = None
             if push_now:
                 try:
-                    codec_id = panel_codec_for_entry(entry).id
-                except Exception:  # noqa: BLE001
-                    codec_id = None
+                    try:
+                        codec_id = panel_codec_for_entry(entry).id
+                    except Exception:  # noqa: BLE001
+                        codec_id = None
 
-                spec = render_spec_for_hass_entry(hass, entry)
-                wire_bytes, preview_png = encode_for_panel_with_preview(
-                    source_bytes=master_bytes,
-                    width=spec.width,
-                    height=spec.height,
-                    rotation=spec.rotation,
-                    locked=spec.locked,
-                    codec_id=codec_id,
-                    crop_box=crop_box,
-                )
-
-                coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
-                if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
-                    await coordinator.async_send_image_or_queue(
-                        wire_bytes=wire_bytes,
-                        preview_png=preview_png,
-                        image_id=saved_image_id,
+                    spec = render_spec_for_hass_entry(hass, entry)
+                    wire_bytes, preview_png = encode_for_panel_with_preview(
+                        source_bytes=master_bytes,
+                        width=spec.width,
+                        height=spec.height,
+                        rotation=spec.rotation,
+                        locked=spec.locked,
+                        codec_id=codec_id,
+                        crop_box=crop_box,
                     )
 
-            results.append({
+                    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+                    if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
+                        await coordinator.async_send_image_or_queue(
+                            wire_bytes,
+                            image_id=saved_image_id,
+                            thumbnail=preview_png,
+                        )
+                    sent = True
+                except Exception as err:  # noqa: BLE001
+                    # One frame's encode/send failure (a bad crop, an
+                    # unreachable coordinator, ...) must not abort every
+                    # other frame's delivery -- each is independent, same as
+                    # scenes.py's async_send_mappings.
+                    send_error = str(err)
+                    _LOGGER.error(
+                        "Wall span send failed for frame %s: %s", entry_id, err
+                    )
+
+            result_entry: dict[str, Any] = {
                 "entry_id": entry_id,
                 "crop_box": crop_box,
-                "sent": push_now,
-            })
+                "sent": sent,
+            }
+            if send_error:
+                result_entry["message"] = send_error
+            results.append(result_entry)
 
             if saved_image_id:
                 scene_mappings[entry_id] = {
@@ -401,6 +417,8 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("Failed to save scene for wall span: %s", err)
 
+        failed = [r for r in results if push_now and not r.get("sent")]
+
         return self.json({
             "success": True,
             "wall_id": wall_id,
@@ -408,6 +426,8 @@ class DigitalFramesWallSpanImageView(HomeAssistantView):
             "scene_id": scene_id,
             "frames_updated": len(results),
             "crop_boxes": geometry.crop_boxes,
+            "results": results,
+            "frames_failed": len(failed),
         })
 
 

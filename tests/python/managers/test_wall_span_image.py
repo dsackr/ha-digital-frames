@@ -16,13 +16,23 @@ from custom_components.digital_frames.walls_http import (
 
 
 class _FakeCoordinator:
-    """Records every push instead of touching real hardware."""
+    """Records every push instead of touching real hardware.
+
+    Matches the real signature every DigitalFramesCoordinator/
+    MeuralCoordinator/SamsungCoordinator subclass implements (image_bytes
+    positional, thumbnail keyword) -- not the "wire_bytes"/"preview_png"
+    keywords a real caller would raise TypeError against. A prior version of
+    this fake used those wrong keyword names, which made it silently accept
+    a caller that would have crashed every real coordinator with a
+    TypeError (the exact bug a live user hit -- see walls_http.py's
+    async_send_image_or_queue call sites).
+    """
 
     def __init__(self):
         self.sent = []
 
-    async def async_send_image_or_queue(self, *, wire_bytes, preview_png=None, image_id=None):
-        self.sent.append({"image_id": image_id})
+    async def async_send_image_or_queue(self, image_bytes, *, image_id=None, thumbnail=None):
+        self.sent.append({"image_id": image_id, "image_bytes": image_bytes, "thumbnail": thumbnail})
         return {"queued": False}
 
 

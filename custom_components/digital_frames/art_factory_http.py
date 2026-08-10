@@ -220,24 +220,30 @@ class DigitalFramesArtFactoryGenerateView(HomeAssistantView):
                 )
 
                 try:
-                    codec_id = panel_codec_for_entry(entry).id
-                except Exception:  # noqa: BLE001
-                    codec_id = None
+                    try:
+                        codec_id = panel_codec_for_entry(entry).id
+                    except Exception:  # noqa: BLE001
+                        codec_id = None
 
-                spec = render_spec_for_hass_entry(hass, entry)
-                wire_bytes, preview_png = encode_for_panel_with_preview(
-                    source_bytes=img_bytes,
-                    width=spec.width,
-                    height=spec.height,
-                    rotation=spec.rotation,
-                    locked=spec.locked,
-                    codec_id=codec_id,
-                )
-                await coordinator.async_send_image_or_queue(
-                    wire_bytes=wire_bytes,
-                    preview_png=preview_png,
-                    image_id=saved_image_id,
-                )
+                    spec = render_spec_for_hass_entry(hass, entry)
+                    wire_bytes, preview_png = encode_for_panel_with_preview(
+                        source_bytes=img_bytes,
+                        width=spec.width,
+                        height=spec.height,
+                        rotation=spec.rotation,
+                        locked=spec.locked,
+                        codec_id=codec_id,
+                    )
+                    await coordinator.async_send_image_or_queue(
+                        wire_bytes,
+                        image_id=saved_image_id,
+                        thumbnail=preview_png,
+                    )
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.error(
+                        "Art Factory direct-send to frame %s failed: %s",
+                        send_to_entry_id, err,
+                    )
 
         import base64  # noqa: PLC0415
         preview_b64 = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('ascii')}"

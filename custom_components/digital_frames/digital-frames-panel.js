@@ -11762,10 +11762,23 @@
         }
 
         if (fb) {
-          fb.className = 'feedback ok';
-          fb.textContent = pushNow
-            ? '🚀 Wallpaper sent to all wall frames successfully!'
-            : `🎬 Saved Home Assistant Scene "${sceneName || wall.name + ' Wallpaper'}" successfully!`;
+          const failedCount = result.frames_failed || 0;
+          if (pushNow && failedCount > 0) {
+            const failedFrames = (result.results || [])
+              .filter(r => !r.sent)
+              .map(r => {
+                const frame = this._frames.find(f => f.entryId === r.entry_id);
+                return `${frame ? frame.title : r.entry_id}${r.message ? `: ${r.message}` : ''}`;
+              })
+              .join('; ');
+            fb.className = 'feedback err';
+            fb.textContent = `⚠ Sent to ${result.frames_updated - failedCount} of ${result.frames_updated} frames -- failed: ${failedFrames}`;
+          } else {
+            fb.className = 'feedback ok';
+            fb.textContent = pushNow
+              ? '🚀 Wallpaper sent to all wall frames successfully!'
+              : `🎬 Saved Home Assistant Scene "${sceneName || wall.name + ' Wallpaper'}" successfully!`;
+          }
           fb.style.display = 'block';
         }
       } catch (err) {
