@@ -17,6 +17,11 @@ const FRAMES = [
 
 const IMAGES = [
   { image_id: 'img_bg_1', filename: 'sunset.png', albums: ['Images'] },
+  { image_id: 'img_bg_2', filename: 'forest.png', albums: ['Nature'] },
+];
+
+const ALBUMS = [
+  { name: 'Nature', count: 1, cover_image_id: 'img_bg_2' },
 ];
 
 const SCENES = [
@@ -56,7 +61,7 @@ test.describe('Wallpaper mode (Walls tab)', () => {
   let baseUrl;
 
   test.beforeEach(async () => {
-    mockServer = createMockServer({ frames: FRAMES, images: IMAGES, scenes: SCENES });
+    mockServer = createMockServer({ frames: FRAMES, images: IMAGES, albums: ALBUMS, scenes: SCENES });
     baseUrl = await mockServer.start();
   });
 
@@ -270,6 +275,56 @@ test.describe('Wallpaper mode (Walls tab)', () => {
       return [...root.querySelectorAll('.wall-tile')].every((t) => t.classList.contains('wall-wallpaper-tile'));
     });
     expect(tilesAreTransparent).toBe(true);
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('the wallpaper image picker has an album filter and renders thumbnails with the same crop-safe markup as the per-frame picker', async ({ page }) => {
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openDashboard(page);
+    await openWallpaperMode(page);
+
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('wall-wallpaper-choose-btn').click();
+    });
+    await page.waitForFunction(() => {
+      const grid = document.getElementById('panel').shadowRoot.getElementById('wall-wallpaper-picker-grid');
+      return grid && grid.children.length > 0;
+    });
+
+    const initial = await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const albumSelect = root.getElementById('wall-wallpaper-picker-album');
+      const grid = root.getElementById('wall-wallpaper-picker-grid');
+      return {
+        albumOptions: [...albumSelect.options].map((o) => o.value),
+        cellCount: grid.children.length,
+        // Reuses the per-frame picker's own cell/thumb classes -- an
+        // earlier version used a plain unstyled div, which left the
+        // fetched <img> at its natural size with nothing constraining it,
+        // so the cell's overflow:hidden clipped an arbitrary corner
+        // instead of showing a clean, centered crop.
+        firstCellIsImagePickerCell: grid.firstElementChild.classList.contains('image-picker-cell'),
+        firstCellHasThumbDiv: !!grid.firstElementChild.querySelector('.image-picker-thumb'),
+      };
+    });
+
+    expect(initial.albumOptions).toEqual(['', 'Nature']);
+    expect(initial.cellCount).toBe(2); // both images, unfiltered ("All Photos")
+    expect(initial.firstCellIsImagePickerCell).toBe(true);
+    expect(initial.firstCellHasThumbDiv).toBe(true);
+
+    // Filter to the "Nature" album -- only img_bg_2 should remain.
+    await page.evaluate(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const albumSelect = root.getElementById('wall-wallpaper-picker-album');
+      albumSelect.value = 'Nature';
+      albumSelect.dispatchEvent(new Event('change'));
+    });
+    await page.waitForFunction(() => {
+      const grid = document.getElementById('panel').shadowRoot.getElementById('wall-wallpaper-picker-grid');
+      return grid && grid.children.length === 1;
+    });
 
     expect(pageErrors).toHaveLength(0);
   });

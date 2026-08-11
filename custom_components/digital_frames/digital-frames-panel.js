@@ -3160,8 +3160,12 @@
         <div class="modal-overlay" id="wall-wallpaper-picker-overlay">
           <div class="modal-box" style="max-width:520px">
             <h3>Choose Wallpaper Image</h3>
+            <div class="modal-row">
+              <label for="wall-wallpaper-picker-album">Album</label>
+              <select id="wall-wallpaper-picker-album"><option value="">All Photos</option></select>
+            </div>
             <div class="feedback" id="wall-wallpaper-picker-fb"></div>
-            <div id="wall-wallpaper-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(90px, 1fr));gap:8px;max-height:360px;overflow:auto"></div>
+            <div class="image-picker-grid" id="wall-wallpaper-picker-grid"></div>
             <div class="modal-actions">
               <button class="btn-ghost" id="wall-wallpaper-picker-cancel">Cancel</button>
             </div>
@@ -8102,6 +8106,7 @@
       this.shadowRoot.getElementById('wall-wallpaper-btn').addEventListener('click', () => this._toggleWallWallpaperMode());
       this.shadowRoot.getElementById('wall-wallpaper-choose-btn').addEventListener('click', () => this._openWallWallpaperPicker());
       this.shadowRoot.getElementById('wall-wallpaper-picker-cancel').addEventListener('click', () => this._closeWallWallpaperPicker());
+      this.shadowRoot.getElementById('wall-wallpaper-picker-album').addEventListener('change', () => this._loadWallWallpaperPickerImages());
       const wallpaperPickerOverlay = this.shadowRoot.getElementById('wall-wallpaper-picker-overlay');
       wallpaperPickerOverlay.addEventListener('click', (e) => {
         if (e.target === wallpaperPickerOverlay) this._closeWallWallpaperPicker();
@@ -9105,29 +9110,59 @@
     async _openWallWallpaperPicker() {
       const root = this.shadowRoot;
       const overlay = root.getElementById('wall-wallpaper-picker-overlay');
+      const albumSelect = root.getElementById('wall-wallpaper-picker-album');
+      if (!overlay || !albumSelect) return;
+
+      if (!this._albums || !this._albums.length) await this._loadAlbums();
+      albumSelect.innerHTML = '<option value="">All Photos</option>' +
+        this._albums.map(a => `<option value="${this._esc(a.name)}">${this._esc(a.name)}</option>`).join('');
+      albumSelect.value = '';
+
+      overlay.style.display = 'flex';
+      await this._loadWallWallpaperPickerImages();
+    }
+
+    // Separated from _openWallWallpaperPicker so the album <select> can
+    // re-run just this part without reopening the modal or reloading the
+    // album list -- same split as _loadWallImagePickerImages.
+    async _loadWallWallpaperPickerImages() {
+      const root = this.shadowRoot;
       const grid = root.getElementById('wall-wallpaper-picker-grid');
       const fb = root.getElementById('wall-wallpaper-picker-fb');
-      if (!overlay || !grid) return;
+      const albumSelect = root.getElementById('wall-wallpaper-picker-album');
+      if (!grid) return;
       fb.style.display = 'none';
-      grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">Loading…</div>';
-      overlay.style.display = 'flex';
+      grid.innerHTML = '<div class="modal-file-summary">Loading photos…</div>';
+
+      const album = albumSelect ? albumSelect.value : '';
       try {
-        const resp = await fetch('/api/digital_frames/library/list?sort=uploaded_desc', { headers: this._authHeaders() });
+        const url = album
+          ? `/api/digital_frames/library/list?album=${encodeURIComponent(album)}&sort=uploaded_desc`
+          : '/api/digital_frames/library/list?sort=uploaded_desc';
+        const resp = await fetch(url, { headers: this._authHeaders() });
         const result = await resp.json();
         const images = result.images || [];
         grid.innerHTML = '';
         if (!images.length) {
-          grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--secondary-text-color)">No images in your library yet.</div>';
+          grid.innerHTML = album
+            ? '<div class="modal-file-summary">No photos in this album yet.</div>'
+            : '<div class="modal-file-summary">No photos in the library yet.</div>';
           return;
         }
         for (const image of images) {
           const cell = document.createElement('div');
-          cell.style.cssText = 'aspect-ratio:1;border-radius:6px;overflow:hidden;background:#000;cursor:pointer;border:2px solid transparent';
+          cell.className = 'image-picker-cell';
           cell.title = image.filename || '';
-          const thumb = document.createElement('div');
-          thumb.style.cssText = 'width:100%;height:100%';
-          cell.appendChild(thumb);
-          this._loadThumbnail(image.image_id, thumb);
+          // Reuses the per-frame picker's own cell/thumb classes -- their
+          // `object-fit: cover` + centered sizing is what actually crops a
+          // non-square source to a clean square thumbnail. A plain
+          // unstyled div here (as an earlier version used) leaves the
+          // fetched <img> at its natural (thumb=480) size with nothing
+          // constraining it, so the cell's overflow:hidden just clips
+          // whatever corner of the full-size image happens to land in the
+          // top-left -- not a centered crop, an arbitrary one.
+          cell.innerHTML = `<div class="image-picker-thumb">🖼</div>`;
+          this._loadThumbnail(image.image_id, cell.querySelector('.image-picker-thumb'));
           cell.addEventListener('click', () => this._selectWallWallpaperImage(image.image_id));
           grid.appendChild(cell);
         }
