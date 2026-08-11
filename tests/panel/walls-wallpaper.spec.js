@@ -91,11 +91,20 @@ test.describe('Wallpaper mode (Walls tab)', () => {
 
     await openWallpaperMode(page);
 
+    // The frame's own thumbnail loads via an authenticated fetch -> blob
+    // URL (_loadFrameThumbnail), not a synchronous <img src="...">, so
+    // wait for it rather than reading the DOM immediately.
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const tiles = [...root.querySelectorAll('.wall-tile')];
+      return tiles.length > 0 && tiles.every((t) => t.querySelector('.wall-frame-thumb img'));
+    });
+
     const beforeImage = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
       return [...root.querySelectorAll('.wall-tile')].map((t) => ({
         transparent: t.classList.contains('wall-wallpaper-tile'),
-        hasThumbnail: !!t.querySelector('img[src*="/frame/"]'),
+        hasThumbnail: !!t.querySelector('.wall-frame-thumb img'),
       }));
     });
     expect(beforeImage).toHaveLength(FRAMES.length);
@@ -401,6 +410,40 @@ test.describe('Wallpaper mode (Walls tab)', () => {
       () => document.getElementById('panel').shadowRoot.getElementById('wall-scene-fb').textContent
     );
     expect(fbText).toContain('Sent to 2 frame');
+
+    expect(pageErrors).toHaveLength(0);
+  });
+
+  test('a frame\'s "on frame" thumbnail (no scene mapping, no library image_id) loads with an auth header, not a bare <img src>', async ({ page }) => {
+    // Real bug: coordinator.last_thumbnail (a crop/upload/skill-render send
+    // with no library image_id behind it) rendered via a plain
+    // `<img src="/api/digital_frames/frame/{id}/thumbnail">`. HA requires
+    // the Bearer auth header for every /api/ route; an <img> tag has no way
+    // to attach one, so this always 401'd in real Home Assistant even
+    // though this permissive mock would happily serve it either way --
+    // this is exactly why the bug slipped past every earlier test here.
+    // Rendering it via _loadFrameThumbnail (authenticated fetch -> blob
+    // URL, like every other thumbnail in the panel) is what this asserts.
+    await mockServer.stop();
+    const framesWithThumbnail = [
+      { ...FRAMES[0], last_image_id: null, has_thumbnail: true },
+      FRAMES[1],
+    ];
+    mockServer = createMockServer({ frames: framesWithThumbnail, images: IMAGES, albums: ALBUMS, scenes: SCENES });
+    baseUrl = await mockServer.start();
+
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: framesWithThumbnail });
+    await openDashboard(page);
+
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      const tile = root.querySelector('.wall-tile[data-entry-id="entry_1"]');
+      return tile && tile.querySelector('.wall-tile-media img');
+    });
+
+    const requests = mockServer.frameThumbnailRequests.filter((r) => r.url.includes('entry_1'));
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((r) => r.hasAuthHeader)).toBe(true);
 
     expect(pageErrors).toHaveLength(0);
   });

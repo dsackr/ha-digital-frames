@@ -1931,6 +1931,12 @@
       display: block;
       pointer-events: none;
     }
+    .wall-frame-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
     .wall-wallpaper-resize-handle {
       position: absolute;
       right: -7px;
@@ -6627,6 +6633,59 @@
       delete this._thumbFetches[imageId];
     }
 
+    // Same authenticated-fetch -> blob-URL -> cached-<img> pattern as
+    // _loadThumbnail, but for a frame's own last-sent-image endpoint
+    // (/frame/{entry_id}/thumbnail -- coordinator.last_thumbnail, keyed by
+    // entry_id, not a library image_id; a wallpaper/crop send or a raw
+    // upload often has no library image_id behind it at all). Cache key is
+    // prefixed so it can never collide with a real image_id in the same
+    // _thumbUrls/_thumbFetches maps _loadThumbnail uses.
+    //
+    // Real bug this replaced: three call sites used a plain
+    // `<img src="/api/digital_frames/frame/.../thumbnail">` directly.
+    // That view requires the Bearer auth header HA's frontend uses for
+    // every /api/ call -- an <img> tag has no way to attach a header, so
+    // the request always ran unauthenticated and 401'd. The wire bytes a
+    // wallpaper send produced were correct (proven live, hashing the
+    // endpoint's response before/after a real send) -- the browser could
+    // just never actually display them here, which is exactly what "the
+    // frame's thumbnail isn't showing/saved after a send" looks like from
+    // the outside.
+    _loadFrameThumbnail(entryId, container) {
+      const cacheKey = `frame:${entryId}`;
+      const cached = this._thumbUrls[cacheKey];
+      if (cached) {
+        container.innerHTML = `<img src="${cached}" alt="">`;
+        return;
+      }
+      (async () => {
+        try {
+          if (!this._thumbFetches[cacheKey]) {
+            this._thumbFetches[cacheKey] = (async () => {
+              const resp = await fetch(`/api/digital_frames/frame/${encodeURIComponent(entryId)}/thumbnail`, {
+                headers: this._authHeaders(),
+                signal: this._abort.signal,
+              });
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              const blob = await resp.blob();
+              // Same disposal race _fetchThumb guards against -- panel may
+              // have navigated away mid-fetch.
+              if (this._disposed) return null;
+              const url = URL.createObjectURL(blob);
+              this._thumbUrls[cacheKey] = url;
+              return url;
+            })();
+          }
+          const url = await this._thumbFetches[cacheKey];
+          if (!url || this._disposed) return;
+          container.innerHTML = `<img src="${url}" alt="">`;
+        } catch (err) {
+          delete this._thumbFetches[cacheKey]; // allow a later retry
+          console.warn('[fraimic-panel] frame thumbnail load failed:', err);
+        }
+      })();
+    }
+
     // -----------------------------------------------------------------------
     // Library: delete
     // -----------------------------------------------------------------------
@@ -9238,9 +9297,10 @@
         } else {
           tile.className = 'wall-tile';
           tile.innerHTML = `
-            <img src="/api/digital_frames/frame/${this._esc(entryId)}/thumbnail" alt="" style="width:100%;height:100%;object-fit:cover">
+            <div class="wall-frame-thumb" style="width:100%;height:100%"></div>
             <div class="wall-wallpaper-tile-label">${this._esc(frame.title)}</div>
           `;
+          this._loadFrameThumbnail(entryId, tile.querySelector('.wall-frame-thumb'));
         }
         if (this._wallSelection.has(entryId)) tile.classList.add('selected');
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
@@ -9815,7 +9875,8 @@
         badge.dataset.kind = 'ondeck';
         badge.style.display = '';
       } else if (!modeling && frame.queued && frame.hasThumbnail) {
-        media.innerHTML = `<img src="/api/digital_frames/frame/${this._esc(frame.entryId)}/thumbnail" alt="">`;
+        media.innerHTML = '';
+        this._loadFrameThumbnail(frame.entryId, media);
         badge.textContent = 'on deck';
         badge.dataset.kind = 'ondeck';
         badge.style.display = '';
@@ -9826,7 +9887,8 @@
         badge.dataset.kind = 'onframe';
         badge.style.display = '';
       } else if (!modeling && frame.hasThumbnail) {
-        media.innerHTML = `<img src="/api/digital_frames/frame/${this._esc(frame.entryId)}/thumbnail" alt="">`;
+        media.innerHTML = '';
+        this._loadFrameThumbnail(frame.entryId, media);
         badge.textContent = 'on frame';
         badge.dataset.kind = 'onframe';
         badge.style.display = '';

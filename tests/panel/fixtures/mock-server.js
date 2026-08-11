@@ -97,6 +97,7 @@ function createMockServer({
   const messageSendCalls = []; // request body per /messages/send POST
   const wallpaperCalls = []; // { wall_id, body } per /walls/:id/wallpaper POST
   const wallSendCalls = []; // { wall_id, body } per /walls/:id/send POST
+  const frameThumbnailRequests = []; // { url, hasAuthHeader } per /frame/:id/thumbnail GET
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -513,6 +514,14 @@ function createMockServer({
     if (p.match(/^\/api\/digital_frames\/frame\/[^/]+\/thumbnail$/)) {
       // The frame's own render preview (uploads, xOTD/skill text renders) --
       // ETag'd like the real DigitalFramesFrameThumbnailView.
+      //
+      // Real HA requires the Bearer auth header for every /api/ route; a
+      // plain <img src="..."> has no way to attach one and 401s in
+      // production even though this permissive mock (which doesn't reject
+      // unauthenticated requests) would happily serve it -- so tests must
+      // assert the header was actually sent, not just that the tile
+      // rendered an <img> at all. See frameThumbnailRequests below.
+      frameThumbnailRequests.push({ url: p, hasAuthHeader: !!req.headers['authorization'] });
       const etag = '"tiny-png"';
       if (req.headers['if-none-match'] === etag) {
         res.writeHead(304, { ETag: etag });
@@ -871,6 +880,7 @@ function createMockServer({
     messageSendCalls,
     wallpaperCalls,
     wallSendCalls,
+    frameThumbnailRequests,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },
