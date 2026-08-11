@@ -9496,7 +9496,25 @@
         })
         .filter(t => t && t.frame && t.frame.entityId && t.skillId);
 
-      if (!imageTargets.length && !skillTargets.length) {
+      // A wallpaper's per-frame slice (see KPF 36) -- an object, not a
+      // string, so it never matched imageTargets above. Sent as one batch
+      // via DigitalFramesWallSendView, since only the backend can compose
+      // the correctly cropped wire bytes; the per-frame image-send endpoint
+      // (_sendLibraryImageToFrame uses) has no crop-override param. Before
+      // this branch existed, a wallpaper-mapped frame here was silently
+      // skipped entirely -- "Send to Frames" reported success while never
+      // touching that frame or updating its thumbnail.
+      const cropTargets = this._frames
+        .map(frame => {
+          const mapping = this._wallEffectiveMapping(frame.entryId);
+          if (mapping && typeof mapping === 'object' && mapping.type === 'image_crop') {
+            return { entryId: frame.entryId, frame, mapping };
+          }
+          return null;
+        })
+        .filter(t => t && t.frame);
+
+      if (!imageTargets.length && !skillTargets.length && !cropTargets.length) {
         fb.className = 'feedback err';
         fb.textContent = 'No frames have an image or skill assigned yet.';
         fb.style.display = 'block';
@@ -9527,7 +9545,11 @@
         }
       }));
 
-      const results = [...imageResults, ...skillResults];
+      const cropResults = cropTargets.length
+        ? await this._sendCropMappingsToFrames(cropTargets)
+        : [];
+
+      const results = [...imageResults, ...skillResults, ...cropResults];
 
       const ok     = results.filter(r => r.success);
       // Queued frames haven't actually received the image yet -- don't
@@ -9584,6 +9606,52 @@
       }
       this._clearFrameOnDeck(frame);
       return { queued: false };
+    }
+
+    // Sends every image_crop-mapped frame's slice in one batch via
+    // DigitalFramesWallSendView -- see _sendWallToFrames's cropTargets
+    // comment for why this can't go through _sendLibraryImageToFrame like
+    // a plain image mapping. Deliberately does NOT set frame.lastImageId
+    // on success (unlike the plain-image path): that field is the shared
+    // background's image_id, and using it as the tile's thumbnail source
+    // would reproduce the exact "every wallpaper frame shows the same
+    // uncropped image" bug omitting image_id on the backend send already
+    // fixes -- the tile's own per-frame preview comes from
+    // coordinator.last_thumbnail (via /frame/{id}/thumbnail) on the next
+    // frames-list refresh instead.
+    async _sendCropMappingsToFrames(cropTargets) {
+      const wall = this._activeWall();
+      if (!wall) {
+        return cropTargets.map(t => ({ ...t, success: false, message: 'No active wall' }));
+      }
+      const mappings = {};
+      for (const t of cropTargets) mappings[t.entryId] = t.mapping;
+
+      let result;
+      try {
+        const resp = await fetch(`/api/digital_frames/walls/${wall.wall_id}/send`, {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings }),
+        });
+        result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.success) {
+          const message = result.message || resp.statusText || `HTTP ${resp.status}`;
+          return cropTargets.map(t => ({ ...t, success: false, message }));
+        }
+      } catch (err) {
+        return cropTargets.map(t => ({ ...t, success: false, message: err.message }));
+      }
+
+      const byEntry = {};
+      for (const r of result.results || []) byEntry[r.entry_id] = r;
+      return cropTargets.map(t => {
+        const r = byEntry[t.entryId];
+        if (!r) return { ...t, success: false, message: 'No result returned for this frame' };
+        if (r.queued) return { ...t, success: false, queued: true };
+        if (!r.success) return { ...t, success: false, message: r.message || 'Send failed' };
+        return { ...t, success: true };
+      });
     }
 
     // Keeps the Save Scene button (and the explanatory hint above it) in

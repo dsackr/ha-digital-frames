@@ -211,6 +211,33 @@ async def test_wallpaper_push_now_true_sends_to_coordinators(
     assert coord1.sent[0]["thumbnail"] is not None
 
 
+async def test_wallpaper_missing_coordinator_reported_as_failure_not_success(
+    hass, wallpaper_client, make_frame_entry, sample_image_bytes
+):
+    """A frame with no coordinator registered (not yet loaded, a stale
+    entry_id, ...) must not be silently skipped and still reported as
+    sent -- an earlier version set `sent = True` unconditionally after the
+    coordinator-lookup block, so a missing coordinator both skipped the
+    actual send/thumbnail-save AND told the caller it succeeded."""
+    wall_id, image_id = await _make_wall_and_image(hass, make_frame_entry, sample_image_bytes)
+    # Deliberately register no coordinator for either frame.
+
+    resp = await wallpaper_client.post(
+        f"/api/digital_frames/walls/{wall_id}/wallpaper",
+        json={
+            "image_id": image_id,
+            "image_rect": {"x": 0.0, "y": 0.0, "width": 2000.0, "height": 1600.0},
+        },
+    )
+
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["frames_failed"] == 2
+    for result in body["results"]:
+        assert result["sent"] is False
+        assert "coordinator" in result["message"].lower()
+
+
 async def test_wallpaper_frame_outside_image_rect_excluded_from_scene(
     hass, wallpaper_client, make_frame_entry, sample_image_bytes
 ):

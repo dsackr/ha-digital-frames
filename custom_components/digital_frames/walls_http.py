@@ -6,6 +6,7 @@ Endpoints:
     POST   /api/digital_frames/walls/{wall_id}     update a wall ({name, placements})
     DELETE /api/digital_frames/walls/{wall_id}     delete a wall
     POST   /api/digital_frames/walls/{wall_id}/wallpaper   save/send a wallpaper scene
+    POST   /api/digital_frames/walls/{wall_id}/send        send a batch of {entry_id: mapping}
 """
 
 from __future__ import annotations
@@ -252,7 +253,16 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
                     )
 
                     coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
-                    if coordinator is not None and hasattr(coordinator, "async_send_image_or_queue"):
+                    if coordinator is None or not hasattr(coordinator, "async_send_image_or_queue"):
+                        # No coordinator for this entry -- nothing was
+                        # actually sent, so this must not be reported as a
+                        # success (an earlier version set sent = True
+                        # unconditionally after this block, so a missing
+                        # coordinator silently skipped the send *and* the
+                        # thumbnail save while the response still claimed
+                        # success for that frame).
+                        send_error = "No frame coordinator available"
+                    else:
                         # image_id deliberately omitted: this frame is
                         # showing a *crop* of image_id, not the whole image,
                         # and async_set_last_image's contract is to pass
@@ -268,7 +278,7 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
                             wire_bytes,
                             thumbnail=preview_png,
                         )
-                    sent = True
+                        sent = True
                 except Exception as err:  # noqa: BLE001
                     # One frame's encode/send failure (a bad crop, an
                     # unreachable coordinator, ...) must not abort every
@@ -334,4 +344,69 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
         if scene_save_error:
             response["scene_save_error"] = scene_save_error
         return self.json(response)
+
+
+class DigitalFramesWallSendView(HomeAssistantView):
+    """Send an arbitrary batch of {entry_id: mapping} to their frames now.
+
+    The Walls tab's "Send to Frames" button resolves each frame's own
+    *effective* mapping client-side (staged picks merged over the active
+    preview scene's own -- see _wallEffectiveMapping) and posts the whole
+    batch here in one call. Plain image_id (str) and skill ({"type":
+    "skill", ...}) mappings could always be sent by the client itself,
+    one fetch per frame, straight to /api/digital_frames/library/send or
+    /api/digital_frames/skills/{id}/send -- but an image_crop mapping (a
+    wallpaper's per-frame slice, see KPF 36) cannot: only the backend can
+    compose the correctly cropped wire bytes, and that endpoint has no
+    crop-override param. A wallpaper-mapped frame silently had no send
+    path at all here before this view existed -- "Send to Frames" simply
+    skipped it (its mapping is an object, not a string, so it never
+    matched the client's own string-only per-frame send loop), reporting
+    overall success while quietly never touching that frame or its
+    thumbnail. This view just hands the whole batch to
+    SceneManager.async_send_mappings, the same executor scene activation,
+    schedules, and skill/message sends already use, which already handles
+    every mapping shape correctly.
+    """
+
+    url = "/api/digital_frames/walls/{wall_id}/send"
+    name = "api:digital_frames:walls:send"
+    requires_auth = True
+
+    async def post(self, request: web.Request, wall_id: str) -> web.Response:
+        hass = request.app["hass"]
+        wall_mgr = _get_wall_manager(hass)
+
+        wall = await wall_mgr.async_get_wall(wall_id)
+        if wall is None:
+            return self.json_message(f"Wall '{wall_id}' not found", status_code=404)
+
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            return self.json_message(f"Invalid JSON body: {err}", status_code=400)
+
+        mappings = body.get("mappings") if isinstance(body, dict) else None
+        if not isinstance(mappings, dict) or not mappings:
+            return self.json_message(
+                "Request body needs a non-empty 'mappings' object", status_code=400
+            )
+
+        scene_mgr = hass.data.get(DOMAIN, {}).get("_scenes")
+        if scene_mgr is None:
+            return self.json_message("Scene manager not initialised", status_code=500)
+
+        try:
+            result = await scene_mgr.async_send_mappings(hass, mappings)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to send wall '%s': %s", wall_id, err)
+            return self.json_message(f"Failed to send: {err}", status_code=500)
+
+        results = result.get("results", [])
+        failed = [r for r in results if not r.get("success") and not r.get("queued")]
+        return self.json({
+            "success": True,
+            "results": results,
+            "frames_failed": len(failed),
+        })
 

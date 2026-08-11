@@ -367,4 +367,41 @@ test.describe('Wallpaper mode (Walls tab)', () => {
 
     expect(pageErrors).toHaveLength(0);
   });
+
+  test('clicking Send to Frames on the ordinary Walls tab (a wallpaper scene loaded, not editing mode) actually sends the wallpaper-mapped frames', async ({ page }) => {
+    // The bug this guards against: a wallpaper's image_crop mapping is an
+    // object, not a plain image_id string, so it never matched the
+    // client's old string-only per-frame send loop -- "Send to Frames"
+    // reported success while silently never touching that frame, and its
+    // thumbnail never updated. This is the ordinary Walls tab "Send to
+    // Frames" button, deliberately NOT wallpaper-editing mode (that path,
+    // covered above, always worked -- this one didn't).
+    const { pageErrors } = await gotoPanel(page, baseUrl, { frames: FRAMES });
+    await openDashboard(page);
+    await selectWallScene(page, 'scene_wallpaper_1');
+    await page.waitForFunction(() => {
+      const root = document.getElementById('panel').shadowRoot;
+      return root.querySelector('.wall-wallpaper-bg') !== null;
+    });
+
+    await page.evaluate(() => {
+      document.getElementById('panel').shadowRoot.getElementById('wall-send-btn').click();
+    });
+    await page.waitForFunction(
+      () => document.getElementById('panel').shadowRoot.getElementById('wall-scene-fb').style.display === 'block'
+    );
+
+    expect(mockServer.wallSendCalls.length).toBe(1);
+    const sentMappings = mockServer.wallSendCalls[0].body.mappings;
+    expect(Object.keys(sentMappings).sort()).toEqual(['entry_1', 'entry_2']);
+    expect(sentMappings.entry_1).toEqual({ type: 'image_crop', image_id: 'img_bg_1', crop_box: [0, 0, 0.5, 1] });
+    expect(sentMappings.entry_2).toEqual({ type: 'image_crop', image_id: 'img_bg_1', crop_box: [0.5, 0, 1, 1] });
+
+    const fbText = await page.evaluate(
+      () => document.getElementById('panel').shadowRoot.getElementById('wall-scene-fb').textContent
+    );
+    expect(fbText).toContain('Sent to 2 frame');
+
+    expect(pageErrors).toHaveLength(0);
+  });
 });

@@ -96,6 +96,7 @@ function createMockServer({
   const skillSendCalls = []; // { skill_id, entry_id } per /skills/:id/send POST
   const messageSendCalls = []; // request body per /messages/send POST
   const wallpaperCalls = []; // { wall_id, body } per /walls/:id/wallpaper POST
+  const wallSendCalls = []; // { wall_id, body } per /walls/:id/send POST
   // The backend guarantees the default "All Frames" wall exists with a
   // placement for every configured frame -- mirror that here unless a test
   // seeds its own default wall record.
@@ -779,6 +780,29 @@ function createMockServer({
       });
     }
 
+    const wallSendMatch = p.match(/^\/api\/digital_frames\/walls\/([^/]+)\/send$/);
+    if (wallSendMatch && req.method === 'POST') {
+      const wallId = wallSendMatch[1];
+      const parsed = await readJsonBody(req);
+      wallSendCalls.push({ wall_id: wallId, body: parsed });
+
+      const wall = wallList.find((w) => w.wall_id === wallId);
+      if (!wall) return json(res, 404, { message: `Wall '${wallId}' not found` });
+      const mappings = parsed.mappings;
+      if (!mappings || typeof mappings !== 'object' || !Object.keys(mappings).length) {
+        return json(res, 400, { message: "Request body needs a non-empty 'mappings' object" });
+      }
+
+      // Mirrors DigitalFramesWallSendView -> SceneManager.async_send_mappings:
+      // every mapping shape (string image_id, skill, image_crop) succeeds
+      // here -- the real crop-composition/coordinator-send logic is Python
+      // test territory, this just proves the panel posts the right shape
+      // and reads the response back correctly, including a mapping type
+      // (image_crop) the plain per-frame send endpoint can't express at all.
+      const results = Object.keys(mappings).map((entryId) => ({ entry_id: entryId, success: true }));
+      return json(res, 200, { success: true, results, frames_failed: 0 });
+    }
+
     const wallMatch = p.match(/^\/api\/digital_frames\/walls\/(.+)$/);
     if (wallMatch) {
       const wallId = wallMatch[1];
@@ -846,6 +870,7 @@ function createMockServer({
     skillSendCalls,
     messageSendCalls,
     wallpaperCalls,
+    wallSendCalls,
     get walls() { return wallList; },
     setFailing(value) { failing = value; },
     get onboardingComplete() { return onboardingComplete; },
