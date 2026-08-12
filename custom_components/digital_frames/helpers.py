@@ -35,7 +35,7 @@ from .const import (
     ORIENTATION_LANDSCAPE,
     ORIENTATION_PORTRAIT,
 )
-from .frame_types import FRAME_TYPES, ORIGIN_CLONE, ORIGIN_OFFICIAL
+from .frame_types import FRAME_TYPES
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -307,42 +307,25 @@ def mac_from_info(info: dict[str, Any]) -> str:
 
 # Official Fraimic Wi-Fi module OUIs. Mirrors manifest.json's dhcp
 # matchers (which can't be imported from here) -- keep the two in sync.
+# Discovery-only: the OUI identifies the Wi-Fi module vendor/batch, not the
+# assembled frame's provenance (real official frames have shipped with
+# multiple Espressif OUIs -- see GH #22), so this must never be used to
+# decide official-vs-clone origin. It's fine for identity matching, DHCP
+# tracking, and (in detect_frame_type_from_info) an early best-effort size
+# guess that a working /info scrape or device_type field will override.
 _OFFICIAL_MAC_PREFIXES = ("1cdbd4", "3cdc75")
 
 
-def is_official_mac(mac: str | None) -> bool | None:
-    """True/False if *mac* matches a known official OUI; None if unknown/empty."""
-    if not mac:
-        return None
-    norm = "".join(c for c in str(mac).lower() if c.isalnum())
-    if len(norm) < 6:
-        return None
-    return any(norm.startswith(p) for p in _OFFICIAL_MAC_PREFIXES)
-
-
 def origin_for_fraimic_entry(entry: "ConfigEntry") -> str | None:
-    """official/clone for a Fraimic-family entry, with MAC OUI tie-break.
+    """official/clone for a Fraimic-family entry, from the registry alone.
 
-    Entries sometimes store size ``13.3`` (official registry id) for a
-    community panel. When a non-official MAC is present, report ``clone``
-    so power controls stay editable.
+    Origin is whatever the entry's selected/detected frame type declares
+    (see frame_types.FRAME_TYPES) -- MAC OUI does not override it. GH #22:
+    two genuine Fraimic Canvas 31.5" units were reported with different
+    Espressif OUIs, so a non-matching MAC is not evidence of a clone.
     """
     size = entry.data.get(CONF_SIZE) or ""
     frame_type = FRAME_TYPES.get(size)
-    mac = entry.data.get(CONF_MAC) or ""
-    mac_official = is_official_mac(mac)
-
-    if mac_official is False:
-        # Non-Fraimic OUI → community panel for capability purposes.
-        if size.endswith("_clone") and size in FRAME_TYPES:
-            return ORIGIN_CLONE
-        if frame_type is not None and frame_type.origin == ORIGIN_CLONE:
-            return ORIGIN_CLONE
-        base = size.removesuffix("_clone") if size else ""
-        if base and f"{base}_clone" in FRAME_TYPES:
-            return ORIGIN_CLONE
-        return ORIGIN_CLONE
-
     if frame_type is not None:
         return frame_type.origin
     return None
@@ -374,23 +357,32 @@ def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
     1. display.device_type -- newer clone firmware states it outright
        (e.g. '13.3" E-Ink').
     2. Reported pixel dimensions matched against the frame-type registry
-       (orientation-agnostic, like byte_layout_for_resolution). Resolutions
-       shared by multiple types (13.3" official vs 13.3" clone, both
-       1200x1600) are disambiguated by MAC OUI -- functionally either
-       answer renders identically (the registry validates shared
-       resolutions agree on byte layout), so that tiebreak only affects
-       the display label.
+       (orientation-agnostic, like byte_layout_for_resolution).
+
+    Neither signal falls back to MAC OUI to disambiguate types that share a
+    label/resolution (e.g. 13.3" official vs 13.3" clone, both 1200x1600):
+    GH #22 found genuine official frames using OUIs outside the known-official
+    set, so a MAC mismatch is not evidence of a clone. Ambiguous cases return
+    None -- config_flow then asks the user to pick a size -- rather than
+    silently mislabeling origin. (Rendering is unaffected either way:
+    frame_types._validate_registry requires types sharing a resolution to
+    also agree on byte layout, so an ambiguous guess only risks the origin
+    label, never a wrong .bin format.)
     """
     display = info.get("display") or {}
     device_type = display.get("device_type") or ""
     inches = _SIZE_INCHES_RE.search(device_type)
     if inches:
         size_str = inches.group(1)
-        is_official = mac_from_info(info).startswith(_OFFICIAL_MAC_PREFIXES)
-        if not is_official and f"{size_str}_clone" in FRAME_TYPES:
-            return f"{size_str}_clone"
-        if size_str in FRAME_TYPES:
+        has_clone = f"{size_str}_clone" in FRAME_TYPES
+        has_plain = size_str in FRAME_TYPES
+        if has_plain and not has_clone:
             return size_str
+        if has_clone and not has_plain:
+            return f"{size_str}_clone"
+        # Both variants exist for this size -- text alone can't tell them
+        # apart. Fall through to the dimension match, which hits the same
+        # ambiguity and returns None below.
 
     dims = dimensions_from_info(info)
     if dims is None:
@@ -405,12 +397,7 @@ def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
         return None
     if len(candidates) == 1:
         return candidates[0].id
-
-    is_official = mac_from_info(info).startswith(_OFFICIAL_MAC_PREFIXES)
-    for frame_type in candidates:
-        if (frame_type.origin == ORIGIN_OFFICIAL) == is_official:
-            return frame_type.id
-    return candidates[0].id
+    return None
 
 
 def match_and_update_entry(

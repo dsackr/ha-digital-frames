@@ -44,8 +44,8 @@ frame moved; pending flows dedup via `unique_id`.
   `add_fraimic` / `add_meural` / `discovery_confirm_meural` / `pick_device` /
   `manual` / `name_device` / `dhcp` / `integration_discovery`),
   `helpers.py` (`probe_frame`, `probe_device_size`, `scan_subnet`,
-  `detect_frame_type_from_info`), `meural.py` (`probe_meural`,
-  `meural_unique_id`), `discovery.py` (`_async_scan_once`,
+  `detect_frame_type_from_info`, `origin_for_fraimic_entry`), `meural.py`
+  (`probe_meural`, `meural_unique_id`), `discovery.py` (`_async_scan_once`,
   `_match_and_update_meural`).
 - **If it silently breaks**: users can't add frames at all, or duplicate
   entries get created for the same physical frame; Meurals never appear
@@ -58,6 +58,18 @@ frame moved; pending flows dedup via `unique_id`.
   cycle. Caught internally by HA core (not fatal) but real log noise during
   exactly the restart cycles this integration was already suspected of
   causing. Fixed by only force-unsubscribing the persistent interval timer.
+  Another real bug (GH #22, reported 2026-08-11): `origin_for_fraimic_entry`
+  treated any MAC OUI outside the small known-official set as proof of a
+  community clone, silently downgrading an explicitly-selected/detected
+  **official** frame type (e.g. `31.5`) to `origin=clone` in the API and
+  panel — genuine Fraimic Canvas units have shipped with multiple Espressif
+  OUIs, so a MAC mismatch is not clone evidence. This also skewed delivery:
+  `coordinator.py`'s push-vs-pull branch keys off `is_official`. Fixed so
+  origin always comes from the entry's registered frame type alone, never
+  from MAC; `detect_frame_type_from_info`'s resolution-collision fallback
+  (e.g. `13.3` official vs `13.3_clone`, same resolution) similarly stopped
+  guessing from MAC and now returns unknown, so `config_flow` asks the user
+  to pick instead of silently mislabeling origin.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
   `tests/python/config_flow/test_config_flow_user_scan.py` (menu,
@@ -69,7 +81,12 @@ frame moved; pending flows dedup via `unique_id`.
   `test_setup_discovery_start_stop_does_not_leak_listener_errors` drives a
   full not-running → started → stop cycle and asserts no listener-removal
   error is logged -- confirmed to fail with both original error variants
-  when the fix is reverted).
+  when the fix is reverted); `tests/python/unit/test_helpers_info.py`
+  (`test_origin_for_fraimic_entry_ignores_mac` — official size + unknown
+  MAC still reports official, confirmed to fail pre-fix;
+  `test_detect_frame_type_from_info_unambiguous_cases_ignore_mac`,
+  `test_detect_frame_type_from_info_ambiguous_size_returns_unknown` —
+  resolution/label collisions return `None` regardless of MAC).
 
 ## 2. Options flow (scan interval, orientation edge, 180° flip)
 User edits power/sleep, flip, hanging edge, and advanced poll settings via HA's
