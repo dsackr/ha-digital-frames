@@ -57,10 +57,16 @@ _TILE_TARGET_LONGEST = 140
 _GRID = 20
 
 # Auto-layout-only geometry for the default wall (custom walls have no such
-# limit -- users free-place those). A tile's longest edge is always scaled
-# to _TILE_TARGET_LONGEST regardless of orientation, so this cell size fits
-# any tile without vertical collisions between rows.
+# limit -- users free-place those).
 _MAX_FRAMES_PER_ROW = 4
+# Pre-physical-scale row height: every tile's longest edge was independently
+# normalized to _TILE_TARGET_LONGEST, so this fit any tile without vertical
+# collisions between rows. Since tile_dims() started scaling to a panel's
+# true physical size (KPF 19), a tile can be much taller than this -- e.g. a
+# 31.5" official Fraimic panel renders ~2.4x _TILE_TARGET_LONGEST tall -- so
+# it's now only a margin/fallback constant, never trusted as a row's actual
+# height. See _row_y, which computes each row's real height from its
+# occupants' tile_dims instead.
 _CELL = _TILE_TARGET_LONGEST + _GRID
 # Two rows/columns of empty breathing room above and left of the first
 # auto-placed tile, instead of starting flush in the corner.
@@ -237,6 +243,30 @@ class WallManager:
             if entry.data.get("kind") != KIND_SCENES_HUB
         ]
 
+    def _row_y(self, wall: "Wall", row: int) -> float:
+        """Y where auto-placement row *row* (0-indexed) starts.
+
+        _MARGIN_TOP plus every earlier row's *real* height (its tallest
+        occupant's actual tile_dims, not the fixed _CELL) -- a physically
+        large panel (e.g. 31.5") pushes the next row down by however much
+        it actually overflows _CELL, instead of the next row's tiles
+        silently overlapping it. Row 0 always starts at _MARGIN_TOP by
+        definition, so this recursion is exact for a wall built entirely
+        through this method; a legacy wall with rows from before this fix
+        (uniform _CELL spacing) may still visually overlap higher up --
+        the user's existing "Align Wall to Grid" cleans those up."""
+        y = float(_MARGIN_TOP)
+        for _ in range(row):
+            row_height = _TILE_TARGET_LONGEST
+            for entry_id, pos in wall.placements.items():
+                if pos["y"] != y:
+                    continue
+                placed = self.hass.config_entries.async_get_entry(entry_id)
+                if placed:
+                    row_height = max(row_height, tile_dims(placed)[1])
+            y += row_height + _GRID
+        return y
+
     def _append_placement(self, wall: Wall, entry: "ConfigEntry") -> None:
         """Place *entry* in the next open grid slot: rows of up to
         _MAX_FRAMES_PER_ROW tiles, filled left-to-right and wrapping onto a
@@ -253,7 +283,7 @@ class WallManager:
         multiple of _MAX_FRAMES_PER_ROW while the row still holds tiles,
         which used to place the new tile directly on top of a survivor."""
         row = len(wall.placements) // _MAX_FRAMES_PER_ROW
-        y = _MARGIN_TOP + row * _CELL
+        y = self._row_y(wall, row)
         right_edge = _MARGIN_LEFT
         occupied = False
         for entry_id, pos in wall.placements.items():

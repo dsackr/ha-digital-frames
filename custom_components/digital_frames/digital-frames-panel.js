@@ -775,6 +775,37 @@
       border: 1px dashed var(--divider-color, rgba(0,0,0,.2));
       overflow: auto;
       box-sizing: border-box;
+      /* Owns pan/zoom pointer gestures itself (see _wallMaybeBeginPan) --
+         without this, touch drags fight the browser's own scroll/pinch. */
+      touch-action: none;
+    }
+    .wall-canvas.panning {
+      cursor: grabbing;
+    }
+    /* The sole child of .wall-canvas -- every tile/background lives inside
+       this, and only this is what CSS-scales for zoom (transform-origin
+       0 0 so scaling grows down/right, matching scroll direction). Screen
+       <-> logical wall-canvas-px conversions all divide/multiply by the
+       current zoom -- see _wallToLogical / _applyWallZoom. */
+    .wall-zoom-layer {
+      position: relative;
+      transform-origin: 0 0;
+    }
+    .wall-zoom-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: auto;
+    }
+    .wall-zoom-controls .btn-ghost {
+      padding: 4px 10px;
+    }
+    .wall-zoom-label {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      min-width: 38px;
+      text-align: center;
+      user-select: none;
     }
     .wall-tile {
       position: absolute;
@@ -2292,6 +2323,12 @@
     return WALL_TILE_TARGET_LONGEST / Math.max(refWIn, refHIn);
   })();
 
+  // View-only canvas zoom (never persisted -- a per-session convenience,
+  // not layout state). 25%-250%, 10% per wheel notch/button click.
+  const WALL_ZOOM_MIN = 0.25;
+  const WALL_ZOOM_MAX = 2.5;
+  const WALL_ZOOM_STEP = 0.1;
+
   // -------------------------------------------------------------------------
   // Panel element
   // -------------------------------------------------------------------------
@@ -2418,6 +2455,13 @@
                                            // plain click = one, shift/ctrl-click toggles, marquee drags many
       this._wallMarquee = null;            // in-progress rubber-band selection drag, or null
       this._wallSaveTimer = null;          // pending debounced layout auto-save, or null
+
+      // Canvas pan/zoom (view-only -- never saved with the layout).
+      this._wallZoom = 1;                  // 1 = 100%
+      this._wallPanState = null;           // in-progress pan (spacebar/middle-click/two-finger), or null
+      this._wallSpaceHeld = false;         // spacebar currently held -- arms left-drag panning
+      this._wallActiveTouches = new Map(); // touch pointerId -> {x, y}, tracked for two-finger pan
+
       this._onWallPointerMove = this._onWallPointerMove.bind(this);
       this._onWallPointerUp   = this._onWallPointerUp.bind(this);
       this._onWallKeydown     = this._onWallKeydown.bind(this);
@@ -2425,6 +2469,11 @@
       this._onWallMarqueeUp   = this._onWallMarqueeUp.bind(this);
       this._onWallpaperImagePointerMove = this._onWallpaperImagePointerMove.bind(this);
       this._onWallpaperImagePointerUp   = this._onWallpaperImagePointerUp.bind(this);
+      this._onWallPanPointerMove = this._onWallPanPointerMove.bind(this);
+      this._onWallPanPointerUp   = this._onWallPanPointerUp.bind(this);
+      this._onWallWheel          = this._onWallWheel.bind(this);
+      this._onWallSpaceKeydown   = this._onWallSpaceKeydown.bind(this);
+      this._onWallSpaceKeyup     = this._onWallSpaceKeyup.bind(this);
 
       // Embedded config/options flow state (the panel drives HA's own
       // data_entry_flow REST API instead of navigating to Settings).
@@ -2942,7 +2991,17 @@
             <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
             <button class="btn-ghost" id="wall-wallpaper-btn" title="Place one image across this wall's frames as a shared, independently zoomable/pannable background">🖼 Wallpaper</button>
             <button class="btn-ghost" id="wall-wallpaper-choose-btn" style="display:none" title="Choose (or change) the wallpaper image">🖼 Choose Image…</button>
+            <span class="wall-zoom-controls">
+              <button class="btn-ghost" id="wall-zoom-out-btn" title="Zoom out">−</button>
+              <span class="wall-zoom-label" id="wall-zoom-label">100%</span>
+              <button class="btn-ghost" id="wall-zoom-in-btn" title="Zoom in">+</button>
+              <button class="btn-ghost" id="wall-zoom-reset-btn" title="Reset zoom to 100%">⟲ Reset Zoom</button>
+            </span>
           </div>
+          <p style="font-size:11px;color:var(--secondary-text-color);margin:-6px 0 10px">
+            💡 Zoom: Ctrl/Cmd + scroll wheel, or the buttons above. Pan: hold Space and drag,
+            middle-click drag, or a two-finger drag on touch.
+          </p>
           <p id="wall-wallpaper-hint" style="display:none;font-size:12px;color:var(--secondary-text-color);margin:-6px 0 10px">
             💡 Drag the image to pan it, drag its blue corner handle to zoom (aspect ratio locked) -- moving a
             <em>frame</em> only changes which part of the image that frame shows, never the image itself.
@@ -8171,12 +8230,25 @@
         if (e.target === wallpaperPickerOverlay) this._closeWallWallpaperPicker();
       });
 
-      // Rubber-band multi-select starts on the canvas background (tiles
-      // handle their own pointerdown, so this only fires on empty space).
+      this.shadowRoot.getElementById('wall-zoom-in-btn').addEventListener('click', () => this._wallZoomStep(1));
+      this.shadowRoot.getElementById('wall-zoom-out-btn').addEventListener('click', () => this._wallZoomStep(-1));
+      this.shadowRoot.getElementById('wall-zoom-reset-btn').addEventListener('click', () => this._wallZoomReset());
+
       // The canvas element itself survives re-renders (only its children
       // are rebuilt), so wiring once here is safe.
-      this.shadowRoot.getElementById('wall-canvas')
-        .addEventListener('pointerdown', (e) => this._wallBeginMarquee(e));
+      const wallCanvasEl = this.shadowRoot.getElementById('wall-canvas');
+      wallCanvasEl.addEventListener('wheel', this._onWallWheel, { passive: false });
+      // Registered BEFORE the marquee listener below: same-element
+      // pointerdown listeners fire in registration order, and this one
+      // calls stopImmediatePropagation to claim a two-finger touch for
+      // panning before _wallBeginMarquee (or a tile's own _wallBeginDrag,
+      // via bubbling) can react to it as a new drag/select.
+      wallCanvasEl.addEventListener('pointerdown', (e) => this._wallMaybeBeginPan(e));
+      // Rubber-band multi-select starts on the canvas background (tiles
+      // handle their own pointerdown, so this only fires on empty space).
+      wallCanvasEl.addEventListener('pointerdown', (e) => this._wallBeginMarquee(e));
+      window.addEventListener('keydown', this._onWallSpaceKeydown, { signal: this._abort.signal });
+      window.addEventListener('keyup', this._onWallSpaceKeyup, { signal: this._abort.signal });
       this.shadowRoot.querySelectorAll('#wall-align-toolbar [data-align]').forEach((btn) => {
         btn.addEventListener('click', () => this._alignWallSelection(btn.dataset.align));
       });
@@ -8187,7 +8259,13 @@
     // Holding shift/ctrl/cmd adds the swept tiles to the existing
     // selection instead of replacing it.
     _wallBeginMarquee(e) {
-      if (e.target !== e.currentTarget) return; // a tile's own drag, not empty space
+      // Empty space is either #wall-canvas itself (its own padding/edges)
+      // or its .wall-zoom-layer child's own background -- anything deeper
+      // (a tile, the wallpaper bg) is that element's own drag, not this.
+      // A second touch (two-finger pan) is consumed entirely by the pan
+      // detector below, registered first on this same element, via
+      // stopImmediatePropagation -- this handler never sees that event.
+      if (e.target !== e.currentTarget && e.target !== this._wallZoomLayer()) return;
       e.preventDefault();
       // Same overlapping-pointer-input hazard as _wallBeginDrag: a second
       // marquee start before the first's pointerup used to append a second
@@ -8196,11 +8274,13 @@
         this._wallMarquee.box.remove();
         this._wallMarquee = null;
       }
-      const canvas = e.currentTarget;
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
       const box = document.createElement('div');
       box.className = 'wall-marquee';
-      canvas.appendChild(box);
+      // Lives inside .wall-zoom-layer (not #wall-canvas directly) so its
+      // position/size can stay in the same logical wall-canvas px as
+      // everything else and scale for free with the zoom transform.
+      this._wallZoomLayer().appendChild(box);
       this._wallMarquee = {
         box,
         startClientX: e.clientX,
@@ -8223,13 +8303,17 @@
       if (!marquee.moved) return;
 
       const canvas = this.shadowRoot.getElementById('wall-canvas');
-      const rect = canvas.getBoundingClientRect();
-      // Marquee rectangle in canvas coordinates (scroll-aware), clamped to
-      // the canvas so a drag that wanders outside still reads sensibly.
-      const x1 = Math.min(marquee.startClientX, e.clientX) - rect.left + canvas.scrollLeft;
-      const y1 = Math.min(marquee.startClientY, e.clientY) - rect.top + canvas.scrollTop;
-      const x2 = Math.max(marquee.startClientX, e.clientX) - rect.left + canvas.scrollLeft;
-      const y2 = Math.max(marquee.startClientY, e.clientY) - rect.top + canvas.scrollTop;
+      // Marquee rectangle in logical wall-canvas px (scroll- and
+      // zoom-aware) -- the same space _wallPlacements/tile_dims use, and
+      // what the box itself is styled in since it lives inside the
+      // (transform-scaled) .wall-zoom-layer.
+      const p1 = this._wallToLogical(
+        Math.min(marquee.startClientX, e.clientX), Math.min(marquee.startClientY, e.clientY)
+      );
+      const p2 = this._wallToLogical(
+        Math.max(marquee.startClientX, e.clientX), Math.max(marquee.startClientY, e.clientY)
+      );
+      const x1 = p1.x, y1 = p1.y, x2 = p2.x, y2 = p2.y;
       marquee.box.style.left   = `${Math.max(0, x1)}px`;
       marquee.box.style.top    = `${Math.max(0, y1)}px`;
       marquee.box.style.width  = `${Math.max(0, x2 - Math.max(0, x1))}px`;
@@ -8398,28 +8482,26 @@
       const MARGIN_LEFT = 40;
       const MARGIN_TOP = 40;
       const MAX_PER_ROW = 4;
-      const CELL_HEIGHT = 160;
 
-      sorted.forEach((item, index) => {
-        const row = Math.floor(index / MAX_PER_ROW);
-        const col = index % MAX_PER_ROW;
-        const y = MARGIN_TOP + row * CELL_HEIGHT;
-
+      // Row height comes from each row's real tallest tile (_wallTileDims),
+      // not a fixed constant -- a physically large panel (e.g. 31.5", which
+      // renders far taller on canvas than the old 160px assumed) would
+      // otherwise overlap the row placed below it. Mirrors walls.py's
+      // WallManager._row_y fix for the same bug in server-side
+      // auto-placement (GH: "align wall to grid" not resolving overlaps).
+      let y = MARGIN_TOP;
+      for (let row = 0; row * MAX_PER_ROW < sorted.length; row++) {
+        const rowItems = sorted.slice(row * MAX_PER_ROW, (row + 1) * MAX_PER_ROW);
         let x = MARGIN_LEFT;
-        if (col > 0) {
-          let rightEdge = MARGIN_LEFT;
-          for (let i = index - col; i < index; i++) {
-            const prevId = sorted[i].id;
-            const prevPos = newPlacements[prevId];
-            const prevFrame = sorted[i].frame;
-            const prevDims = this._wallTileDims(prevFrame);
-            rightEdge = Math.max(rightEdge, prevPos.x + prevDims.width);
-          }
-          x = Math.ceil(rightEdge / GRID) * GRID + GRID;
+        let rowHeight = 0;
+        for (const item of rowItems) {
+          const dims = this._wallTileDims(item.frame);
+          newPlacements[item.id] = { x, y };
+          x = Math.ceil((x + dims.width) / GRID) * GRID + GRID;
+          rowHeight = Math.max(rowHeight, dims.height);
         }
-
-        newPlacements[item.id] = { x, y };
-      });
+        y += rowHeight + GRID;
+      }
 
       const canvas = this.shadowRoot.getElementById('wall-canvas');
       for (const [id, pos] of Object.entries(newPlacements)) {
@@ -8683,18 +8765,196 @@
       return null;
     }
 
+    // #wall-canvas's sole child and the one thing CSS-scaled for zoom --
+    // created lazily on first render, then reused (only its own children
+    // are torn down/rebuilt per render, same as #wall-canvas used to be).
+    _wallZoomLayer() {
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      let layer = canvas.querySelector('.wall-zoom-layer');
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'wall-zoom-layer';
+        canvas.appendChild(layer);
+      }
+      return layer;
+    }
+
+    // Screen (pointer event clientX/Y) -> logical wall-canvas px, the same
+    // space _wallPlacements / tile_dims / _wallWallpaperEdit all use.
+    // Shared by every drag/marquee/wallpaper-pan conversion so zoom only
+    // had to be taught to one place.
+    _wallToLogical(clientX, clientY) {
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      const rect = canvas.getBoundingClientRect();
+      const zoom = this._wallZoom;
+      return {
+        x: (clientX - rect.left + canvas.scrollLeft) / zoom,
+        y: (clientY - rect.top + canvas.scrollTop) / zoom,
+      };
+    }
+
+    // -------------------------------------------------------------------
+    // Canvas zoom (view-only, per-session -- never saved with the layout)
+    // -------------------------------------------------------------------
+
+    _applyWallZoom() {
+      this._wallZoomLayer().style.transform = `scale(${this._wallZoom})`;
+      const label = this.shadowRoot.getElementById('wall-zoom-label');
+      if (label) label.textContent = `${Math.round(this._wallZoom * 100)}%`;
+    }
+
+    // Sets zoom clamped to [WALL_ZOOM_MIN, WALL_ZOOM_MAX], keeping the
+    // logical point currently under (anchorClientX, anchorClientY) fixed
+    // on screen -- zoom-to-cursor for the wheel, viewport center for the
+    // +/-/Reset buttons (anchor omitted).
+    _wallSetZoom(newZoom, anchorClientX, anchorClientY) {
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      const clamped = Math.round(Math.min(WALL_ZOOM_MAX, Math.max(WALL_ZOOM_MIN, newZoom)) * 100) / 100;
+      if (clamped === this._wallZoom) return;
+      const rect = canvas.getBoundingClientRect();
+      const ax = anchorClientX == null ? rect.left + rect.width / 2 : anchorClientX;
+      const ay = anchorClientY == null ? rect.top + rect.height / 2 : anchorClientY;
+      const before = this._wallToLogical(ax, ay);
+      this._wallZoom = clamped;
+      this._applyWallZoom();
+      canvas.scrollLeft = before.x * clamped - (ax - rect.left);
+      canvas.scrollTop  = before.y * clamped - (ay - rect.top);
+    }
+
+    _wallZoomStep(direction) {
+      this._wallSetZoom(this._wallZoom + direction * WALL_ZOOM_STEP);
+    }
+
+    _wallZoomReset() {
+      this._wallSetZoom(1);
+    }
+
+    // Ctrl/Cmd + wheel zooms, centered on the cursor. Plain wheel (and
+    // trackpad two-finger scroll) is untouched -- it already pans natively
+    // via #wall-canvas's own overflow:auto scrolling.
+    _onWallWheel(e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? (1 + WALL_ZOOM_STEP) : 1 / (1 + WALL_ZOOM_STEP);
+      this._wallSetZoom(this._wallZoom * factor, e.clientX, e.clientY);
+    }
+
+    // -------------------------------------------------------------------
+    // Canvas pan: spacebar + left-drag, middle-mouse-button drag, or a
+    // two-finger touch drag. Deliberately not plain left-drag on empty
+    // canvas, which already means rubber-band multi-select (_wallBeginMarquee).
+    // -------------------------------------------------------------------
+
+    _onWallSpaceKeydown(e) {
+      if (e.code !== 'Space' || e.repeat || this._activeTab !== 'walls') return;
+      const target = (e.composedPath && e.composedPath()[0]) || e.target;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT' || target.isContentEditable)) return;
+      this._wallSpaceHeld = true;
+      e.preventDefault(); // don't let the page scroll on spacebar
+    }
+
+    _onWallSpaceKeyup(e) {
+      if (e.code === 'Space') this._wallSpaceHeld = false;
+    }
+
+    // Registered first on #wall-canvas (before _wallBeginMarquee), so a
+    // two-finger touch's pointerdown can claim the gesture for panning via
+    // stopImmediatePropagation before the marquee/tile-drag handlers ever
+    // see it.
+    _wallMaybeBeginPan(e) {
+      if (e.pointerType === 'touch') {
+        this._wallActiveTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (this._wallActiveTouches.size === 2) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          this._wallCancelInProgressDrag();
+          if (this._wallMarquee) {
+            this._wallMarquee.box.remove();
+            this._wallMarquee = null;
+          }
+          this._wallBeginPan(e, true);
+        }
+        return;
+      }
+      if (e.button === 1 || (e.button === 0 && this._wallSpaceHeld)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this._wallBeginPan(e, false);
+      }
+    }
+
+    _wallBeginPan(e, twoFinger) {
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      this._wallPanState = {
+        twoFinger,
+        startScrollLeft: canvas.scrollLeft,
+        startScrollTop: canvas.scrollTop,
+        startX: e.clientX,
+        startY: e.clientY,
+        centroidX: null,
+        centroidY: null,
+      };
+      canvas.classList.add('panning');
+      window.addEventListener('pointermove', this._onWallPanPointerMove, { signal: this._abort.signal });
+      window.addEventListener('pointerup', this._onWallPanPointerUp, { signal: this._abort.signal });
+      window.addEventListener('pointercancel', this._onWallPanPointerUp, { signal: this._abort.signal });
+    }
+
+    _onWallPanPointerMove(e) {
+      const pan = this._wallPanState;
+      if (!pan) return;
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      if (pan.twoFinger) {
+        if (!this._wallActiveTouches.has(e.pointerId)) return;
+        this._wallActiveTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // Centroid of every tracked touch -- averaging both fingers keeps
+        // the pan smooth even if they move at slightly different speeds.
+        const pts = [...this._wallActiveTouches.values()];
+        const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+        if (pan.centroidX == null) {
+          pan.centroidX = cx;
+          pan.centroidY = cy;
+          return;
+        }
+        canvas.scrollLeft -= (cx - pan.centroidX);
+        canvas.scrollTop  -= (cy - pan.centroidY);
+        pan.centroidX = cx;
+        pan.centroidY = cy;
+        return;
+      }
+      canvas.scrollLeft = pan.startScrollLeft - (e.clientX - pan.startX);
+      canvas.scrollTop  = pan.startScrollTop  - (e.clientY - pan.startY);
+    }
+
+    _onWallPanPointerUp(e) {
+      if (e.pointerType === 'touch') this._wallActiveTouches.delete(e.pointerId);
+      if (this._wallActiveTouches.size >= 2) return; // still panning with the remaining touches
+      if (!this._wallPanState) return;
+      window.removeEventListener('pointermove', this._onWallPanPointerMove);
+      window.removeEventListener('pointerup', this._onWallPanPointerUp);
+      window.removeEventListener('pointercancel', this._onWallPanPointerUp);
+      const canvas = this.shadowRoot.getElementById('wall-canvas');
+      canvas.classList.remove('panning');
+      this._wallPanState = null;
+    }
+
     // The canvas position a drag would snap to if dropped at the pointer's
     // current location -- one shared implementation for the actual drop
-    // (_onWallPointerUp) and the ghost's live collision hint.
+    // (_onWallPointerUp) and the ghost's live collision hint. Zoom-aware:
+    // a palette drop centers on the cursor's logical position; a placed
+    // tile's reposition uses the screen-pixel delta since its drag start,
+    // scaled back down to logical px (_wallZoom > 1 means the same screen
+    // movement covers fewer logical px).
     _wallSnapCandidate(drag, clientX, clientY) {
-      const canvas = this.shadowRoot.getElementById('wall-canvas');
-      const canvasRect = canvas.getBoundingClientRect();
+      const zoom = this._wallZoom;
       const rawX = drag.kind === 'palette'
-        ? (clientX - canvasRect.left + canvas.scrollLeft - drag.dims.width / 2)
-        : (drag.startLeft + (clientX - drag.startClientX));
+        ? (this._wallToLogical(clientX, clientY).x - drag.dims.width / 2)
+        : (drag.startLeft + (clientX - drag.startClientX) / zoom);
       const rawY = drag.kind === 'palette'
-        ? (clientY - canvasRect.top + canvas.scrollTop - drag.dims.height / 2)
-        : (drag.startTop + (clientY - drag.startClientY));
+        ? (this._wallToLogical(clientX, clientY).y - drag.dims.height / 2)
+        : (drag.startTop + (clientY - drag.startClientY) / zoom);
       const GRID = 20;
       return {
         x: Math.max(0, Math.round(rawX / GRID) * GRID),
@@ -8817,6 +9077,7 @@
     _renderWallCanvas() {
       const palette = this.shadowRoot.getElementById('wall-palette');
       const canvas  = this.shadowRoot.getElementById('wall-canvas');
+      const zoomLayer = this._wallZoomLayer();
 
       const placedEntryIds = new Set(Object.keys(this._wallPlacements));
       const unplaced = this._frames.filter(f => !placedEntryIds.has(f.entryId));
@@ -8861,10 +9122,10 @@
         }
       }
 
-      canvas.innerHTML = '';
+      zoomLayer.innerHTML = '';
       canvas.classList.toggle('wallpaper-mode', this._wallWallpaperMode);
       if (this._wallWallpaperMode) {
-        this._renderWallWallpaperTiles(canvas);
+        this._renderWallWallpaperTiles(zoomLayer);
         this._updateWallSaveToSceneAvailability();
         this._updateWallAlignToolbar();
         if (this._hass) this._tickAllStatus();
@@ -8893,7 +9154,7 @@
         imgWrap.style.cssText = 'width:100%;height:100%';
         this._loadThumbnail(wallpaper.image_id, imgWrap);
         bg.appendChild(imgWrap);
-        canvas.appendChild(bg);
+        zoomLayer.appendChild(bg);
       }
 
       for (const entryId of Object.keys(this._wallPlacements)) {
@@ -8914,7 +9175,7 @@
         // of HA's sidebar) -- and for plain keyboard/tab accessibility.
         tile.tabIndex = 0;
         if (this._wallSelection.has(entryId)) tile.classList.add('selected');
-        canvas.appendChild(tile);
+        zoomLayer.appendChild(tile);
 
         this._renderWallTileContent(tile, entryId, frame);
 
@@ -9333,8 +9594,11 @@
       const drag = this._wallpaperDrag;
       const edit = this._wallWallpaperEdit;
       if (!drag || !edit) return;
-      const dx = e.clientX - drag.startClientX;
-      const dy = e.clientY - drag.startClientY;
+      // Screen-pixel delta -> logical wall-canvas px (edit.x/y/width/height
+      // are logical, same space as _wallPlacements) -- the same zoom
+      // undo _wallSnapCandidate does for a tile drag.
+      const dx = (e.clientX - drag.startClientX) / this._wallZoom;
+      const dy = (e.clientY - drag.startClientY) / this._wallZoom;
       if (drag.kind === 'move') {
         edit.x = drag.startX + dx;
         edit.y = drag.startY + dy;
@@ -10034,8 +10298,11 @@
           const rect = tileEl.getBoundingClientRect();
           const memberGhost = document.createElement('div');
           memberGhost.className = 'wall-drag-ghost';
-          memberGhost.style.width  = `${memberDims.width}px`;
-          memberGhost.style.height = `${memberDims.height}px`;
+          // Ghosts live in raw screen space (appended to shadowRoot, not
+          // the zoomed .wall-zoom-layer) -- scale their on-screen size by
+          // zoom so they visually match the tile they'll actually place.
+          memberGhost.style.width  = `${memberDims.width * this._wallZoom}px`;
+          memberGhost.style.height = `${memberDims.height * this._wallZoom}px`;
           memberGhost.textContent = memberFrame.title;
           this.shadowRoot.appendChild(memberGhost);
           if (!isQuadrant) tileEl.classList.add('dragging');
@@ -10051,8 +10318,8 @@
       } else {
         ghost = document.createElement('div');
         ghost.className = 'wall-drag-ghost';
-        ghost.style.width  = `${dims.width}px`;
-        ghost.style.height = `${dims.height}px`;
+        ghost.style.width  = `${dims.width * this._wallZoom}px`;
+        ghost.style.height = `${dims.height * this._wallZoom}px`;
         ghost.textContent = frame.title;
         this.shadowRoot.appendChild(ghost);
       }

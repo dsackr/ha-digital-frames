@@ -39,16 +39,17 @@ CONF_FAST_POLL_WHEN_QUEUED = "fast_poll_when_queued"
 DEFAULT_FAST_POLL_WHEN_QUEUED = False
 
 # Spectra 6 color pipeline: "fast" (Floyd-Steinberg against measured
-# real-world panel colors, near-instant) or "vivid" (opt-in -- Fraimic's own
+# real-world panel colors, near-instant) or "vivid" (Fraimic's own
 # reference-converter approach: enhance chain + Atkinson dither against
 # idealized primaries, ~1-3s/image on dev hardware, more on weaker boxes
 # like HA Green -- see image_converter.py's "Vivid color pipeline" section
 # and docs/KEY_PRODUCT_FLOWS.md KPF 7). Per-frame so mixed hardware setups
-# can choose per panel; never auto-enabled.
+# can still opt a specific panel back to "fast" if it's too slow; "vivid" is
+# the default for every Fraimic frame as of 2026-08-12.
 CONF_COLOR_PIPELINE = "color_pipeline"
 COLOR_PIPELINE_FAST = "fast"
 COLOR_PIPELINE_VIVID = "vivid"
-DEFAULT_COLOR_PIPELINE = COLOR_PIPELINE_FAST
+DEFAULT_COLOR_PIPELINE = COLOR_PIPELINE_VIVID
 
 DEFAULT_PORT = 80
 

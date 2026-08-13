@@ -241,6 +241,8 @@ class SkillManager:
         # Tracking the in-flight Task (not just its eventual result) lets
         # every caller after the first await the same render.
         self._wall_canvas_renders: dict[tuple[Any, ...], "asyncio.Task"] = {}
+        # (provider, date_str) -> in-flight feed fetch Task
+        self._in_flight_feed_fetches: dict[tuple[str, str], "asyncio.Task[str]"] = {}
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
@@ -965,6 +967,24 @@ class SkillManager:
 
     async def _async_fetch_image_feed(self, skill: Skill) -> str:
         provider = skill.config.get("feed_provider")
+        today_str = dt_util.now().strftime("%Y-%m-%d")
+        key = (str(provider), today_str)
+
+        if key in self._in_flight_feed_fetches:
+            return await self._in_flight_feed_fetches[key]
+
+        async def _do_fetch() -> str:
+            try:
+                return await self._async_fetch_image_feed_uncached(skill)
+            finally:
+                self._in_flight_feed_fetches.pop(key, None)
+
+        task = asyncio.create_task(_do_fetch())
+        self._in_flight_feed_fetches[key] = task
+        return await task
+
+    async def _async_fetch_image_feed_uncached(self, skill: Skill) -> str:
+        provider = skill.config.get("feed_provider")
         session = async_get_clientsession(self.hass)
         today = dt_util.now()
 
@@ -1022,6 +1042,16 @@ class SkillManager:
             else:
                 raise SkillError(f"Unknown feed_provider: {provider!r}")
 
+            # Reuse today's feed image if already saved in the Image of the Day album
+            existing_images = await self._library.async_list_images()
+            for img in existing_images:
+                albums = img.get("albums") if isinstance(img, dict) else getattr(img, "albums", [])
+                img_filename = img.get("filename") if isinstance(img, dict) else getattr(img, "filename", None)
+                if _IMAGE_OTD_ALBUM in (albums or []) and img_filename == filename:
+                    image_id = img.get("image_id") if isinstance(img, dict) else getattr(img, "image_id", None)
+                    if image_id:
+                        return image_id
+
             async with session.get(image_url, timeout=_DOWNLOAD_TIMEOUT) as resp:
                 if resp.status != 200:
                     raise SkillError(f"HTTP {resp.status} downloading image")
@@ -1032,7 +1062,9 @@ class SkillManager:
         record = await self._library.async_upload(
             filename, image_bytes, albums=[_IMAGE_OTD_ALBUM]
         )
-        return record["image_id"]
+        if isinstance(record, dict):
+            return record["image_id"]
+        return getattr(record, "image_id")
 
     async def _async_pick_image_album(self, skill: Skill, entry: "ConfigEntry") -> str:
         album = skill.config.get("album")

@@ -238,6 +238,41 @@ async def test_auto_layout_wraps_to_new_row_after_max_per_row(
     assert fifth_pos["y"] > first_pos["y"]
 
 
+async def test_auto_layout_row_height_accounts_for_physically_tall_panels(
+    hass, wall_manager, make_frame_entry
+):
+    """A 31.5" panel (physically ~2.4x taller on-canvas than the 13.3"
+    reference _CELL was sized for) auto-placed in row 0 must push row 1
+    down by its real height, not the old fixed _CELL -- otherwise row 1's
+    tiles land overlapping its bottom half. Regression for the bug
+    introduced when tile_dims() started scaling to true physical size
+    (KPF 19): row spacing was never updated to match."""
+    row0 = [
+        make_frame_entry(
+            entry_id=f"entry-{i}",
+            host=f"192.168.1.{50+i}",
+            size="31.5" if i == 0 else "13.3",
+            width=1440,
+            height=2560,
+        ) if i == 0 else make_frame_entry(entry_id=f"entry-{i}", host=f"192.168.1.{50+i}")
+        for i in range(4)
+    ]
+    for entry in row0:
+        entry.add_to_hass(hass)
+    await wall_manager.async_ensure_default_wall()
+
+    fifth = make_frame_entry(entry_id="entry-4", host="192.168.1.99")
+    fifth.add_to_hass(hass)
+    await wall_manager.async_ensure_placement(fifth)
+
+    default_wall = await wall_manager.async_get_wall(DEFAULT_WALL_ID)
+    tall_pos = default_wall.placements["entry-0"]
+    tall_height = tile_dims(row0[0])[1]
+    next_row_pos = default_wall.placements["entry-4"]
+
+    assert next_row_pos["y"] >= tall_pos["y"] + tall_height
+
+
 async def test_auto_layout_does_not_overlap_after_removing_and_readding_a_frame(
     hass, wall_manager, make_frame_entry
 ):

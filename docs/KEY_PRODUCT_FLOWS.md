@@ -425,10 +425,22 @@ benchmarked and shipped separately:
   pixels that are visually indistinguishable after dithering) cut that to
   ~1.2s / ~2.3s — still roughly two orders of magnitude slower than
   Floyd-Steinberg's ~0.03-0.05s, and real HA hardware (HA Green-class boxes
-  especially) will likely be worse. This part stays opt-in via
-  `CONF_COLOR_PIPELINE` (`fast` default | `vivid`), **per-frame** (not
-  global) since mixed-hardware setups may want it on for a capable box and
-  off for a weaker one, and **never on the default path**.
+  especially) will likely be worse. Selected via `CONF_COLOR_PIPELINE`
+  (`fast` | `vivid`), **per-frame** (not global) since mixed-hardware
+  setups may want a capable box on vivid and a weaker one on fast.
+
+**2026-08-12: "vivid" made the default for every Fraimic frame**
+(`const.DEFAULT_COLOR_PIPELINE`), reversing the "never on the default
+path" stance above — a deliberate product decision, not a re-run of the
+cp2/cp3 mistake: the enhance chain was already default-path and cheap: the
+one part being flipped here is the ~1.2-2.3s/image (dev hardware) Atkinson
+dither. Per-frame `CONF_COLOR_PIPELINE` is unchanged and still lets any
+individual frame opt back to `fast` if vivid is too slow on its hardware —
+this only changes what an unset option resolves to. `library.py`'s
+no-config-entry fallback (legacy call sites with no frame to resolve an
+option from) now also resolves through `DEFAULT_COLOR_PIPELINE` instead of
+a hardcoded `"fast"`, so it can't silently diverge from the product
+default.
 
 Library `.bin` caching keys vivid renders under a distinct codec-id suffix
 (`library._cache_codec_id`, e.g. `spectra6_split_half_vivid`) so flipping
@@ -503,12 +515,14 @@ renderer — see KPF 28/29).
   `tests/python/unit/test_panel_codec.py` (`encode_for_panel` default/opt-in
   parity, positional-arg plumbing to the packer, no-op for JPEG/PNG codecs),
   `tests/python/config_flow/test_config_flow_options.py` (field present +
-  defaults to fast for Spectra frames, reflects a saved vivid choice, hidden
-  for Samsung), `tests/python/library/test_library_crop_albums_backfill.py`
+  defaults to **vivid** for Spectra frames as of 2026-08-12, reflects a
+  saved fast/vivid choice, hidden for Samsung),
+  `tests/python/library/test_library_crop_albums_backfill.py`
   (fast/vivid cached under distinct codec-id suffixes, a second vivid call
   hits cache instead of re-encoding, pipeline resolved from the frame's own
-  config-entry option vs. defaulting to fast when no entry is available,
-  backfill writes into the frame's configured pipeline's cache slot). Panel
+  config-entry option vs. `DEFAULT_COLOR_PIPELINE` when no entry is
+  available, backfill writes into the frame's configured pipeline's cache
+  slot). Panel
   rendering of the new options-flow field verified via the existing generic
   suites (`flow-renderer.spec.js`, `frame-manage.spec.js`) — no dedicated
   panel test needed since the form renderer is schema-driven.
@@ -869,6 +883,24 @@ An "Align Wall to Grid" option allows users to snap all
 placed frames on a wall to a clean structured layout. When aligning selected
 frames, if they would overlap each other, they are automatically spaced out
 along the other axis rather than producing a collision error.
+
+**Canvas zoom and pan** (2026-08-12, view-only -- never saved with the
+layout): `+`/`−`/Reset buttons and Ctrl/Cmd+scroll-wheel (zoomed centered
+on the cursor) zoom the canvas 25%-250%. Panning is spacebar+left-drag,
+middle-mouse-button drag, or a two-finger touch drag on tablets --
+deliberately not plain left-drag on empty canvas, which already means
+rubber-band multi-select. A two-finger touch drag starting mid-single-
+finger-drag (one finger already down on a tile) cancels that drag/marquee
+outright and takes over as a pan, rather than letting both interpretations
+run at once. Implemented as a `transform: scale()` on `.wall-zoom-layer`
+(the sole child of `#wall-canvas`, holding every tile/marquee/wallpaper
+background) so tile/marquee/wallpaper-pan positioning code stays in the
+same logical wall-canvas px it always used; only the screen-to-logical
+conversion boundary (`_wallToLogical`, and `_wallSnapCandidate`'s tile-drag
+delta branch) had to learn to divide by the current zoom. The floating drag
+ghost (which lives outside the zoomed layer, in raw screen space, so it
+tracks the cursor 1:1) is sized by zoom at creation so it still visually
+matches the tile it's about to place.
 A tile's on-canvas size is scaled to the frame's true physical size
 (`tile_dims`/`_wallTileDims`, using `CONF_SIZE`'s diagonal-inch label plus
 the resolution's aspect ratio), not just its pixel resolution — a 31.5"
@@ -886,7 +918,7 @@ formula, which is also what every frame got before this fix — so an
 all-13.3"/default-resolution wall renders pixel identical to before.
 - **Entry points**: `walls.py` (`WallManager.async_save_wall`,
   `async_ensure_default_wall`, `async_ensure_placement`, `async_prune_entry`, `tile_dims`), `walls_http.py`,
-  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_setActiveWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`, `_wallTileDims`).
+  `digital-frames-panel.js` (`_renderWallStrip`, `_openWall`, `_setActiveWall`, `_alignWallSelection`, `_alignWallToGrid`, `_openFrameSettingsMenu`, `_openFrameConfigureFlow`, `_onWallPointerUp`, `_checkDefaultWallModified`, `_updateWallOfferBanner`, `_saveAsCustomWall`, `_wallTileDims`, `_wallZoomLayer`, `_wallToLogical`, `_wallSetZoom`/`_wallZoomStep`/`_wallZoomReset`, `_onWallWheel`, `_wallMaybeBeginPan`/`_wallBeginPan`/`_onWallPanPointerMove`/`_onWallPanPointerUp`, `_onWallSpaceKeydown`/`_onWallSpaceKeyup`).
 - **If it silently breaks**: removed/re-added frames haunt old layouts,
   the default wall stops tracking newly-added frames, mixed-frame-type
   walls render every frame at the same size regardless of physical
@@ -921,6 +953,30 @@ all-13.3"/default-resolution wall renders pixel identical to before.
   copy and missed on the other, reintroducing the exact leak class this
   review just fixed. `_onWallPointerUp` now calls
   `_wallCancelInProgressDrag()` instead of duplicating its body.
+  A real bug reported 2026-08-12: since `tile_dims()`/`_wallTileDims`
+  started scaling tiles to a panel's true physical size (the fix above),
+  two independent row-layout paths could overlap tiles, both assuming a
+  fixed row height that was only ever true when every tile's longest edge
+  was independently normalized to the same 140px target:
+  1. Server-side auto-placement onto the default wall (`_append_placement`'s
+     `_CELL`, a fixed 160px) — a 31.5" panel renders ~2.4x that tall
+     (~332-360px on canvas), so it silently overflowed into the next
+     auto-placed row. Fixed by `WallManager._row_y`, which computes each
+     row's start from the *actual* max tile height of every earlier row.
+  2. The panel's own "Align Wall to Grid" button (`_alignWallToGrid`'s
+     `CELL_HEIGHT`, the same fixed 160px, independently duplicated
+     client-side) — meaning clicking it did not resolve an existing
+     overlap involving a physically tall panel, the opposite of what the
+     button is for. Fixed the same way: row height now comes from
+     `_wallTileDims` on each row's actual occupants.
+  Manual dragging was never affected by either bug (`_wallCollidesAt`/
+  `_wallCollidingNeighbor` already check real `tile_dims` for both single-
+  and group-tile drops) — nor was the multi-select align toolbar's own
+  auto-spacing (`_alignWallSelection`, which already used `_wallTileDims`).
+  A wall with rows placed by the *unfixed* `_append_placement` before this
+  landed isn't retroactively repositioned by loading it — the user must
+  click "Align Wall to Grid" (now itself fixed) or drag tiles apart
+  manually.
 - **Test status**: Extensively panel-tested (`walls-drag.spec.js` —
   including a second pointerdown before the first drag ends no longer
   leaking a ghost element, a failed begin-drag with a stale entryId no
@@ -933,6 +989,18 @@ all-13.3"/default-resolution wall renders pixel identical to before.
   "Save as Custom Wall" inline offer banner),
   `walls-multiselect.spec.js` — including
   alignment auto-spacing and Align Wall to Grid logic,
+  `walls-align-grid-tall-panel.spec.js` (a 31.5" panel auto-placed in row 0
+  of a 5-frame default wall: Align Wall to Grid's next row lands at/below
+  its real bottom edge, and no pair of tiles overlaps afterward — confirmed
+  to fail pre-fix, landing row 1 inside the tall tile's bounds),
+  `walls-zoom-pan.spec.js` (zoom buttons step/clamp 25%-250% and update the
+  `.wall-zoom-layer` transform + label; Ctrl/Cmd+wheel zooms, plain wheel
+  doesn't; spacebar+left-drag and middle-click-drag both pan `scrollLeft`/
+  `scrollTop` without moving a tile, changing selection, or leaving a
+  marquee box behind; a synthetic two-finger touch drag pans and tears down
+  the single-finger tile-drag/ghost the first touch had already started,
+  confirmed via disabling the pan-trigger condition and re-running to see
+  exactly those cases fail),
   `walls-flow.spec.js`, `walls-scenes-merge.spec.js`,
   `walls-send-and-offwall.spec.js`, `walls-image-picker.spec.js`,
   `walls-addon-album-lock.spec.js`) — but these exercise the frontend
@@ -941,6 +1009,10 @@ all-13.3"/default-resolution wall renders pixel identical to before.
   CRUD, default-wall auto-sync, clearing/ignoring exclusions, default-wall save
   preserving omitted placements, entry removal pruning, auto-layout collision math,
   no placement overlap after removing and re-adding a frame around a full row boundary,
+  auto-layout row height accounts for a physically tall (31.5") panel in an
+  earlier row so the next auto-placed row starts below its real bottom edge
+  instead of the old fixed `_CELL` (confirmed to fail pre-fix: the next row
+  landed inside the tall tile's bounds),
   `tile_dims`'s physical-scale sizing — the 13.3"/1200x1600 reference frame
   pinned to its exact pre-fix pixel size, a 31.5" panel rendering visibly
   larger than a 13.3" one, `"13.3_clone"` scaling identically to `"13.3"`,
@@ -1144,10 +1216,10 @@ handle both dictionary-style and string-style calendar event start/end times
 to support different HA versions. Both paths use
 `text_skill_payload_for_codec` for Spectra vs Meural JPEG.
 Image modes resolve to a library image_id (feeds upload the fetched photo
-into the library first) and use the normal library codec path.
+into the library first, reusing the existing image if already downloaded for today or currently fetching in-flight) and use the normal library codec path.
 - **Entry points**: `skills.py` (`SkillManager.async_save_skill` /
   `async_render_for_entry` / `_async_render_text` / `_async_render_agenda` /
-  `_async_fetch_image_feed` / `_async_pick_image_album`), `ai_enhancer.py`
+  `_async_fetch_image_feed` / `_async_fetch_image_feed_uncached` / `_async_pick_image_album`), `ai_enhancer.py`
   (`async_generate_ai_enhanced_image`, `build_ai_prompt`, `has_ai_image_service`),
   `const.py` (`AGENDA_RENDERER_PINNED_BASE`),
   `panel_codec.py` (`text_skill_payload_for_codec`),
@@ -1188,15 +1260,22 @@ into the library first) and use the normal library codec path.
   bytes. The decode+rotate step itself was also factored into one shared
   helper (`_decode_and_rotate`) reused by both the JPEG/PNG branch and the
   Spectra rotate branch, replacing two separately-written copies of the
-  same "unpack bin, then conditionally rotate" sequence.
+  same "unpack bin, then conditionally rotate" sequence. Another real bug
+  (GH #23, reported 2026-08-13): fetching an Image of the Day (`image_feed`
+  mode) scheduled across multiple frames downloaded and saved duplicate copies
+  of the daily image to the `Image of the Day` library album for every frame.
+  Fixed so `_async_fetch_image_feed_uncached` checks whether today's feed image
+  is already present in the `Image of the Day` album before downloading, and
+  `_async_fetch_image_feed` deduplicates concurrent in-flight fetches across frames.
 - **Test status**: **Backend-tested** —
   `tests/python/managers/test_skills.py` (CRUD, per-mode render dispatch,
-  feed fetch/upload, subprocess lifecycle + cleanup, preview-PNG
-  generation with graceful degradation, Meural JPEG re-encode from
-  text-skill bin, Samsung PNG re-encode from text-skill bin never falls
-  through to raw Spectra bytes, a rotation-locked Spectra frame with a
-  malformed renderer bin raises `SkillError` instead of silently sending
-  the un-rotated bin),
+  feed fetch/upload, deduplicating image feed downloads and album uploads
+  when scheduled/rendered across multiple frames, in-flight fetch deduplication,
+  subprocess lifecycle + cleanup, preview-PNG generation with graceful degradation,
+  Meural JPEG re-encode from text-skill bin, Samsung PNG re-encode from
+  text-skill bin never falls through to raw Spectra bytes, a rotation-locked
+  Spectra frame with a malformed renderer bin raises `SkillError` instead of
+  silently sending the un-rotated bin),
   `tests/python/managers/test_live_quick_setup.py` (daily schedule create,
   on_demand_only, missing skill),
   `tests/python/managers/test_scenes.py` (bin renders thread their

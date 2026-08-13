@@ -801,8 +801,8 @@ class DigitalFramesOptionsFlow(OptionsFlow):
         # for them.
         is_samsung = self.config_entry.data.get(CONF_DRIVER) == DRIVER_SAMSUNG
         color_pipeline_options = {
-            COLOR_PIPELINE_FAST: "Fast (Floyd-Steinberg, default)",
-            COLOR_PIPELINE_VIVID: "Vivid (Fraimic-style Atkinson, slower)",
+            COLOR_PIPELINE_FAST: "Fast (Floyd-Steinberg, quicker)",
+            COLOR_PIPELINE_VIVID: "Vivid (Fraimic-style Atkinson, default)",
         }
 
         schema_dict: dict[Any, Any] = {}

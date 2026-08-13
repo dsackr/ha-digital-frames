@@ -84,13 +84,13 @@ async def test_clone_size_does_not_default_landscape_flip_on(hass, make_frame_en
     assert defaults[CONF_ROTATE_LANDSCAPE_180] is False
 
 
-async def test_color_pipeline_field_defaults_to_fast_for_spectra_frame(
+async def test_color_pipeline_field_defaults_to_vivid_for_spectra_frame(
     hass, make_frame_entry
 ):
-    """CONF_COLOR_PIPELINE (KPF 7's opt-in Fraimic-style Atkinson pipeline)
-    must be offered for a plain Spectra frame and default to "fast" when
-    never saved -- omitting the option must never silently opt a frame into
-    the slower pipeline."""
+    """CONF_COLOR_PIPELINE (KPF 7's Fraimic-style Atkinson pipeline) must be
+    offered for a plain Spectra frame and default to "vivid" when never
+    saved -- vivid is the product default for every Fraimic frame as of
+    2026-08-12; a frame on weak hardware opts back to "fast" explicitly."""
     entry = make_frame_entry(size="13.3")
     entry.add_to_hass(hass)
 
@@ -101,7 +101,7 @@ async def test_color_pipeline_field_defaults_to_fast_for_spectra_frame(
     defaults = {
         str(k): k.default() for k in schema if getattr(k, "default", None) is not None
     }
-    assert defaults[CONF_COLOR_PIPELINE] == "fast"
+    assert defaults[CONF_COLOR_PIPELINE] == "vivid"
 
 
 async def test_color_pipeline_field_reflects_saved_vivid_choice(hass, make_frame_entry):

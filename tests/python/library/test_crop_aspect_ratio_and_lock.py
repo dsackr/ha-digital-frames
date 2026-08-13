@@ -98,7 +98,7 @@ async def test_unlocked_frame_natural_orientation_selection(hass, library_manage
     from custom_components.digital_frames.frame_types import CODEC_SPECTRA6_SPLIT_HALF
     from custom_components.digital_frames.library import _cache_codec_id
     cached = await library_manager._backend.async_get_bin(
-        image_id, 1600, 1200, "_r90_c", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+        image_id, 1600, 1200, "_r90_c", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "vivid")
     )
     assert cached is not None
 
@@ -108,6 +108,6 @@ async def test_unlocked_frame_natural_orientation_selection(hass, library_manage
     # Send to unlocked portrait frame
     bin_bytes2 = await library_manager.async_get_bin_for_send(image_id2, spec)
     cached2 = await library_manager._backend.async_get_bin(
-        image_id2, 1600, 1200, "_r90_c", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "fast")
+        image_id2, 1600, 1200, "_r90_c", _cache_codec_id(CODEC_SPECTRA6_SPLIT_HALF, "vivid")
     )
     assert cached2 is not None

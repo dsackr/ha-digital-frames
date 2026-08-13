@@ -66,9 +66,10 @@ Conversion pipeline
 4. Optionally rotate the finished canvas (90/180/270) -- used for frames
    physically hung in their non-native orientation and/or upside down
 5. Quantize to the 6 Spectra 6 real-world colors using Floyd-Steinberg
-   dithering (default) -- or, opt-in via CONF_COLOR_PIPELINE="vivid", the
-   "vivid" pipeline: see "Vivid color pipeline" below and
-   docs/KEY_PRODUCT_FLOWS.md KPF 7.
+   dithering (this module's own default when color_pipeline is omitted) --
+   or the "vivid" pipeline (CONF_COLOR_PIPELINE="vivid", the default for
+   every configured Fraimic frame unless a frame opts back to "fast"): see
+   "Vivid color pipeline" below and docs/KEY_PRODUCT_FLOWS.md KPF 7.
 6. Pack pixels into the nibble format described above, using the byte
    ordering that matches the final resolution's physical panel
 """
@@ -155,8 +156,12 @@ FAST_PIPELINE_CACHE_VERSION = "2"
 # - The idealized-primary Atkinson dither (_quantize_vivid_p) is roughly two
 #   orders of magnitude slower than Floyd-Steinberg (seconds, not
 #   milliseconds, per image -- worse on weaker hardware and during a
-#   library-wide backfill), so it stays opt-in via CONF_COLOR_PIPELINE,
-#   never the default.
+#   library-wide backfill), so it's selected per-frame via
+#   CONF_COLOR_PIPELINE (const.DEFAULT_COLOR_PIPELINE) rather than forced on
+#   every panel regardless of hardware. As of 2026-08-12 it IS the default
+#   for every configured Fraimic frame (a deliberate product decision,
+#   revisiting the "never the default" stance below) -- a frame on weak
+#   hardware can still opt back to "fast" in its options.
 #
 # 2026-07-30 history: an earlier attempt (commits 9679ec5/24367e1, "cp2"/
 # "cp3") shipped a very similar Atkinson port as the new *default* pipeline
@@ -1041,11 +1046,14 @@ def _process(
     the A/B switches can be removed in a future release.
 
     color_pipeline selects the quantizer/dither: COLOR_PIPELINE_FAST
-    (default, Floyd-Steinberg against measured real-world panel colors) or
-    COLOR_PIPELINE_VIVID (opt-in, idealized-primary Atkinson dither -- see
-    the module docstring above _quantize_vivid_p, meaningfully slower,
-    never the default). Both pipelines share the same pre-quantize enhance
-    chain (_enhance_for_panel) -- it's cheap enough to always run."""
+    (this function's own default when the arg is omitted --
+    Floyd-Steinberg against measured real-world panel colors) or
+    COLOR_PIPELINE_VIVID (idealized-primary Atkinson dither -- see the
+    module docstring above _quantize_vivid_p, meaningfully slower; callers
+    resolving a configured frame's choice use const.DEFAULT_COLOR_PIPELINE,
+    which is "vivid" as of 2026-08-12, not this parameter's own default).
+    Both pipelines share the same pre-quantize enhance chain
+    (_enhance_for_panel) -- it's cheap enough to always run."""
     if not locked:
         # The Fraimic way: a mismatched image lies sideways at full size.
         image = _auto_rotate(image, width, height)

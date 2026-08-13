@@ -61,6 +61,7 @@ class _FakeLibrary:
     async def async_upload(self, filename, raw_bytes, albums=None):
         record = {"image_id": f"uploaded_{len(self.uploads)}", "filename": filename, "albums": list(albums or [])}
         self.uploads.append(record)
+        self.images.append(record)
         return record
 
 
@@ -309,6 +310,68 @@ async def test_image_feed_non_image_apod_raises(
     with pytest.raises(SkillError, match="not an image"):
         await skill_manager.async_render_for_entry(created["skill_id"], entry)
     assert fake_library.uploads == []
+
+
+async def test_image_feed_deduplicates_downloads_when_already_in_library(
+    hass, skill_manager, fake_library, make_frame_entry, aioclient_mock
+):
+    entry1 = make_frame_entry(entry_id="e1")
+    entry1.add_to_hass(hass)
+    entry2 = make_frame_entry(entry_id="e2")
+    entry2.add_to_hass(hass)
+
+    aioclient_mock.get(
+        "https://api.nasa.gov/planetary/apod",
+        json={"media_type": "image", "url": "https://example.com/apod.jpg", "date": "2026-01-01"},
+    )
+    aioclient_mock.get("https://example.com/apod.jpg", content=b"fake-jpeg-bytes")
+
+    await skill_manager.async_load()
+    created = await skill_manager.async_save_skill(
+        "APOD", "image_feed", {"feed_provider": "nasa_apod"}
+    )
+
+    # First frame fetch: downloads and uploads image to library album
+    res1 = await skill_manager.async_render_for_entry(created["skill_id"], entry1)
+    assert res1["kind"] == "image_id"
+    assert len(fake_library.uploads) == 1
+    image_id_1 = res1["image_id"]
+
+    # Second frame fetch: reuses the image already in the library album without re-uploading
+    res2 = await skill_manager.async_render_for_entry(created["skill_id"], entry2)
+    assert res2["kind"] == "image_id"
+    assert res2["image_id"] == image_id_1
+    assert len(fake_library.uploads) == 1
+
+
+async def test_image_feed_concurrent_renders_deduplicate_in_flight_fetches(
+    hass, skill_manager, fake_library, make_frame_entry, aioclient_mock
+):
+    entry1 = make_frame_entry(entry_id="e1")
+    entry1.add_to_hass(hass)
+    entry2 = make_frame_entry(entry_id="e2")
+    entry2.add_to_hass(hass)
+
+    aioclient_mock.get(
+        "https://api.nasa.gov/planetary/apod",
+        json={"media_type": "image", "url": "https://example.com/apod.jpg", "date": "2026-01-01"},
+    )
+    aioclient_mock.get("https://example.com/apod.jpg", content=b"fake-jpeg-bytes")
+
+    await skill_manager.async_load()
+    created = await skill_manager.async_save_skill(
+        "APOD", "image_feed", {"feed_provider": "nasa_apod"}
+    )
+
+    # Render for entry1 and entry2 concurrently
+    res1, res2 = await asyncio.gather(
+        skill_manager.async_render_for_entry(created["skill_id"], entry1),
+        skill_manager.async_render_for_entry(created["skill_id"], entry2),
+    )
+    assert res1["kind"] == "image_id"
+    assert res2["kind"] == "image_id"
+    assert res1["image_id"] == res2["image_id"]
+    assert len(fake_library.uploads) == 1
 
 
 # ---------------------------------------------------------------------------

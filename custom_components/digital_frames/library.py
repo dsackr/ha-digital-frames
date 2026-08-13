@@ -168,9 +168,10 @@ _VIVID_CACHE_SUFFIX = "_vivid"
 
 
 def _color_pipeline_for_entry(entry: "ConfigEntry") -> str:
-    """CONF_COLOR_PIPELINE for *entry*, defaulting to fast. JPEG/PNG driver
-    entries (Meural/Samsung) never dither, so this is meaningless for them,
-    but reading it is harmless -- callers only apply it for Spectra codecs."""
+    """CONF_COLOR_PIPELINE for *entry*, defaulting to DEFAULT_COLOR_PIPELINE
+    (vivid). JPEG/PNG driver entries (Meural/Samsung) never dither, so this
+    is meaningless for them, but reading it is harmless -- callers only
+    apply it for Spectra codecs."""
     return entry.options.get(CONF_COLOR_PIPELINE, DEFAULT_COLOR_PIPELINE)
 
 
@@ -2190,10 +2191,11 @@ class LibraryManager:
         ``panel_codec_for_entry(entry).id`` so size-based codec wins over
         geometry alone.
 
-        color_pipeline ("fast" default | "vivid", CONF_COLOR_PIPELINE) picks
+        color_pipeline ("fast" | "vivid" default, CONF_COLOR_PIPELINE) picks
         the Spectra quantizer -- see image_converter.py and KPF 7. When
-        omitted, resolved from *entry*'s options (fast if no entry, e.g.
-        legacy call sites with no config-entry context). Vivid renders are
+        omitted, resolved from *entry*'s options (DEFAULT_COLOR_PIPELINE if
+        no entry, e.g. legacy call sites with no config-entry context).
+        Vivid renders are
         cached under a distinct codec-id suffix (see _cache_codec_id) so
         flipping the option never serves a stale bin from the other
         pipeline.
@@ -2279,7 +2281,9 @@ class LibraryManager:
 
         if color_pipeline is None:
             color_pipeline = (
-                _color_pipeline_for_entry(entry) if entry is not None else "fast"
+                _color_pipeline_for_entry(entry)
+                if entry is not None
+                else DEFAULT_COLOR_PIPELINE
             )
         cache_codec_id = _cache_codec_id(codec_id, color_pipeline)
 
