@@ -2864,6 +2864,23 @@
       if (libraryBtn) libraryBtn.addEventListener('click', () => this._openLibraryModal());
       const composeMessageBtn = this.shadowRoot.getElementById('compose-message-btn');
       if (composeMessageBtn) composeMessageBtn.addEventListener('click', () => this._openMessageComposeModal());
+
+      const createWidgetBtn = this.shadowRoot.getElementById('create-widget-btn');
+      if (createWidgetBtn) createWidgetBtn.addEventListener('click', () => this._openWidgetTypeModal());
+
+      const openCalFromWidgetsBtn = this.shadowRoot.getElementById('open-calendar-from-widgets-btn');
+      if (openCalFromWidgetsBtn) openCalFromWidgetsBtn.addEventListener('click', () => this._openScheduleCalendar());
+
+      const widgetTypeClose = this.shadowRoot.getElementById('widget-type-modal-close');
+      if (widgetTypeClose) widgetTypeClose.addEventListener('click', () => this._closeWidgetTypeModal());
+
+      const widgetTypeOverlay = this.shadowRoot.getElementById('widget-type-modal-overlay');
+      if (widgetTypeOverlay) {
+        widgetTypeOverlay.addEventListener('click', (e) => {
+          if (e.target === widgetTypeOverlay) this._closeWidgetTypeModal();
+        });
+      }
+
       this._renderXotdModeTiles();
       const gallerySearch = this.shadowRoot.getElementById('gallery-search');
       if (gallerySearch) {
@@ -2935,6 +2952,7 @@
       }
       if (name === 'widgets') {
         this._renderXotdModeTiles();
+        this._loadSchedules().then(() => this._renderActiveSchedulesSection());
         this._loadXotdInstances().then(() => this._renderXotdInstances());
       }
       if (name === 'walls') {
@@ -3130,21 +3148,39 @@
 
         <div class="tab-content" id="tab-widgets">
           <div class="lib-toolbar">
-            <h3 style="margin:0;flex:1 1 auto">⚙ Widgets</h3>
+            <h3 style="margin:0;flex:1 1 auto">⚙ Widgets & Schedules</h3>
             <div class="lib-toolbar-actions">
-              <button class="btn-primary" id="compose-message-btn" style="flex:0 0 auto">✉ Compose Message</button>
+              <button class="btn-primary" id="create-widget-btn" style="flex:0 0 auto">+ Create New Widget</button>
+              <button class="btn-ghost" id="compose-message-btn" style="flex:0 0 auto">✉ Compose Message</button>
             </div>
           </div>
-          <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 12px">
-            Your configured widgets. Edit one to change options (for newspaper: topics + news sources),
-            or create a new type from the tiles below.
+          <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 16px">
+            Configure dynamic content generators (Newspaper, Agenda, Quotes) and manage active frame schedules.
           </p>
-          <div class="xotd-mode-grid" id="xotd-mode-grid-widgets" style="margin-bottom:18px"></div>
           <div class="feedback" id="xotd-fb"></div>
-          <div class="lib-grid skill-grid" id="xotd-grid">
-            <div class="empty">
-              <div class="empty-icon">⋯</div>
-              <h2>Loading widgets…</h2>
+
+          <!-- Section 1: Active Schedules & Frame Deployments -->
+          <div class="addons-section" style="margin-bottom:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <h2 class="addons-section-title" style="margin:0">🟢 Active Schedules & Frame Deployments</h2>
+              <button class="btn-ghost" id="open-calendar-from-widgets-btn" style="flex:0 0 auto">📅 Calendar View</button>
+            </div>
+            <div id="active-schedules-list" class="schedule-list" style="display:flex;flex-direction:column;gap:8px">
+              <div class="empty" style="padding:16px;text-align:center">
+                <div class="empty-icon">⏰</div>
+                <h2 style="font-size:14px;margin:4px 0">Loading active schedules…</h2>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: My Saved Widgets Library -->
+          <div class="addons-section">
+            <h2 class="addons-section-title" style="margin:0 0 12px">📦 My Saved Widgets</h2>
+            <div class="lib-grid skill-grid" id="xotd-grid">
+              <div class="empty">
+                <div class="empty-icon">⋯</div>
+                <h2>Loading widgets…</h2>
+              </div>
             </div>
           </div>
         </div><!-- /tab-widgets -->
@@ -3366,6 +3402,20 @@
              Drive / Dropbox), relocated from the old Library tab. The
              #backend-config contents are rendered by _renderBackendConfig,
              exactly as before -- only the markup's home moved. -->
+        <!-- Widget Type Selector Modal: launched from "+ Create New Widget" button -->
+        <div class="modal-overlay" id="widget-type-modal-overlay">
+          <div class="modal-box" style="max-width:600px">
+            <div class="modal-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <h3 style="margin:0;font-size:18px">Select Widget Type</h3>
+              <button type="button" class="btn-ghost" id="widget-type-modal-close" style="padding:4px 8px;font-size:16px">✕</button>
+            </div>
+            <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 16px">
+              Choose a widget generator type to configure and save as a custom preset.
+            </p>
+            <div class="xotd-mode-grid" id="xotd-mode-grid-widgets-modal"></div>
+          </div>
+        </div>
+
         <div class="modal-overlay" id="settings-modal-overlay">
           <div class="modal-box">
             <h3>⚙ Settings</h3>
@@ -11894,8 +11944,20 @@
       ];
     }
 
+    _openWidgetTypeModal() {
+      const overlay = this.shadowRoot.getElementById('widget-type-modal-overlay');
+      if (!overlay) return;
+      this._renderXotdModeTiles();
+      overlay.style.display = 'flex';
+    }
+
+    _closeWidgetTypeModal() {
+      const overlay = this.shadowRoot.getElementById('widget-type-modal-overlay');
+      if (overlay) overlay.style.display = 'none';
+    }
+
     _renderXotdModeTiles() {
-      for (const gridId of ['xotd-mode-grid', 'xotd-mode-grid-widgets']) {
+      for (const gridId of ['xotd-mode-grid', 'xotd-mode-grid-widgets', 'xotd-mode-grid-widgets-modal']) {
         const grid = this.shadowRoot.getElementById(gridId);
         if (!grid) continue;
         grid.innerHTML = '';
@@ -11963,8 +12025,111 @@
         <div class="xotd-mode-tile-title">${this._esc(this._xotdContentModeLabel(def.mode))}</div>
         <div class="xotd-mode-tile-desc">${this._esc(def.desc)}</div>
       `;
-      el.addEventListener('click', () => this._openXotdModal(null, def.mode));
+      el.addEventListener('click', () => {
+        this._closeWidgetTypeModal();
+        this._openXotdModal(null, def.mode);
+      });
       return el;
+    }
+
+    _renderActiveSchedulesSection() {
+      const container = this.shadowRoot.getElementById('active-schedules-list');
+      if (!container) return;
+      const schedules = this._schedules || [];
+      const frames = this._frames || [];
+
+      if (!schedules.length) {
+        container.innerHTML = `
+          <div class="empty" style="padding:16px;text-align:center">
+            <div class="empty-icon">⏰</div>
+            <h2 style="font-size:14px;margin:4px 0">No active schedules</h2>
+            <p style="font-size:12px;color:var(--secondary-text-color);margin:0">Schedule a widget or scene to run daily on any frame.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = '';
+      for (const s of schedules) {
+        const card = document.createElement('div');
+        card.className = 'card schedule-card-row';
+        card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;margin-bottom:8px;gap:12px;background:var(--paper-card-background-color,#202124);border:1px solid var(--border-color,rgba(255,255,255,0.1));border-radius:8px';
+
+        const sid = this._sid(s.schedule_id);
+        let targetName = 'Unknown Frame';
+        const targetEntryId = s.action && s.action.entry_ids ? s.action.entry_ids[0] : (s.action ? s.action.entry_id : null);
+        if (targetEntryId) {
+          const matchedFrame = frames.find(f => f.entryId === targetEntryId || f.entry_id === targetEntryId);
+          if (matchedFrame) targetName = matchedFrame.title;
+        }
+
+        const triggerStr = s.trigger ? (s.trigger.freq || s.trigger.type || 'schedule') : 'schedule';
+        const triggerTime = s.trigger && s.trigger.time ? s.trigger.time : '';
+        const timingText = triggerTime ? `${triggerStr} at ${triggerTime}` : triggerStr;
+
+        const isEnabled = s.enabled !== false;
+        const statusText = s.status === 'target_missing' ? 'Broken (Target Missing)' : (isEnabled ? 'Active' : 'Paused');
+        const statusClass = s.status === 'target_missing' ? 'err' : (isEnabled ? 'ok' : 'muted');
+
+        card.innerHTML = `
+          <div style="flex:1 1 auto;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+              <strong style="font-size:14px;color:var(--primary-text-color)">${this._esc(s.name || 'Schedule')}</strong>
+              <span style="font-size:12px;color:var(--secondary-text-color)">──> 🖼️ ${this._esc(targetName)}</span>
+              <span class="status-badge ${statusClass}" style="font-size:11px;padding:2px 6px;border-radius:4px;font-weight:500">${this._esc(statusText)}</span>
+            </div>
+            <div style="font-size:12px;color:var(--secondary-text-color)">
+              ⏰ ${this._esc(timingText)}${s.next_fire_at ? ' · Next run: ' + this._esc(s.next_fire_at.slice(0, 16).replace('T', ' ')) : ''}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex:0 0 auto">
+            <button type="button" class="btn-primary btn-sm" id="sched-run-${sid}">▶ Run Now</button>
+            <button type="button" class="btn-ghost btn-sm" id="sched-toggle-${sid}">${isEnabled ? '⏸️ Pause' : '▶ Resume'}</button>
+            <button type="button" class="btn-ghost btn-sm" id="sched-delete-${sid}">🗑️</button>
+          </div>
+        `;
+
+        card.querySelector(`#sched-run-${sid}`).addEventListener('click', async () => {
+          const btn = card.querySelector(`#sched-run-${sid}`);
+          btn.disabled = true;
+          const prev = btn.textContent;
+          btn.textContent = '⏳ …';
+          try {
+            if (s.action && s.action.type === 'skill' && s.action.skill_id && targetEntryId) {
+              const resp = await fetch(`/api/digital_frames/skills/${encodeURIComponent(s.action.skill_id)}/send`, {
+                method: 'POST',
+                headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entry_id: targetEntryId }),
+              });
+              const result = await resp.json().catch(() => ({}));
+              if (!resp.ok && !result.success) throw new Error(result.message || 'Send failed');
+            } else if (s.action && s.action.type === 'scene' && s.action.scene_id && targetEntryId) {
+              const resp = await fetch(`/api/digital_frames/scenes/${encodeURIComponent(s.action.scene_id)}/send`, {
+                method: 'POST',
+                headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entry_id: targetEntryId }),
+              });
+              const result = await resp.json().catch(() => ({}));
+              if (!resp.ok && !result.success) throw new Error(result.message || 'Send failed');
+            }
+          } catch (err) {
+            console.error('Schedule run failed:', err);
+          } finally {
+            btn.disabled = false;
+            btn.textContent = prev;
+          }
+        });
+
+        card.querySelector(`#sched-toggle-${sid}`).addEventListener('click', () => {
+          this._setScheduleEnabled(s, !isEnabled);
+        });
+
+        card.querySelector(`#sched-delete-${sid}`).addEventListener('click', () => {
+          this._deleteSchedule(s);
+        });
+
+        container.appendChild(card);
+      }
     }
 
 
@@ -12019,6 +12184,13 @@
       const sid = this._sid(skill.skill_id);
       const modeLabel = this._esc(this._xotdContentModeLabel(skill.content_mode));
 
+      const activeSchedCount = (this._schedules || []).filter(s =>
+        s.action && s.action.type === 'skill' && s.action.skill_id === skill.skill_id
+      ).length;
+      const schedBadge = activeSchedCount > 0
+        ? `<div style="font-size:11px;color:var(--primary-color,#03a9f4);margin-top:2px">✓ Active in ${activeSchedCount} schedule${activeSchedCount > 1 ? 's' : ''}</div>`
+        : '';
+
       const cfg = skill.config || {};
       let subLabel = '';
       if (skill.content_mode === 'image_album') {
@@ -12059,7 +12231,7 @@
           <button type="button" class="btn-ghost skill-delete-btn" id="xotd-delete-${sid}"
                   title="Delete this live content" aria-label="Delete ${this._esc(skill.name)}">🗑</button>
         </div>
-        <div class="scene-card-summary">${modeLabel}${subLabel ? ' · ' + subLabel : ''}</div>
+        <div class="scene-card-summary">${modeLabel}${subLabel ? ' · ' + subLabel : ''}${schedBadge}</div>
         <div class="modal-row" style="margin-top:10px">
           <select id="xotd-send-frame-${sid}" ${this._frames.length ? '' : 'disabled'}>
             ${this._frames.length ? frameOptions : '<option value="">No frames available</option>'}
@@ -12121,10 +12293,11 @@
           throw new Error(result.message || resp.statusText || `HTTP ${resp.status}`);
         }
         fb.className = 'feedback ok';
-        fb.textContent = `Scheduled daily at ${time}. Manage under Schedules.`;
+        fb.textContent = `Scheduled daily at ${time}.`;
         fb.style.display = 'block';
         if (typeof this._loadSchedules === 'function') {
           await this._loadSchedules();
+          if (typeof this._renderActiveSchedulesSection === 'function') this._renderActiveSchedulesSection();
           if (typeof this._renderSchedules === 'function') this._renderSchedules();
         }
       } catch (err) {
@@ -13726,6 +13899,7 @@
         fb.style.display = 'block';
       }
       await this._loadSchedules();
+      if (typeof this._renderActiveSchedulesSection === 'function') this._renderActiveSchedulesSection();
       this._renderScheduleCalendar();
     }
 
@@ -13746,6 +13920,7 @@
         fb.style.display = 'block';
       }
       await this._loadSchedules();
+      if (typeof this._renderActiveSchedulesSection === 'function') this._renderActiveSchedulesSection();
       this._renderScheduleCalendar();
     }
 

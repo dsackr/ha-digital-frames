@@ -1028,15 +1028,17 @@ one-shots fire late on restart; a deleted scene/image target degrades a
 schedule to "broken" instead of erroring at fire time.
 - **Entry points**: `schedules.py` (`ScheduleManager.async_create_schedule`,
   `_arm`, `_async_fire`, `_async_fire_missed`,
-  `async_handle_scene_deleted`, `next_fire_at`), `schedules_http.py`.
+  `async_handle_scene_deleted`, `next_fire_at`), `schedules_http.py`,
+  `digital-frames-panel.js` (`_renderActiveSchedulesSection`,
+  `_openScheduleCalendar`, `_setScheduleEnabled`, `_deleteSchedule`).
 - **If it silently breaks**: missed schedules never fire after an outage,
   or a schedule keeps trying to fire against a deleted target forever.
-- **Test status**: Panel-tested (`schedules.spec.js` — create/edit/toggle/
-  delete, weekly validation). **Backend-tested** —
-  `tests/python/managers/test_schedules.py` (trigger/action validation,
-  missed-once fires late, recurring fire re-resolves the scene at fire
-  time, target-deleted → target_missing + disabled, edit repairs a broken
-  schedule, `next_fire_at` math including monthly day-of-month clamping).
+- **Test status**: Panel-tested (`schedules.spec.js` — active schedules on
+  Widgets & Schedules tab, create/edit/toggle/delete, calendar launcher).
+  **Backend-tested** — `tests/python/managers/test_schedules.py` (trigger/
+  action validation, missed-once fires late, recurring fire re-resolves the
+  scene at fire time, target-deleted → target_missing + disabled, edit repairs
+  a broken schedule, `next_fire_at` math including monthly day-of-month clamping).
 
 ## 21. HA entities: sensors + Orientation select + Camera display
 Read-only device telemetry (battery/wifi/charging/firmware/IP/queued-on-deck), a per-frame Orientation control that persists into config entry options (supporting lock/unlock and follow-device settings), and a Camera entity representing the frame's dynamic canvas (active photo display).
@@ -1200,11 +1202,13 @@ across every visit to the Frames panel for the life of the browser tab.
   never calls `URL.createObjectURL` at all). Backend: not applicable.
 
 ## 28. Live content (skills / xOTD renderer): reusable content generators
-**(Content platform: Live tab — was "Daily Content / skills".)** User creates
-named presets (word/quote/joke/scripture of the day, image feeds like NASA
-APOD / Wikimedia POTD / Bing wallpaper, or random-from-album) and sends one
-to any frame — ad hoc ("Send Now" on the Live tab, the Lovelace card's Daily
-picker), staged into a scene via the wall picker, or on a schedule.
+**(Content platform: Widgets & Schedules tab — was "Daily Content / skills".)**
+User creates named presets (word/quote/joke/scripture of the day, image feeds
+like NASA APOD / Wikimedia POTD / Bing wallpaper, or random-from-album) and
+sends one to any frame — ad hoc ("Send Now" on the Widgets & Schedules tab, the
+Lovelace card's Daily picker), staged into a scene via the wall picker, or on a
+schedule. The tab surfaces active frame schedules on top, saved widget presets
+in the middle, and a `+ Create New Widget` button opening the type picker modal.
 **Quick setup (Phase 3):** each Live card has frame + time + "Schedule daily"
 which calls `POST /api/digital_frames/live/quick_setup` to create one daily
 recurring schedule per selected frame (does not clone the skill).
@@ -1225,8 +1229,8 @@ into the library first, reusing the existing image if already downloaded for tod
   `panel_codec.py` (`text_skill_payload_for_codec`),
   `skills_http.py` (CRUD + `DigitalFramesSkillSendView` +
   `DigitalFramesLiveQuickSetupView`), fan-out via
-  `scenes.py` (`async_send_mappings`), panel Live tab
-  (`_quickScheduleLive`, agenda mode tile + fields),
+  `scenes.py` (`async_send_mappings`), panel Widgets & Schedules tab
+  (`_openWidgetTypeModal`, `_renderActiveSchedulesSection`, `_quickScheduleLive`),
   `__init__.py` (`_async_migrate_agenda_widget`).
 - **If it silently breaks**: daily content stops arriving (schedules
   no-op), a skill renders blank/stale content, fan-out to several frames

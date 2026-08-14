@@ -392,4 +392,64 @@ test.describe('Skills ("Daily Content" tab)', () => {
       await mock.stop();
     }
   });
+
+  test('Widgets & Schedules tab renders active schedules section and + Create New Widget button modal', async ({ page }) => {
+    const mock = createMockServer({
+      frames: frames(),
+      scenePacks: [XOTD_PACK],
+      schedules: [
+        {
+          schedule_id: 'sched_1',
+          name: 'Morning Newspaper',
+          enabled: true,
+          action: { type: 'skill', skill_id: 'skill_1', entry_ids: ['entry_1'] },
+          trigger: { freq: 'daily', time: '08:00' },
+          status: 'ok',
+          next_fire_at: '2026-08-15T08:00:00',
+        },
+      ],
+    });
+    const baseUrl = await mock.start();
+    try {
+      await gotoPanel(page, baseUrl, { frames: frames() });
+      await openXotdTab(page);
+
+      // Verify Active Schedules section header and card rendering
+      const hasActiveHeader = await page.evaluate(() => {
+        const root = document.getElementById('panel').shadowRoot;
+        return root.textContent.includes('Active Schedules & Frame Deployments');
+      });
+      expect(hasActiveHeader).toBe(true);
+
+      const scheduleCardText = await page.evaluate(() => {
+        const root = document.getElementById('panel').shadowRoot;
+        const card = root.querySelector('.schedule-card-row');
+        return card ? card.textContent : '';
+      });
+      expect(scheduleCardText).toContain('Morning Newspaper');
+      expect(scheduleCardText).toContain('Living Room Frame');
+      expect(scheduleCardText).toContain('Active');
+
+      // Verify + Create New Widget button opens modal
+      await page.evaluate(() => {
+        document.getElementById('panel').shadowRoot.getElementById('create-widget-btn').click();
+      });
+
+      const modalDisplay = await page.evaluate(() => {
+        return document.getElementById('panel').shadowRoot.getElementById('widget-type-modal-overlay').style.display;
+      });
+      expect(modalDisplay).toBe('flex');
+
+      // Close modal
+      await page.evaluate(() => {
+        document.getElementById('panel').shadowRoot.getElementById('widget-type-modal-close').click();
+      });
+      const closedDisplay = await page.evaluate(() => {
+        return document.getElementById('panel').shadowRoot.getElementById('widget-type-modal-overlay').style.display;
+      });
+      expect(closedDisplay).toBe('none');
+    } finally {
+      await mock.stop();
+    }
+  });
 });
