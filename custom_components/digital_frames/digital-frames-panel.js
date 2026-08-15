@@ -239,6 +239,22 @@
        neighbors paint later and sit on top — bottom-of-card Delete was
        unclickable "under" the next tile. Raise the focused/hovered card
        and put Delete in the header so it never lives under a neighbor. */
+    .schedule-card-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      margin-bottom: 10px;
+      gap: 16px;
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: var(--ha-card-border-radius, 12px);
+      box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(0, 0, 0, 0.05));
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .schedule-card-row:hover {
+      border-color: var(--primary-color, #03a9f4);
+    }
     .skill-card {
       position: relative;
       z-index: 0;
@@ -12052,8 +12068,7 @@
       container.innerHTML = '';
       for (const s of schedules) {
         const card = document.createElement('div');
-        card.className = 'card schedule-card-row';
-        card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;margin-bottom:8px;gap:12px;background:var(--paper-card-background-color,#202124);border:1px solid var(--border-color,rgba(255,255,255,0.1));border-radius:8px';
+        card.className = 'schedule-card-row';
 
         const sid = this._sid(s.schedule_id);
         let targetName = '';
