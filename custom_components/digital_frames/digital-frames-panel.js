@@ -12056,10 +12056,10 @@
         card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;margin-bottom:8px;gap:12px;background:var(--paper-card-background-color,#202124);border:1px solid var(--border-color,rgba(255,255,255,0.1));border-radius:8px';
 
         const sid = this._sid(s.schedule_id);
-        let targetName = 'Unknown Frame';
+        let targetName = '';
         const targetEntryId = s.action && s.action.entry_ids ? s.action.entry_ids[0] : (s.action ? s.action.entry_id : null);
         if (targetEntryId) {
-          const matchedFrame = frames.find(f => f.entryId === targetEntryId || f.entry_id === targetEntryId);
+          const matchedFrame = frames.find(f => f.entryId === targetEntryId || f.entry_id === targetEntryId || f.id === targetEntryId);
           if (matchedFrame) targetName = matchedFrame.title;
         }
 
@@ -12071,11 +12071,14 @@
         const statusText = s.status === 'target_missing' ? 'Broken (Target Missing)' : (isEnabled ? 'Active' : 'Paused');
         const statusClass = s.status === 'target_missing' ? 'err' : (isEnabled ? 'ok' : 'muted');
 
+        const nameHasArrow = (s.name || '').includes('→') || (s.name || '').includes('-->');
+        const targetSpan = (targetName && !nameHasArrow) ? `<span style="font-size:12px;color:var(--secondary-text-color)">──> 🖼️ ${this._esc(targetName)}</span>` : '';
+
         card.innerHTML = `
           <div style="flex:1 1 auto;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
               <strong style="font-size:14px;color:var(--primary-text-color)">${this._esc(s.name || 'Schedule')}</strong>
-              <span style="font-size:12px;color:var(--secondary-text-color)">──> 🖼️ ${this._esc(targetName)}</span>
+              ${targetSpan}
               <span class="status-badge ${statusClass}" style="font-size:11px;padding:2px 6px;border-radius:4px;font-weight:500">${this._esc(statusText)}</span>
             </div>
             <div style="font-size:12px;color:var(--secondary-text-color)">
