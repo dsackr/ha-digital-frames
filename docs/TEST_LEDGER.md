@@ -205,3 +205,4 @@ Notes on reading it:
 | 2026-08-15 | 9dd5cd1 | panel-playwright | success | 192 passed | — | CI |
 | 2026-08-15 | 32d9f96 | panel-playwright | success | 192 passed | — | CI |
 | 2026-08-17 | 29ac096 | panel-playwright | success | 192 passed | — | CI |
+| 2026-08-17 | 29ac096 | backend-pytest | success | 633 passed in 538.23s (0:08:58) | 65% | CI |
