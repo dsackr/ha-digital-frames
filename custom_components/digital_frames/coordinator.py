@@ -182,6 +182,9 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_ble_wake_time: float | None = None
         self.last_ble_wake_success: bool | None = None
 
+        # Cached telemetry to keep sensors available across HA restarts
+        self._cached_telemetry: dict[str, Any] | None = None
+
         # Network presence (any device_tracker that matches this frame's IP
         # or MAC — UniFi, Omada, ASUSWRT, etc.). Coming home flushes a
         # queued send without accelerated frame polling.
@@ -326,6 +329,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not data:
             return
         self.last_image_id = data.get("last_image_id")
+        self._cached_telemetry = data.get("last_telemetry")
         thumb_b64 = data.get("last_thumbnail_b64")
         if thumb_b64:
             try:
@@ -334,6 +338,23 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning(
                     "Failed to decode cached frame preview for %s: %s", self.host, err
                 )
+
+    async def _async_persist_cached_telemetry(self) -> None:
+        """Persist current preview and telemetry to disk so sensors survive HA restarts."""
+        try:
+            payload: dict[str, Any] = {
+                "last_image_id": self.last_image_id,
+                "last_thumbnail_b64": (
+                    base64.b64encode(self.last_thumbnail).decode("ascii")
+                    if self.last_thumbnail
+                    else None
+                ),
+            }
+            if self._cached_telemetry:
+                payload["last_telemetry"] = self._cached_telemetry
+            await self._preview_store.async_save(payload)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Failed to persist cached frame telemetry for %s: %s", self.host, err)
 
     async def async_set_last_image(
         self, *, image_id: str | None = None, thumbnail: bytes | None = None
@@ -345,14 +366,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         exclusive (see their docstrings above)."""
         self.last_image_id = image_id
         self.last_thumbnail = thumbnail
-        await self._preview_store.async_save(
-            {
-                "last_image_id": image_id,
-                "last_thumbnail_b64": (
-                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
-                ),
-            }
-        )
+        await self._async_persist_cached_telemetry()
 
     # ------------------------------------------------------------------
     # Pull delivery (frame wakes and GETs packed .bin from HA)
@@ -637,21 +651,12 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._pending_store.async_save(None)
             self.async_update_listeners()
 
-    async def async_ble_wake(self, timeout: float = 6.0) -> bool:
-        """Attempt to wake a sleeping frame via Bluetooth Low Energy."""
+    def _find_ble_device(self) -> tuple[Any, dict[str, Any] | None]:
+        """Discover connectable BLE device matching this frame's MAC, service, or name."""
         try:
             from homeassistant.components import bluetooth  # noqa: PLC0415
-            from bleak import BleakClient  # noqa: PLC0415
         except (ImportError, Exception):
-            _LOGGER.debug("BLE components not available on this system")
-            return False
-
-        if bluetooth.async_scanner_count(self.hass) == 0:
-            _LOGGER.debug("No active Bluetooth scanners available for BLE wake")
-            return False
-
-        service_uuid_lower = DIGITAL_FRAMES_BLE_SERVICE_UUID.lower()
-        wake_uuid = DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID
+            return None, None
 
         target_mac = ""
         if self.config_entry:
@@ -682,34 +687,84 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass, target_mac, connectable=True
             )
 
-        if not ble_device:
-            for service_info in bluetooth.async_discovered_service_info(
-                self.hass, connectable=True
-            ):
-                addr_clean = service_info.address.replace(":", "").replace("-", "").upper()
-                if any(service_uuid_lower in s.lower() for s in service_info.service_uuids):
-                    if clean_mac and (addr_clean == clean_mac or service_info.address.upper() == formatted_mac):
-                        ble_device = service_info.device
-                        break
-                    elif not clean_mac:
-                        ble_device = service_info.device
-                        break
-                elif service_info.name and (
-                    service_info.name.startswith("frame-") or service_info.name.startswith("DF-")
-                ):
-                    if clean_mac and clean_mac.endswith(service_info.name.split("-")[-1].upper()):
-                        ble_device = service_info.device
-                        break
-                    elif not clean_mac:
-                        ble_device = service_info.device
-                        break
+        if ble_device:
+            return ble_device, {
+                "address": getattr(ble_device, "address", formatted_mac),
+                "name": getattr(ble_device, "name", "") or "",
+                "rssi": getattr(ble_device, "rssi", None),
+            }
 
+        service_uuid_lower = DIGITAL_FRAMES_BLE_SERVICE_UUID.lower()
+        device_key = str(self.device_key or "").upper()
+
+        for service_info in bluetooth.async_discovered_service_info(
+            self.hass, connectable=True
+        ):
+            addr_clean = service_info.address.replace(":", "").replace("-", "").upper()
+            matched = False
+
+            # Check 1: exact MAC match
+            if clean_mac and (addr_clean == clean_mac or service_info.address.upper() == formatted_mac):
+                matched = True
+
+            # Check 2: ESP32 BLE MAC offset (BLE MAC is typically Base MAC + 2)
+            elif clean_mac and len(clean_mac) == 12 and len(addr_clean) == 12:
+                try:
+                    if abs(int(addr_clean, 16) - int(clean_mac, 16)) <= 4:
+                        matched = True
+                except ValueError:
+                    pass
+
+            # Check 3: Unique Digital Frames service UUID match
+            if not matched and any(service_uuid_lower in s.lower() for s in service_info.service_uuids):
+                if not clean_mac:
+                    matched = True
+                elif clean_mac and len(clean_mac) >= 4 and clean_mac[-4:] in (service_info.name or "").upper():
+                    matched = True
+                else:
+                    matched = True
+
+            # Check 4: Advertised device name prefix
+            if not matched and service_info.name and (
+                service_info.name.startswith(("frame-", "DF-", "fraimic-"))
+            ):
+                if not clean_mac:
+                    matched = True
+                else:
+                    suffix = service_info.name.split("-")[-1].upper()
+                    if clean_mac.endswith(suffix) or (device_key and suffix in device_key):
+                        matched = True
+
+            if matched:
+                return service_info.device, {
+                    "address": service_info.address,
+                    "name": service_info.name or "",
+                    "rssi": service_info.rssi,
+                }
+
+        return None, None
+
+    async def async_ble_wake(self, timeout: float = 6.0) -> bool:
+        """Attempt to wake a sleeping frame via Bluetooth Low Energy."""
+        try:
+            from homeassistant.components import bluetooth  # noqa: PLC0415
+            from bleak import BleakClient  # noqa: PLC0415
+        except (ImportError, Exception):
+            _LOGGER.debug("BLE components not available on this system")
+            return False
+
+        if bluetooth.async_scanner_count(self.hass) == 0:
+            _LOGGER.debug("No active Bluetooth scanners available for BLE wake")
+            return False
+
+        ble_device, _ = self._find_ble_device()
         if not ble_device:
             _LOGGER.debug("No matching BLE beacon discovered for frame %s", self.host)
             return False
 
+        wake_uuid = DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID
         _LOGGER.info(
-            "Waking frame %s over BLE (device %s)...", self.host, ble_device.address
+            "Waking frame %s over BLE (device %s)...", self.host, getattr(ble_device, "address", "unknown")
         )
         self.last_ble_wake_time = time.time()
         try:
@@ -744,77 +799,21 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "scanner_count": 0,
             }
 
-        service_uuid_lower = DIGITAL_FRAMES_BLE_SERVICE_UUID.lower()
-        target_mac = ""
-        if self.config_entry:
-            target_mac = str(
-                self.config_entry.data.get(CONF_MAC)
-                or self.config_entry.data.get("mac")
-                or ""
-            ).upper()
-        if not target_mac and self.data and isinstance(self.data, dict):
-            target_mac = self.data.get("wifi", {}).get("mac", "").upper()
-        if not target_mac and hasattr(self, "mac") and getattr(self, "mac"):
-            target_mac = str(getattr(self, "mac")).upper()
-
-        clean_mac = target_mac.replace(":", "").replace("-", "")
-        formatted_mac = (
-            ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
-            if len(clean_mac) == 12
-            else target_mac
-        )
-
-        ble_device = None
-        if formatted_mac:
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, formatted_mac, connectable=True
-            )
-        if not ble_device and target_mac and target_mac != formatted_mac:
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, target_mac, connectable=True
-            )
-
+        ble_device, info = self._find_ble_device()
         if ble_device:
+            addr = (info.get("address") if info else None) or getattr(ble_device, "address", "") or ""
+            name = (info.get("name") if info else None) or getattr(ble_device, "name", "") or ""
+            rssi = (info.get("rssi") if info else None) or getattr(ble_device, "rssi", None)
             return {
                 "state": "ready",
                 "detected": True,
                 "scanner_count": scanners,
-                "address": ble_device.address,
-                "name": getattr(ble_device, "name", "") or "",
-                "rssi": getattr(ble_device, "rssi", None),
+                "address": addr,
+                "name": name,
+                "rssi": rssi,
                 "last_wake_sent": self.last_ble_wake_time,
                 "last_wake_success": self.last_ble_wake_success,
             }
-
-        for service_info in bluetooth.async_discovered_service_info(
-            self.hass, connectable=True
-        ):
-            addr_clean = service_info.address.replace(":", "").replace("-", "").upper()
-            matched = False
-            if any(service_uuid_lower in s.lower() for s in service_info.service_uuids):
-                if clean_mac and (addr_clean == clean_mac or service_info.address.upper() == formatted_mac):
-                    matched = True
-                elif not clean_mac:
-                    matched = True
-            elif service_info.name and (
-                service_info.name.startswith("frame-") or service_info.name.startswith("DF-")
-            ):
-                if clean_mac and clean_mac.endswith(service_info.name.split("-")[-1].upper()):
-                    matched = True
-                elif not clean_mac:
-                    matched = True
-
-            if matched:
-                return {
-                    "state": "ready",
-                    "detected": True,
-                    "scanner_count": scanners,
-                    "address": service_info.address,
-                    "name": service_info.name,
-                    "rssi": service_info.rssi,
-                    "last_wake_sent": self.last_ble_wake_time,
-                    "last_wake_success": self.last_ble_wake_success,
-                }
 
         return {
             "state": "standby",
@@ -1226,6 +1225,9 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         height,
                     )
 
+            data["online"] = True
+            self._cached_telemetry = dict(data)
+            self.hass.async_create_task(self._async_persist_cached_telemetry())
             return data
 
         except (aiohttp.ClientConnectionError, TimeoutError) as err:
@@ -1250,6 +1252,15 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     err,
                 )
                 return stale
+            if self._cached_telemetry:
+                stale = dict(self._cached_telemetry)
+                stale["online"] = False
+                _LOGGER.debug(
+                    "Frame %s unreachable on startup; using cached telemetry from disk: %s",
+                    self.host,
+                    err,
+                )
+                return stale
             raise UpdateFailed(
                 "Frame is unreachable — it may be sleeping or off-network"
             ) from err
@@ -1259,6 +1270,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 stale = dict(self.data)
                 stale["online"] = False
                 return stale
+            if self._cached_telemetry:
+                stale = dict(self._cached_telemetry)
+                stale["online"] = False
+                return stale
             raise UpdateFailed(
                 f"Frame returned unexpected HTTP {err.status}"
             ) from err
@@ -1266,6 +1281,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._consecutive_failures += 1
             if self.data:
                 stale = dict(self.data)
+                stale["online"] = False
+                return stale
+            if self._cached_telemetry:
+                stale = dict(self._cached_telemetry)
                 stale["online"] = False
                 return stale
             raise UpdateFailed(f"Unexpected error fetching frame data: {err}") from err

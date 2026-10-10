@@ -309,4 +309,57 @@ def test_ble_wake_sensor():
     bat_attrs = battery_sensor.extra_state_attributes
     assert bat_attrs["ble_wake"] == "standby"
 
+    # BLE Wake and Queued Send sensors are available even when Wi-Fi polling failed
+    coord.last_update_success = False
+    assert sensor.available is True
+
+
+def test_get_ble_status_matches_esp32_mac_offset():
+    """ESP32 BLE MAC is typically Wi-Fi Station MAC + 2."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "84:F7:03:CA:4D:78"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+
+    mock_service_info = MagicMock()
+    mock_service_info.address = "84:F7:03:CA:4D:7A"  # +2 from 78
+    mock_service_info.name = "fraimic-4d0f78"
+    mock_service_info.service_uuids = [DIGITAL_FRAMES_BLE_SERVICE_UUID]
+    mock_service_info.rssi = -65
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+    mock_bluetooth.async_ble_device_from_address.return_value = None
+    mock_bluetooth.async_discovered_service_info.return_value = [mock_service_info]
+
+    with patch.dict(sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}):
+        status = coord.get_ble_status()
+        assert status["state"] == "ready"
+        assert status["detected"] is True
+        assert status["address"] == "84:F7:03:CA:4D:7A"
+        assert status["name"] == "fraimic-4d0f78"
+        assert status["rssi"] == -65
+
+
+@pytest.mark.asyncio
+async def test_coordinator_retains_cached_telemetry_on_startup():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "84:F7:03:CA:4D:78"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+    coord.data = None
+    coord._cached_telemetry = {"battery": {"percent": 72, "charging": False}}
+
+    with patch("aiohttp.ClientSession.get", side_effect=TimeoutError()):
+        stale = await coord._async_update_data()
+        assert stale["online"] is False
+        assert stale["battery"]["percent"] == 72
+
+
 

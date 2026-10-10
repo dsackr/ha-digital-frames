@@ -565,6 +565,11 @@ class DigitalFramesQueuedSendSensor(DigitalFramesBaseSensor):
             attrs["queued_at"] = queued_at
         return attrs
 
+    @property
+    def available(self) -> bool:
+        """Queue state is available locally even if frame is sleeping."""
+        return True
+
 
 class DigitalFramesBleWakeSensor(DigitalFramesBaseSensor):
     """Sensor indicating Bluetooth Low Energy (BLE) on-demand wake capability
@@ -582,6 +587,11 @@ class DigitalFramesBleWakeSensor(DigitalFramesBaseSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_ble_wake"
         self._attr_name = "BLE Wake"
+
+    @property
+    def available(self) -> bool:
+        """BLE wake status is available independently of Wi-Fi HTTP polling."""
+        return True
 
     @property
     def icon(self) -> str:
