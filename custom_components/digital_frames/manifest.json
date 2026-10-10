@@ -2,7 +2,8 @@
   "domain": "digital_frames",
   "name": "Digital Frames",
   "after_dependencies": [
-    "roku"
+    "roku",
+    "bluetooth"
   ],
   "codeowners": [
     "@dsackr"

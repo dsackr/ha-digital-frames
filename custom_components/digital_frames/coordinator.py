@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -41,6 +42,8 @@ from .const import (
     DEFAULT_FRAME_ALWAYS_ON,
     DEFAULT_FRAME_SLEEP_MINUTES,
     DEFAULT_SCAN_INTERVAL,
+    DIGITAL_FRAMES_BLE_SERVICE_UUID,
+    DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID,
     DOMAIN,
     FRAME_API_PULLURL,
     FRAME_API_SLEEPCONFIG,
@@ -119,6 +122,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=f"{DOMAIN} {self.host}",
             update_interval=self._normal_update_interval,
         )
+        self.config_entry = config_entry
+        self.mac: str = config_entry.data.get(CONF_MAC, "")
 
         self._consecutive_failures: int = 0
         self._rescan_in_progress: bool = False
@@ -628,6 +633,89 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._pending_store.async_save(None)
             self.async_update_listeners()
 
+    async def async_ble_wake(self, timeout: float = 6.0) -> bool:
+        """Attempt to wake a sleeping frame via Bluetooth Low Energy."""
+        try:
+            from homeassistant.components import bluetooth  # noqa: PLC0415
+            from bleak import BleakClient  # noqa: PLC0415
+        except (ImportError, Exception):
+            _LOGGER.debug("BLE components not available on this system")
+            return False
+
+        if bluetooth.async_scanner_count(self.hass) == 0:
+            _LOGGER.debug("No active Bluetooth scanners available for BLE wake")
+            return False
+
+        service_uuid_lower = DIGITAL_FRAMES_BLE_SERVICE_UUID.lower()
+        wake_uuid = DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID
+
+        target_mac = ""
+        if self.config_entry:
+            target_mac = str(
+                self.config_entry.data.get(CONF_MAC)
+                or self.config_entry.data.get("mac")
+                or ""
+            ).upper()
+        if not target_mac and self.data and isinstance(self.data, dict):
+            target_mac = self.data.get("wifi", {}).get("mac", "").upper()
+        if not target_mac and hasattr(self, "mac") and getattr(self, "mac"):
+            target_mac = str(getattr(self, "mac")).upper()
+
+        clean_mac = target_mac.replace(":", "").replace("-", "")
+        formatted_mac = (
+            ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
+            if len(clean_mac) == 12
+            else target_mac
+        )
+
+        ble_device = None
+        if formatted_mac:
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, formatted_mac, connectable=True
+            )
+        if not ble_device and target_mac and target_mac != formatted_mac:
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, target_mac, connectable=True
+            )
+
+        if not ble_device:
+            for service_info in bluetooth.async_discovered_service_info(
+                self.hass, connectable=True
+            ):
+                addr_clean = service_info.address.replace(":", "").replace("-", "").upper()
+                if any(service_uuid_lower in s.lower() for s in service_info.service_uuids):
+                    if clean_mac and (addr_clean == clean_mac or service_info.address.upper() == formatted_mac):
+                        ble_device = service_info.device
+                        break
+                    elif not clean_mac:
+                        ble_device = service_info.device
+                        break
+                elif service_info.name and (
+                    service_info.name.startswith("frame-") or service_info.name.startswith("DF-")
+                ):
+                    if clean_mac and clean_mac.endswith(service_info.name.split("-")[-1].upper()):
+                        ble_device = service_info.device
+                        break
+                    elif not clean_mac:
+                        ble_device = service_info.device
+                        break
+
+        if not ble_device:
+            _LOGGER.debug("No matching BLE beacon discovered for frame %s", self.host)
+            return False
+
+        _LOGGER.info(
+            "Waking frame %s over BLE (device %s)...", self.host, ble_device.address
+        )
+        try:
+            async with BleakClient(ble_device, timeout=timeout) as client:
+                await client.write_gatt_char(wake_uuid, b"\x01")
+                _LOGGER.info("BLE wake signal successfully sent to frame %s", self.host)
+                return True
+        except Exception as err:
+            _LOGGER.debug("BLE wake connection to %s failed: %s", self.host, err)
+            return False
+
     async def async_send_image_or_queue(
         self,
         image_bytes: bytes,
@@ -666,11 +754,31 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         is_official = (
             origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
         )
-        # Keep a lightweight pending record only for UI "queued" sensor when
-        # we couldn't push — delivery is pull, not a re-POST of bin_b64.
-        # Official Fraimic frames do not support local pull, so we always
-        # fall through to attempt a direct push via /api/image.
+
         if not provisioned and not self.last_update_success and not is_official:
+            # Frame appears asleep on Wi-Fi: attempt on-demand BLE wake first!
+            ble_woken = await self.async_ble_wake()
+            if ble_woken:
+                # Wait up to 6 seconds for the frame to connect to Wi-Fi
+                for _ in range(12):
+                    await asyncio.sleep(0.5)
+                    await self.async_refresh()
+                    if self.last_update_success:
+                        break
+
+                if self.last_update_success:
+                    try:
+                        await self.async_send_image(image_bytes)
+                        await self.async_clear_pull_bin()
+                        return {
+                            "success": True,
+                            "queued": False,
+                            "delivery": "ble+push",
+                            "message": "Woke frame via BLE and pushed image over Wi-Fi",
+                        }
+                    except Exception as err:
+                        _LOGGER.warning("Push after BLE wake failed: %s", err)
+
             # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
             payload: dict[str, Any] = {
                 "schema": _PENDING_SCHEMA,
