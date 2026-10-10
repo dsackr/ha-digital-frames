@@ -207,3 +207,4 @@ Notes on reading it:
 | 2026-08-17 | 29ac096 | panel-playwright | success | 192 passed | — | CI |
 | 2026-08-17 | 29ac096 | backend-pytest | success | 633 passed in 538.23s (0:08:58) | 65% | CI |
 | 2026-10-10 | 70b3785 | backend-pytest | success | 639 passed in 380.84s (0:06:20) | 65% | CI |
+| 2026-10-10 | 48d6d25 | backend-pytest | failure | 1 failed, 643 passed in 671.53s (0:11:11) | 65% | CI |
