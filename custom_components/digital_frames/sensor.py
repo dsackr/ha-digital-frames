@@ -82,6 +82,7 @@ async def async_setup_entry(
             DigitalFramesFirmwareSensor(coordinator, entry),
             DigitalFramesIpAddressSensor(coordinator, entry),
             DigitalFramesQueuedSendSensor(coordinator, entry),
+            DigitalFramesBleWakeSensor(coordinator, entry),
         ]
     )
 
@@ -246,6 +247,9 @@ class DigitalFramesBatterySensor(DigitalFramesBaseSensor):
                     extra["charging"] = str(raw).lower() == "true"
             except (KeyError, TypeError):
                 pass
+        ble_status = self.coordinator.get_ble_status()
+        if ble_status:
+            extra["ble_wake"] = ble_status.get("state")
         return self._attrs_with_online(extra or None)
 
 
@@ -560,3 +564,69 @@ class DigitalFramesQueuedSendSensor(DigitalFramesBaseSensor):
         if queued_at is not None:
             attrs["queued_at"] = queued_at
         return attrs
+
+
+class DigitalFramesBleWakeSensor(DigitalFramesBaseSensor):
+    """Sensor indicating Bluetooth Low Energy (BLE) on-demand wake capability
+    and discovery status.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: DigitalFramesCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_ble_wake"
+        self._attr_name = "BLE Wake"
+
+    @property
+    def icon(self) -> str:
+        val = self.native_value
+        if val == "Ready":
+            return "mdi:bluetooth-connect"
+        if val == "No Adapter":
+            return "mdi:bluetooth-off"
+        return "mdi:bluetooth"
+
+    @property
+    def native_value(self) -> str:
+        """Return 'Ready' if frame BLE beacon is discovered, 'Standby' if
+        adapter is scanning, 'No Adapter' if HA has no Bluetooth, or 'Unsupported'."""
+        from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
+        from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
+
+        if origin_for_fraimic_entry(self._entry) == ORIGIN_OFFICIAL:
+            return "Unsupported"
+
+        status = self.coordinator.get_ble_status()
+        state = status.get("state")
+        if state == "ready":
+            return "Ready"
+        if state == "standby":
+            return "Standby"
+        if state == "no_adapter":
+            return "No Adapter"
+        return "Unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        from .const import (  # noqa: PLC0415
+            DIGITAL_FRAMES_BLE_SERVICE_UUID,
+            DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID,
+        )
+
+        status = self.coordinator.get_ble_status()
+        attrs: dict[str, Any] = {
+            "ble_detected": status.get("detected", False),
+            "service_uuid": DIGITAL_FRAMES_BLE_SERVICE_UUID,
+            "wake_characteristic_uuid": DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID,
+        }
+        for k in ("name", "address", "rssi", "scanner_count", "last_wake_sent", "last_wake_success"):
+            if k in status and status[k] is not None:
+                attrs[f"ble_{k}" if k in ("name", "address", "rssi") else k] = status[k]
+        return attrs
+

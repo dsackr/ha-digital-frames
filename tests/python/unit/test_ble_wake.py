@@ -167,3 +167,146 @@ async def test_async_send_image_with_ble_wake_fallback_pull():
     coord.async_ble_wake.assert_called_once()
     coord._set_pending.assert_called_once()
 
+
+def test_get_ble_status_no_adapter():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 0
+
+    with patch.dict(sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}):
+        status = coord.get_ble_status()
+        assert status["state"] == "no_adapter"
+        assert status["detected"] is False
+
+
+def test_get_ble_status_ready_by_address():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+    mock_device = MagicMock()
+    mock_device.address = "90:E5:B1:D6:E0:9C"
+    mock_device.name = "frame-E09C"
+    mock_device.rssi = -64
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+    mock_bluetooth.async_ble_device_from_address.return_value = mock_device
+
+    with patch.dict(sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}):
+        status = coord.get_ble_status()
+        assert status["state"] == "ready"
+        assert status["detected"] is True
+        assert status["address"] == "90:E5:B1:D6:E0:9C"
+        assert status["name"] == "frame-E09C"
+        assert status["rssi"] == -64
+
+
+def test_get_ble_status_ready_by_service_info():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+
+    mock_service_info = MagicMock()
+    mock_service_info.address = "90:E5:B1:D6:E0:9C"
+    mock_service_info.name = "frame-E09C"
+    mock_service_info.service_uuids = [DIGITAL_FRAMES_BLE_SERVICE_UUID]
+    mock_service_info.rssi = -58
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+    mock_bluetooth.async_ble_device_from_address.return_value = None
+    mock_bluetooth.async_discovered_service_info.return_value = [mock_service_info]
+
+    with patch.dict(sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}):
+        status = coord.get_ble_status()
+        assert status["state"] == "ready"
+        assert status["detected"] is True
+        assert status["rssi"] == -58
+
+
+def test_get_ble_status_standby():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+    mock_bluetooth.async_ble_device_from_address.return_value = None
+    mock_bluetooth.async_discovered_service_info.return_value = []
+
+    with patch.dict(sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}):
+        status = coord.get_ble_status()
+        assert status["state"] == "standby"
+        assert status["detected"] is False
+
+
+def test_ble_wake_sensor():
+    from custom_components.digital_frames.sensor import (
+        DigitalFramesBleWakeSensor,
+        DigitalFramesBatterySensor,
+    )
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+
+    coord = DigitalFramesCoordinator(hass, entry)
+    coord.data = {"battery": {"percent": 85, "charging": False}, "online": True}
+
+    # Ready state
+    coord.get_ble_status = MagicMock(return_value={
+        "state": "ready",
+        "detected": True,
+        "name": "frame-E09C",
+        "address": "90:E5:B1:D6:E0:9C",
+        "rssi": -62,
+        "scanner_count": 1,
+        "last_wake_sent": 1791655000.0,
+        "last_wake_success": True,
+    })
+
+    sensor = DigitalFramesBleWakeSensor(coord, entry)
+    assert sensor.name == "BLE Wake"
+    assert sensor.native_value == "Ready"
+    assert sensor.icon == "mdi:bluetooth-connect"
+    attrs = sensor.extra_state_attributes
+    assert attrs["ble_detected"] is True
+    assert attrs["ble_rssi"] == -62
+    assert attrs["ble_name"] == "frame-E09C"
+    assert attrs["service_uuid"] == DIGITAL_FRAMES_BLE_SERVICE_UUID
+
+    # Standby state
+    coord.get_ble_status = MagicMock(return_value={
+        "state": "standby",
+        "detected": False,
+        "scanner_count": 1,
+    })
+    assert sensor.native_value == "Standby"
+    assert sensor.icon == "mdi:bluetooth"
+
+    # Battery sensor also includes ble_wake in extra_state_attributes
+    battery_sensor = DigitalFramesBatterySensor(coord, entry)
+    bat_attrs = battery_sensor.extra_state_attributes
+    assert bat_attrs["ble_wake"] == "standby"
+
+

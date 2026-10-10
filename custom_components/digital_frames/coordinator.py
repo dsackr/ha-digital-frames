@@ -178,6 +178,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._flushing: bool = False
 
+        # Bluetooth Low Energy (BLE) on-demand wake state
+        self.last_ble_wake_time: float | None = None
+        self.last_ble_wake_success: bool | None = None
+
         # Network presence (any device_tracker that matches this frame's IP
         # or MAC — UniFi, Omada, ASUSWRT, etc.). Coming home flushes a
         # queued send without accelerated frame polling.
@@ -707,14 +711,119 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info(
             "Waking frame %s over BLE (device %s)...", self.host, ble_device.address
         )
+        self.last_ble_wake_time = time.time()
         try:
             async with BleakClient(ble_device, timeout=timeout) as client:
                 await client.write_gatt_char(wake_uuid, b"\x01")
                 _LOGGER.info("BLE wake signal successfully sent to frame %s", self.host)
+                self.last_ble_wake_success = True
+                self.async_update_listeners()
                 return True
         except Exception as err:
             _LOGGER.debug("BLE wake connection to %s failed: %s", self.host, err)
+            self.last_ble_wake_success = False
+            self.async_update_listeners()
             return False
+
+    def get_ble_status(self) -> dict[str, Any]:
+        """Return the current BLE discovery and wake readiness status."""
+        try:
+            from homeassistant.components import bluetooth  # noqa: PLC0415
+        except (ImportError, Exception):
+            return {
+                "state": "no_adapter",
+                "detected": False,
+                "scanner_count": 0,
+            }
+
+        scanners = bluetooth.async_scanner_count(self.hass)
+        if scanners == 0:
+            return {
+                "state": "no_adapter",
+                "detected": False,
+                "scanner_count": 0,
+            }
+
+        service_uuid_lower = DIGITAL_FRAMES_BLE_SERVICE_UUID.lower()
+        target_mac = ""
+        if self.config_entry:
+            target_mac = str(
+                self.config_entry.data.get(CONF_MAC)
+                or self.config_entry.data.get("mac")
+                or ""
+            ).upper()
+        if not target_mac and self.data and isinstance(self.data, dict):
+            target_mac = self.data.get("wifi", {}).get("mac", "").upper()
+        if not target_mac and hasattr(self, "mac") and getattr(self, "mac"):
+            target_mac = str(getattr(self, "mac")).upper()
+
+        clean_mac = target_mac.replace(":", "").replace("-", "")
+        formatted_mac = (
+            ":".join(clean_mac[i:i+2] for i in range(0, 12, 2))
+            if len(clean_mac) == 12
+            else target_mac
+        )
+
+        ble_device = None
+        if formatted_mac:
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, formatted_mac, connectable=True
+            )
+        if not ble_device and target_mac and target_mac != formatted_mac:
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, target_mac, connectable=True
+            )
+
+        if ble_device:
+            return {
+                "state": "ready",
+                "detected": True,
+                "scanner_count": scanners,
+                "address": ble_device.address,
+                "name": getattr(ble_device, "name", "") or "",
+                "rssi": getattr(ble_device, "rssi", None),
+                "last_wake_sent": self.last_ble_wake_time,
+                "last_wake_success": self.last_ble_wake_success,
+            }
+
+        for service_info in bluetooth.async_discovered_service_info(
+            self.hass, connectable=True
+        ):
+            addr_clean = service_info.address.replace(":", "").replace("-", "").upper()
+            matched = False
+            if any(service_uuid_lower in s.lower() for s in service_info.service_uuids):
+                if clean_mac and (addr_clean == clean_mac or service_info.address.upper() == formatted_mac):
+                    matched = True
+                elif not clean_mac:
+                    matched = True
+            elif service_info.name and (
+                service_info.name.startswith("frame-") or service_info.name.startswith("DF-")
+            ):
+                if clean_mac and clean_mac.endswith(service_info.name.split("-")[-1].upper()):
+                    matched = True
+                elif not clean_mac:
+                    matched = True
+
+            if matched:
+                return {
+                    "state": "ready",
+                    "detected": True,
+                    "scanner_count": scanners,
+                    "address": service_info.address,
+                    "name": service_info.name,
+                    "rssi": service_info.rssi,
+                    "last_wake_sent": self.last_ble_wake_time,
+                    "last_wake_success": self.last_ble_wake_success,
+                }
+
+        return {
+            "state": "standby",
+            "detected": False,
+            "scanner_count": scanners,
+            "last_wake_sent": self.last_ble_wake_time,
+            "last_wake_success": self.last_ble_wake_success,
+        }
+
 
     async def async_send_image_or_queue(
         self,
