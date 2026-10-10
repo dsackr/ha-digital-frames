@@ -483,6 +483,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sleep_minutes: int | None = None,
         active_sec: int = 120,
         always_on: bool | None = None,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> bool:
         """Tell the frame its HA pull URL and power mode.
 
@@ -500,6 +501,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_ensure_pull_token()
             url = self.pull_bin_url()
 
+        req_timeout = timeout or _REQUEST_TIMEOUT
         session = async_get_clientsession(self.hass)
         # Power mode first so always_on/sleep stick even if pullurl fails.
         sleep_body = urlencode(
@@ -515,7 +517,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._base_url(FRAME_API_SLEEPCONFIG),
                 data=sleep_body,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=_REQUEST_TIMEOUT,
+                timeout=req_timeout,
             ) as resp:
                 sleep_text = await resp.text()
                 sleep_ok = resp.status < 400
@@ -549,7 +551,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._base_url(FRAME_API_PULLURL),
                 data=urlencode({"url": url}),
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=_REQUEST_TIMEOUT,
+                timeout=req_timeout,
             ) as resp:
                 pull_ok = resp.status < 400
                 if not pull_ok:
@@ -744,7 +746,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return None, None
 
-    async def async_ble_wake(self, timeout: float = 6.0) -> bool:
+    async def async_ble_wake(self, timeout: float = 10.0) -> bool:
         """Attempt to wake a sleeping frame via Bluetooth Low Energy."""
         try:
             from homeassistant.components import bluetooth  # noqa: PLC0415
@@ -759,7 +761,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         ble_device, _ = self._find_ble_device()
         if not ble_device:
-            _LOGGER.debug("No matching BLE beacon discovered for frame %s", self.host)
+            _LOGGER.warning("No matching BLE beacon discovered for frame %s", self.host)
             return False
 
         wake_uuid = DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID
@@ -768,14 +770,34 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.last_ble_wake_time = time.time()
         try:
-            async with BleakClient(ble_device, timeout=timeout) as client:
-                await client.write_gatt_char(wake_uuid, b"\x01")
-                _LOGGER.info("BLE wake signal successfully sent to frame %s", self.host)
-                self.last_ble_wake_success = True
-                self.async_update_listeners()
-                return True
+            connected = False
+            try:
+                from bleak_retry_connector import (  # noqa: PLC0415
+                    BleakClientWithServiceCache,
+                    establish_connection,
+                )
+                client = await establish_connection(
+                    BleakClientWithServiceCache,
+                    ble_device,
+                    self.host,
+                    max_attempts=2,
+                )
+                async with client:
+                    await client.write_gatt_char(wake_uuid, b"\x01")
+                connected = True
+            except (ImportError, Exception) as err:
+                _LOGGER.debug("establish_connection fallback: %s", err)
+
+            if not connected:
+                async with BleakClient(ble_device, timeout=timeout) as client:
+                    await client.write_gatt_char(wake_uuid, b"\x01")
+
+            _LOGGER.info("BLE wake signal successfully sent to frame %s", self.host)
+            self.last_ble_wake_success = True
+            self.async_update_listeners()
+            return True
         except Exception as err:
-            _LOGGER.debug("BLE wake connection to %s failed: %s", self.host, err)
+            _LOGGER.warning("BLE wake connection to %s failed: %s", self.host, err)
             self.last_ble_wake_success = False
             self.async_update_listeners()
             return False
@@ -851,10 +873,6 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_stage_pull_bin(image_bytes)
         await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
 
-        # 2) If the frame happens to be online, refresh its pull URL config
-        #    and try an immediate push.
-        provisioned = await self.async_provision_frame_pull()
-
         token = uuid.uuid4().hex
         from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
         from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
@@ -863,21 +881,41 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
         )
 
-        if not provisioned and not self.last_update_success and not is_official:
-            # Frame appears asleep on Wi-Fi: attempt on-demand BLE wake first!
-            ble_woken = await self.async_ble_wake()
+        is_known_online = bool(self.data and self.data.get("online", False))
+        provisioned = False
+
+        if is_known_online:
+            # Fast probe / provision if known online
+            probe_timeout = aiohttp.ClientTimeout(total=3.0, connect=1.5)
+            provisioned = await self.async_provision_frame_pull(timeout=probe_timeout)
+        elif is_official:
+            # Official frames don't support BLE wake; probe standard provision
+            provisioned = await self.async_provision_frame_pull()
+
+        if not provisioned and not is_official:
+            # Frame is asleep on Wi-Fi: attempt on-demand BLE wake!
+            _LOGGER.info(
+                "Frame %s is asleep on Wi-Fi; triggering on-demand BLE wake...",
+                self.host,
+            )
+            ble_woken = await self.async_ble_wake(timeout=10.0)
             if ble_woken:
-                # Wait up to 6 seconds for the frame to connect to Wi-Fi
-                for _ in range(12):
+                wifi_ready = False
+                for _ in range(16):
                     await asyncio.sleep(0.5)
                     await self.async_refresh()
-                    if self.last_update_success:
+                    if self.data and self.data.get("online"):
+                        wifi_ready = True
+                        break
+                    if self.last_update_success and (not self.data or self.data.get("online") is not False):
+                        wifi_ready = True
                         break
 
-                if self.last_update_success:
+                if wifi_ready:
                     try:
                         await self.async_send_image(image_bytes)
                         await self.async_clear_pull_bin()
+                        self.hass.async_create_task(self.async_request_refresh())
                         return {
                             "success": True,
                             "queued": False,

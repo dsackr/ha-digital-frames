@@ -362,4 +362,36 @@ async def test_coordinator_retains_cached_telemetry_on_startup():
         assert stale["battery"]["percent"] == 72
 
 
+@pytest.mark.asyncio
+async def test_handle_wake_service_invokes_ble_wake():
+    from custom_components.digital_frames import _register_services
+
+    hass = MagicMock()
+    registered_services = {}
+
+    def mock_register(domain, service, handler, schema=None):
+        registered_services[service] = handler
+
+    hass.services.async_register = mock_register
+
+    _register_services(hass)
+    assert "wake" in registered_services
+
+    coord = MagicMock()
+    coord.host = "192.168.1.29"
+    coord.async_ble_wake = AsyncMock(return_value=True)
+
+    call = MagicMock()
+    call.data = {"device_id": "test_device"}
+
+    with patch(
+        "custom_components.digital_frames._get_coordinator_by_device_id",
+        return_value=(coord, "test_entry"),
+    ):
+        await registered_services["wake"](call)
+        coord.async_ble_wake.assert_called_once()
+
+
+
+
 

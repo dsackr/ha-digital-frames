@@ -1010,14 +1010,21 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def _handle_wake(call: ServiceCall) -> None:
         coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
-        # Meural maps /api/wake → resume; Fraimic has no wake endpoint.
+        if hasattr(coordinator, "async_ble_wake"):
+            success = await coordinator.async_ble_wake(timeout=10.0)
+            if not success:
+                raise HomeAssistantError(
+                    f"Failed to wake frame {coordinator.host} over BLE. Make sure the frame is in Bluetooth range."
+                )
+            _LOGGER.info("BLE wake command sent to frame %s", coordinator.host)
+            return
+
         if hasattr(coordinator, "async_resume"):
             await coordinator.async_resume()
-        else:
-            raise HomeAssistantError(
-                "Wake is only supported on Meural Canvas frames"
-            )
-        _LOGGER.info("Wake command sent to frame %s", coordinator.host)
+            _LOGGER.info("Wake command sent to frame %s", coordinator.host)
+            return
+
+        raise HomeAssistantError("Wake is not supported on this frame")
 
     async def _handle_refresh(call: ServiceCall) -> None:
         coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])

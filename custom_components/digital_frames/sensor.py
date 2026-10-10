@@ -247,9 +247,10 @@ class DigitalFramesBatterySensor(DigitalFramesBaseSensor):
                     extra["charging"] = str(raw).lower() == "true"
             except (KeyError, TypeError):
                 pass
-        ble_status = self.coordinator.get_ble_status()
-        if ble_status:
-            extra["ble_wake"] = ble_status.get("state")
+        if hasattr(self.coordinator, "get_ble_status"):
+            ble_status = self.coordinator.get_ble_status()
+            if ble_status:
+                extra["ble_wake"] = ble_status.get("state")
         return self._attrs_with_online(extra or None)
 
 
