@@ -606,16 +606,17 @@ class DigitalFramesBleWakeSensor(DigitalFramesBaseSensor):
     def native_value(self) -> str:
         """Return 'Ready' if frame BLE beacon is discovered, 'Standby' if
         adapter is scanning, 'No Adapter' if HA has no Bluetooth, or 'Unsupported'."""
+        status = self.coordinator.get_ble_status()
+        state = status.get("state")
+        if state == "ready":
+            return "Ready"
+
         from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
         from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
 
         if origin_for_fraimic_entry(self._entry) == ORIGIN_OFFICIAL:
             return "Unsupported"
 
-        status = self.coordinator.get_ble_status()
-        state = status.get("state")
-        if state == "ready":
-            return "Ready"
         if state == "standby":
             return "Standby"
         if state == "no_adapter":

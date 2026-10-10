@@ -721,7 +721,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     matched = True
                 elif clean_mac and len(clean_mac) >= 4 and clean_mac[-4:] in (service_info.name or "").upper():
                     matched = True
-                else:
+                elif device_key and len(device_key) >= 4 and device_key[-4:] in (service_info.name or "").upper():
                     matched = True
 
             # Check 4: Advertised device name prefix
