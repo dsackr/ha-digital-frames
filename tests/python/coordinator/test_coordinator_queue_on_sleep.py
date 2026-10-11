@@ -343,3 +343,38 @@ async def test_official_fraimic_frame_attempts_push_even_when_last_update_succes
     assert result.get("delivery") == "push+pull"
 
 
+async def test_ble_wake_supported_frame_clears_pull_url(
+    coordinator, aioclient_mock
+):
+    """When frame supports BLE wake, provisioning must clear pullurl (url="") so frame doesn't pull autonomously."""
+    aioclient_mock.post(f"http://{coordinator.host}/pullurl", status=200, text="ok")
+    aioclient_mock.post(f"http://{coordinator.host}/sleepconfig", status=200, text="ok")
+
+    with patch.object(coordinator, "supports_ble_wake", return_value=True):
+        ok = await coordinator.async_provision_frame_pull()
+
+    assert ok is True
+    last_req = aioclient_mock.mock_calls[-1]
+    assert last_req[0] == "POST"
+    assert "pullurl" in str(last_req[1])
+
+
+async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
+    coordinator, aioclient_mock
+):
+    """BLE-supported frames wake via BLE and push without dual-delivery pre-staging."""
+    aioclient_mock.post(f"http://{coordinator.host}/api/image", status=200)
+
+    with patch.object(coordinator, "supports_ble_wake", return_value=True), \
+         patch.object(coordinator, "async_ble_wake", return_value=True), \
+         patch.object(coordinator, "async_refresh"):
+        coordinator.data = {"online": True}
+        result = await coordinator.async_send_image_or_queue(b"binary-image-data", image_id="img_ble")
+
+    assert result["success"] is True
+    assert result["queued"] is False
+    assert result.get("delivery") in ("push", "ble+push")
+    assert coordinator.get_pull_bin(coordinator.pull_token) is None
+    assert coordinator.last_image_id == "img_ble"
+
+
