@@ -344,9 +344,10 @@ async def test_official_fraimic_frame_attempts_push_even_when_last_update_succes
 
 
 async def test_ble_wake_supported_frame_clears_pull_url(
-    coordinator, aioclient_mock
+    make_coordinator, make_frame_entry, aioclient_mock
 ):
     """When frame supports BLE wake, provisioning must clear pullurl (url="") so frame doesn't pull autonomously."""
+    coordinator = make_coordinator(make_frame_entry(size="7.3"))
     aioclient_mock.post(f"http://{coordinator.host}/pullurl", status=200, text="ok")
     aioclient_mock.post(f"http://{coordinator.host}/sleepconfig", status=200, text="ok")
 
@@ -360,8 +361,10 @@ async def test_ble_wake_supported_frame_clears_pull_url(
 
 
 async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
-    coordinator, aioclient_mock
+    make_coordinator, make_frame_entry, aioclient_mock
 ):
+    """BLE-supported frames wake via BLE and push without dual-delivery pre-staging."""
+    coordinator = make_coordinator(make_frame_entry(size="7.3"))
     _mock_online_frame(aioclient_mock, coordinator.host)
     aioclient_mock.get(f"http://{coordinator.host}/api/info", json={"online": True})
 
@@ -383,5 +386,6 @@ async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
     assert coordinator.get_pull_bin(coordinator.pull_token) is None
     assert coordinator.last_image_id == "img_ble"
     mock_wake.assert_called_once()
+
 
 
