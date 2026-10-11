@@ -28,5 +28,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dsackr/ha-digital-frames/issues",
   "requirements": [],
-  "version": "0.12.224"
+  "version": "0.12.225"
 }
