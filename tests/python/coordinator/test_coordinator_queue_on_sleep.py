@@ -362,8 +362,8 @@ async def test_ble_wake_supported_frame_clears_pull_url(
 async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
     coordinator, aioclient_mock
 ):
-    """BLE-supported frames wake via BLE and push without dual-delivery pre-staging."""
-    aioclient_mock.post(f"http://{coordinator.host}/api/image", status=200)
+    _mock_online_frame(aioclient_mock, coordinator.host)
+    aioclient_mock.get(f"http://{coordinator.host}/api/info", json={"online": True})
 
     coordinator.data = None
     coordinator.last_update_success = False
