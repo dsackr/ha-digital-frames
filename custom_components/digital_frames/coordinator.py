@@ -481,7 +481,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self,
         *,
         sleep_minutes: int | None = None,
-        active_sec: int = 120,
+        active_sec: int | None = None,
         always_on: bool | None = None,
         timeout: aiohttp.ClientTimeout | None = None,
     ) -> bool:
@@ -491,7 +491,25 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns True if the pull URL POST succeeded.
         """
         if sleep_minutes is None:
-            sleep_minutes = self.frame_sleep_minutes()
+            if CONF_FRAME_SLEEP_MINUTES in self.config_entry.options:
+                sleep_minutes = self.frame_sleep_minutes()
+            elif isinstance(self.data, dict) and self.data.get("sleep_minutes") is not None:
+                try:
+                    sleep_minutes = int(self.data["sleep_minutes"])
+                except (TypeError, ValueError):
+                    sleep_minutes = self.frame_sleep_minutes()
+            else:
+                sleep_minutes = self.frame_sleep_minutes()
+
+        if active_sec is None:
+            if isinstance(self.data, dict) and self.data.get("active_window_sec") is not None:
+                try:
+                    active_sec = int(self.data["active_window_sec"])
+                except (TypeError, ValueError):
+                    active_sec = 120
+            else:
+                active_sec = 120
+
         if always_on is None:
             always_on = self.frame_always_on()
 

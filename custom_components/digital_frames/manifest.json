@@ -27,8 +27,6 @@
   "documentation": "https://github.com/dsackr/ha-digital-frames",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dsackr/ha-digital-frames/issues",
-  "requirements": [
-    "Pillow>=10.0.0"
-  ],
+  "requirements": [],
   "version": "0.12.220"
 }
