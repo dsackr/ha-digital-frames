@@ -365,16 +365,23 @@ async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
     """BLE-supported frames wake via BLE and push without dual-delivery pre-staging."""
     aioclient_mock.post(f"http://{coordinator.host}/api/image", status=200)
 
-    with patch.object(coordinator, "supports_ble_wake", return_value=True), \
-         patch.object(coordinator, "async_ble_wake", return_value=True), \
-         patch.object(coordinator, "async_refresh"):
+    coordinator.data = None
+    coordinator.last_update_success = False
+
+    async def mock_refresh():
         coordinator.data = {"online": True}
+        coordinator.last_update_success = True
+
+    with patch.object(coordinator, "supports_ble_wake", return_value=True), \
+         patch.object(coordinator, "async_ble_wake", return_value=True) as mock_wake, \
+         patch.object(coordinator, "async_refresh", side_effect=mock_refresh):
         result = await coordinator.async_send_image_or_queue(b"binary-image-data", image_id="img_ble")
 
     assert result["success"] is True
     assert result["queued"] is False
-    assert result.get("delivery") in ("push", "ble+push")
+    assert result.get("delivery") == "ble+push"
     assert coordinator.get_pull_bin(coordinator.pull_token) is None
     assert coordinator.last_image_id == "img_ble"
+    mock_wake.assert_called_once()
 
 

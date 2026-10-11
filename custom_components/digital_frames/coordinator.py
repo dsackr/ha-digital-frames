@@ -913,30 +913,19 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
         )
 
-        if self.supports_ble_wake():
-            # For BLE-wake capable frames, delivery is push-driven to prevent
-            # double refreshes (where a staged pull bin is fetched on wake AND
-            # an immediate push is delivered).
-            is_known_online = bool(self.data and self.data.get("online", False))
-            if is_known_online:
-                try:
-                    await self.async_send_image(image_bytes)
-                    await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
-                    await self.async_clear_pull_bin()
-                    self.hass.async_create_task(self.async_request_refresh())
-                    return {
-                        "success": True,
-                        "queued": False,
-                        "delivery": "push",
-                        "message": "Pushed image directly to frame over Wi-Fi",
-                    }
-                except (aiohttp.ClientError, TimeoutError) as err:
-                    _LOGGER.debug(
-                        "Direct push to online frame %s failed (%s); trying BLE wake...",
-                        self.host,
-                        err,
-                    )
+        is_known_online = bool(self.data and self.data.get("online", False))
+        provisioned = False
 
+        if is_known_online:
+            # Fast probe / provision if known online
+            probe_timeout = aiohttp.ClientTimeout(total=3.0, connect=1.5)
+            provisioned = await self.async_provision_frame_pull(timeout=probe_timeout)
+        elif is_official:
+            # Official frames don't support BLE wake; probe standard provision
+            provisioned = await self.async_provision_frame_pull()
+
+        if not provisioned and not is_official:
+            # Frame is asleep on Wi-Fi: attempt on-demand BLE wake!
             _LOGGER.info(
                 "Frame %s is asleep on Wi-Fi; triggering on-demand BLE wake...",
                 self.host,
@@ -969,47 +958,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     except Exception as err:
                         _LOGGER.warning("Push after BLE wake failed: %s", err)
 
-            # BLE wake or push failed: fall back to staging pull bin for timer wake
+            # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
             await self.async_stage_pull_bin(image_bytes)
             await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
             payload: dict[str, Any] = {
-                "schema": _PENDING_SCHEMA,
-                "token": token,
-                "bin_b64": "",
-                "pull_only": True,
-                "image_id": image_id,
-                "thumbnail_b64": (
-                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
-                ),
-                "queued_at": time.time(),
-            }
-            await self._set_pending(payload)
-            return {
-                "success": True,
-                "queued": True,
-                "delivery": "pull",
-                "message": "BLE wake/push unsuccessful; image staged for frame pull on next wake",
-            }
-
-        # Non-BLE path (e.g. official Fraimic, or host without Bluetooth adapter):
-        # 1) Always stage for pull first (survives HA restart + frame sleep).
-        await self.async_stage_pull_bin(image_bytes)
-        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
-
-        is_known_online = bool(self.data and self.data.get("online", False))
-        provisioned = False
-
-        if is_known_online:
-            # Fast probe / provision if known online
-            probe_timeout = aiohttp.ClientTimeout(total=3.0, connect=1.5)
-            provisioned = await self.async_provision_frame_pull(timeout=probe_timeout)
-        elif is_official:
-            # Official frames don't support BLE wake; probe standard provision
-            provisioned = await self.async_provision_frame_pull()
-
-        if not provisioned and not is_official:
-            # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
-            payload = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
                 "bin_b64": "",  # pull path; do not re-store multi-MB payload
@@ -1035,6 +987,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._flushing = True
         try:
             await self.async_send_image(image_bytes)
+            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
             await self.async_clear_pull_bin()
             return {"success": True, "queued": False, "delivery": "push+pull"}
         except (aiohttp.ClientConnectionError, TimeoutError):
@@ -1045,6 +998,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "for pull; treating push as unconfirmed",
                     self.host,
                 )
+                await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
                 return {
                     "success": True,
                     "queued": False,
@@ -1052,6 +1006,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "delivery": "pull",
                 }
             # Asleep mid-call: staged pull is authoritative.
+            await self.async_stage_pull_bin(image_bytes)
+            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
             payload = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
@@ -1077,6 +1033,20 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.host,
                 err,
             )
+            await self.async_stage_pull_bin(image_bytes)
+            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+            payload = {
+                "schema": _PENDING_SCHEMA,
+                "token": token,
+                "bin_b64": "",
+                "pull_only": True,
+                "image_id": image_id,
+                "thumbnail_b64": (
+                    base64.b64encode(thumbnail).decode("ascii") if thumbnail else None
+                ),
+                "queued_at": time.time(),
+            }
+            await self._set_pending(payload)
             return {
                 "success": True,
                 "queued": True,
