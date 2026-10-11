@@ -782,9 +782,11 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.host,
                     max_attempts=2,
                 )
-                async with client:
+                try:
                     await client.write_gatt_char(wake_uuid, b"\x01")
-                connected = True
+                    connected = True
+                finally:
+                    await client.disconnect()
             except (ImportError, Exception) as err:
                 _LOGGER.debug("establish_connection fallback: %s", err)
 
