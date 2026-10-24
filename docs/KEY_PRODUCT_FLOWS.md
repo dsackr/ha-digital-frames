@@ -74,10 +74,15 @@ frame moved; pending flows dedup via `unique_id`.
   on ESP32-S3) are their own vendor, not Fraimic: they report `vendor: "DAS2"`
   in `/api/info`, which `detect_frame_type_from_info` uses to settle the 13.3"
   collision, and they carry `origin=clone` so the coordinator sends BLE wakes.
+  The options form re-offers **Frame Type** only to relabel between types that
+  share a resolution *and* byte layout (`13.3` / `13.3_clone` / `13.3_das2`), so a
+  frame added under the wrong vendor can be corrected without removing it; the
+  packed payload is identical, so this can never garble an image.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
   `tests/python/unit/test_helpers_info.py` (vendor-based detection),
   `tests/python/unit/test_frame_types.py` (DAS2 registry entries),
+  `tests/python/config_flow/test_config_flow_options.py` (relabel 13.3 -> 13.3_das2),
   `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (BLE wake for
   `13.3_das2`, not for official `13.3`),
   `tests/python/config_flow/test_config_flow_user_scan.py` (menu,

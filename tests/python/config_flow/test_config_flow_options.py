@@ -27,7 +27,7 @@ from custom_components.digital_frames.const import (
 
 async def test_default_form_reflects_current_options(hass, make_frame_entry):
     entry = make_frame_entry(
-        size="13.3",
+        size="31.5",
         options={
             "scan_interval": 120,
             CONF_FRAME_SLEEP_MINUTES: 45,
@@ -53,7 +53,8 @@ async def test_default_form_reflects_current_options(hass, make_frame_entry):
     assert CONF_FRAME_SLEEP_MINUTES in field_names
     assert CONF_FRAME_ALWAYS_ON in field_names
     assert CONF_FAST_POLL_WHEN_QUEUED in field_names
-    # Frame Type is fixed at add time — not re-offered when size is already set.
+    # Frame Type is fixed at add time — not re-offered when size is already set
+    # and no other type shares its resolution and byte layout (31.5" has none).
     assert "resolution" not in field_names
 
 
@@ -261,3 +262,27 @@ async def test_frame_sleep_minutes_below_minimum_rejected(hass, make_frame_entry
 
     with pytest.raises(vol.Invalid):
         schema({CONF_FRAME_SLEEP_MINUTES: 0})
+
+
+async def test_frame_type_can_be_relabelled_between_same_layout_types(
+    hass, make_frame_entry
+):
+    """A 13.3" added as official can be corrected to DAS2 Frames without removing
+    it: the types share resolution and byte layout, so nothing about the packed
+    payload changes. Types with a different layout are not offered."""
+    entry = make_frame_entry(size="13.3")
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if str(k) == "resolution")
+    offered = set(schema[key].container)
+    assert {"13.3", "13.3_clone", "13.3_das2"} <= offered
+    assert "7.3" not in offered and "31.5" not in offered
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"resolution": "13.3_das2", CONF_FRAME_SLEEP_MINUTES: 1440, "scan_interval": 300},
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.data[CONF_SIZE] == "13.3_das2"

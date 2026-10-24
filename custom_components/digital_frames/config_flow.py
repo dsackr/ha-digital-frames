@@ -941,6 +941,24 @@ class DigitalFramesOptionsFlow(OptionsFlow):
                 schema_dict[
                     vol.Optional(CONF_RESOLUTION, default="")
                 ] = vol.In(size_options)
+            elif current_size in FRAME_TYPES:
+                # Re-label between types that share a resolution AND a byte
+                # layout (13.3 official / 13.3_clone / 13.3_das2): the packed
+                # payload is identical, only origin/vendor differ, so this can
+                # never garble an image. It lets a frame added under the
+                # wrong type be corrected without removing it (which would
+                # orphan its entities, helpers and automations).
+                cur = FRAME_TYPES[current_size]
+                swap_options = {
+                    key: ft.display_name
+                    for key, ft in FRAME_TYPES.items()
+                    if ft.resolution == cur.resolution
+                    and ft.byte_layout == cur.byte_layout
+                }
+                if len(swap_options) > 1:
+                    schema_dict[
+                        vol.Optional(CONF_RESOLUTION, default=current_size)
+                    ] = vol.In(swap_options)
             schema_dict[
                 vol.Optional(CONF_ROTATION_EDGE, default=current_edge)
             ] = vol.In(edge_options)
