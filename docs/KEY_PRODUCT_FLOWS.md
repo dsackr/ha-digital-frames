@@ -204,6 +204,11 @@ asleep, the staged pull payload is enough — success is reported as
    is queued, poll the frame every 30s until it answers. Intended for
    installs with no network device tracker. Exposed under Advanced Settings
    in the frame options UI.
+4. **BLE wake on send (frame asleep):** `async_send_image_or_queue` sends a
+   BLE wake write, then polls the frame for up to 40 s (wall-clock,
+   `_BLE_WAKE_WIFI_WAIT_S`) for it to rejoin Wi-Fi and pushes the image as
+   soon as it answers. Only if it never answers does the send fall back to
+   the staged pull (queued).
 
 **On deck (what is waiting):** while `pending_send` is set, the product
 surfaces the queued image as "on deck" — not only a boolean:
@@ -252,6 +257,8 @@ slow ESP32 sequential panels (7.3").
   push+pull, offline stage-for-pull, default no fast poll, optional fast
   poll, provision always_on flag, token URL shape, pull-only pending flush,
   pull view cleanup on get),
+  `tests/python/unit/test_ble_wake.py` (BLE wake then push; waits past the
+  old 8 s window; gives up after 40 s and queues),
   `tests/python/coordinator/test_coordinator_device_tracker.py` (IP/MAC
   match, home transition flushes, teardown),
   `tests/python/setup/test_entities.py` (queued sensor attrs image_id /

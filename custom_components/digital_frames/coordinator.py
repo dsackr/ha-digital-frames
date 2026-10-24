@@ -65,6 +65,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+# How long to wait for a BLE-woken frame to come back on Wi-Fi before falling
+# back to the staged pull. Wall-clock, not iterations: each probe can itself block.
+_BLE_WAKE_WIFI_WAIT_S = 40.0
 # After this many consecutive poll failures, trigger a subnet rescan to find
 # the frame at its new IP.
 _FAILURES_BEFORE_RESCAN = 3
@@ -933,7 +936,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ble_woken = await self.async_ble_wake(timeout=10.0)
             if ble_woken:
                 wifi_ready = False
-                for _ in range(16):
+                deadline = time.monotonic() + _BLE_WAKE_WIFI_WAIT_S
+                while time.monotonic() < deadline:
                     await asyncio.sleep(0.5)
                     await self.async_refresh()
                     if self.data and self.data.get("online"):

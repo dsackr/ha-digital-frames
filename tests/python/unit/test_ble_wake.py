@@ -395,3 +395,63 @@ async def test_handle_wake_service_invokes_ble_wake():
 
 
 
+
+
+def _ble_wake_coord(online_after_s):
+    """Coordinator whose frame answers only after `online_after_s` fake seconds."""
+    from unittest.mock import patch  # noqa: F401
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.195", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+    coord = DigitalFramesCoordinator(hass, entry)
+    coord.last_update_success = False
+    coord.async_stage_pull_bin = AsyncMock()
+    coord.async_set_last_image = AsyncMock()
+    coord.async_provision_frame_pull = AsyncMock(return_value=False)
+    coord.async_ble_wake = AsyncMock(return_value=True)
+    coord.async_clear_pull_bin = AsyncMock()
+    coord.async_send_image = AsyncMock()
+    coord._set_pending = AsyncMock()
+    clock = {"t": 0.0}
+
+    async def fake_sleep(d):
+        clock["t"] += d
+
+    async def fake_refresh():
+        up = clock["t"] >= online_after_s
+        coord.last_update_success = up
+        coord.data = {"online": up}
+
+    coord.async_refresh = AsyncMock(side_effect=fake_refresh)
+    return coord, clock, fake_sleep
+
+
+@pytest.mark.asyncio
+async def test_ble_wake_waits_beyond_old_8s_window_for_wifi():
+    from unittest.mock import patch
+
+    coord, clock, fake_sleep = _ble_wake_coord(online_after_s=25.0)
+    with patch("custom_components.digital_frames.coordinator.asyncio.sleep", fake_sleep), patch(
+        "custom_components.digital_frames.coordinator.time.monotonic", lambda: clock["t"]
+    ):
+        res = await coord.async_send_image_or_queue(b"dummy_bytes")
+    assert res["delivery"] == "ble+push"
+    assert res["queued"] is False
+    coord.async_send_image.assert_called_once_with(b"dummy_bytes")
+
+
+@pytest.mark.asyncio
+async def test_ble_wake_gives_up_after_wait_window_and_queues():
+    from unittest.mock import patch
+
+    coord, clock, fake_sleep = _ble_wake_coord(online_after_s=10_000.0)
+    with patch("custom_components.digital_frames.coordinator.asyncio.sleep", fake_sleep), patch(
+        "custom_components.digital_frames.coordinator.time.monotonic", lambda: clock["t"]
+    ):
+        res = await coord.async_send_image_or_queue(b"dummy_bytes")
+    assert res["delivery"] == "pull"
+    assert res["queued"] is True
+    assert 39.0 <= clock["t"] <= 41.0
