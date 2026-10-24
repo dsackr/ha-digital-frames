@@ -124,3 +124,26 @@ def test_parse_sleep_minutes_from_html():
     assert parse_sleep_minutes_from_html(
         "<span class='info-label'>Device Type</span><span class='info-value'>13.3\" E-Ink</span>"
     ) is None
+
+
+def test_detect_frame_type_from_info_vendor_settles_shared_13_3():
+    """The DAS2 firmware reports vendor DAS2; that disambiguates 13.3" where text and
+    resolution alone cannot (official Fraimic frames report no vendor)."""
+    from custom_components.digital_frames.helpers import detect_frame_type_from_info
+
+    by_text = {"vendor": "DAS2", "display": {"device_type": '13.3" E-Ink'}}
+    assert detect_frame_type_from_info(by_text) == "13.3_das2"
+
+    by_dims = {"vendor": "DAS2", "display": {"width_px": 1200, "height_px": 1600}}
+    assert detect_frame_type_from_info(by_dims) == "13.3_das2"
+
+    c6 = {"vendor": "DAS2", "display": {"device_type": '7.3" E-Ink', "width_px": 800, "height_px": 480}}
+    assert detect_frame_type_from_info(c6) == "7.3"
+
+    # Same payload without a vendor stays ambiguous, exactly as before.
+    no_vendor = {"display": {"device_type": '13.3" E-Ink'}}
+    assert detect_frame_type_from_info(no_vendor) is None
+
+    # An unknown vendor does not match anything by itself.
+    other = {"vendor": "Acme", "display": {"device_type": '13.3" E-Ink'}}
+    assert detect_frame_type_from_info(other) is None

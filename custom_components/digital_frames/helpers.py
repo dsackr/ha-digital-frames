@@ -36,7 +36,7 @@ from .const import (
     ORIENTATION_LANDSCAPE,
     ORIENTATION_PORTRAIT,
 )
-from .frame_types import FRAME_TYPES
+from .frame_types import FRAME_TYPES, frame_types_for_vendor
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -378,6 +378,25 @@ def detect_frame_type_from_info(info: dict[str, Any]) -> str | None:
     display = info.get("display") or {}
     device_type = display.get("device_type") or ""
     inches = _SIZE_INCHES_RE.search(device_type)
+
+    # A vendor the frame reports itself settles what text and resolution
+    # cannot: DAS2 Frames share 13.3" / 1200x1600 with the official Fraimic.
+    vendor = info.get("vendor")
+    if isinstance(vendor, str) and vendor:
+        vendor_types = frame_types_for_vendor(vendor)
+        if inches:
+            by_size = [ft for ft in vendor_types if ft.id.split("_")[0] == inches.group(1)]
+            if len(by_size) == 1:
+                return by_size[0].id
+        dims = dimensions_from_info(info)
+        if dims is not None:
+            by_dims = [
+                ft for ft in vendor_types
+                if ft.resolution in (dims, (dims[1], dims[0]))
+            ]
+            if len(by_dims) == 1:
+                return by_dims[0].id
+
     if inches:
         size_str = inches.group(1)
         has_clone = f"{size_str}_clone" in FRAME_TYPES

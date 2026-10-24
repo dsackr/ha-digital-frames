@@ -21,6 +21,7 @@ from custom_components.digital_frames.frame_types import (
     byte_layout_for_resolution,
     codec_id_for_resolution,
     frame_type_for_resolution,
+    frame_types_for_vendor,
     send_timeout_for_entry,
 )
 
@@ -96,3 +97,25 @@ def test_send_timeout_from_dimensions_when_size_missing():
 def test_send_timeout_default_when_unknown():
     entry = SimpleNamespace(data={})
     assert send_timeout_for_entry(entry) == DEFAULT_SEND_TIMEOUT_S
+
+
+def test_das2_frames_are_their_own_vendor_not_fraimic():
+    """DAS2 Frames (spectra-frames firmware) are community hardware: origin clone
+    (so HA sends BLE wakes), vendor DAS2, named for the vendor."""
+    from custom_components.digital_frames.frame_types import ORIGIN_CLONE, VENDOR_DAS2
+
+    das2 = frame_types_for_vendor(VENDOR_DAS2)
+    assert {ft.id for ft in das2} == {"7.3", "13.3_das2"}
+    for ft in das2:
+        assert ft.origin == ORIGIN_CLONE
+        assert ft.display_name.startswith("DAS2 Frames")
+    # The official 13.3" and the Pi Zero clone are not DAS2.
+    assert FRAME_TYPES["13.3"].vendor is None
+    assert FRAME_TYPES["13.3_clone"].vendor is None
+
+
+def test_das2_13_3_shares_the_official_split_half_codec():
+    ft = FRAME_TYPES["13.3_das2"]
+    assert ft.codec_id == CODEC_SPECTRA6_SPLIT_HALF
+    assert ft.resolution == FRAME_TYPES["13.3"].resolution
+    assert ft.platform == "ESP32-S3"

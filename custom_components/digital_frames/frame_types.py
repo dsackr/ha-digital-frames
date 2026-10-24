@@ -54,6 +54,9 @@ _LAYOUT_TO_CODEC: dict[str, str] = {
 ORIGIN_OFFICIAL = "official"
 ORIGIN_CLONE = "clone"
 
+# Vendor string reported by the spectra-frames firmware in /api/info.
+VENDOR_DAS2 = "DAS2"
+
 # Default image-upload HTTP timeout (seconds). Large panels (31.5" 2.3MB) and
 # slow ESP32 sequential panels need ample headroom (up to 10 minutes) because
 # the frame receives the body then blocks the HTTP response on the multi-stage
@@ -71,6 +74,9 @@ class FrameType:
     byte_layout: str  # LAYOUT_SPLIT_HALF | LAYOUT_SEQUENTIAL
     origin: str  # ORIGIN_OFFICIAL | ORIGIN_CLONE
     platform: str | None = None  # e.g. "Raspberry Pi Zero", "ESP32-C6"
+    # Firmware vendor string the frame reports in /api/info ("vendor"). DAS2
+    # frames run the spectra-frames firmware; other community builds leave it unset.
+    vendor: str | None = None
     send_timeout_s: int = DEFAULT_SEND_TIMEOUT_S
 
     @property
@@ -121,13 +127,24 @@ FRAME_TYPES: dict[str, FrameType] = {
         platform="Raspberry Pi Zero",
         send_timeout_s=600,
     ),
+    "13.3_das2": FrameType(
+        id="13.3_das2",
+        display_name='DAS2 Frames 13.3" (ESP32-S3)',
+        resolution=(1200, 1600),
+        byte_layout=LAYOUT_SPLIT_HALF,
+        origin=ORIGIN_CLONE,
+        platform="ESP32-S3",
+        vendor=VENDOR_DAS2,
+        send_timeout_s=600,
+    ),
     "7.3": FrameType(
         id="7.3",
-        display_name='7.3" Community Panel (ESP32-C6)',
+        display_name='DAS2 Frames 7.3" (ESP32-C6)',
         resolution=(800, 480),
         byte_layout=LAYOUT_SEQUENTIAL,
         origin=ORIGIN_CLONE,
         platform="ESP32-C6",
+        vendor=VENDOR_DAS2,
         # Redraw blocks the HTTP response; see coordinator.async_send_image.
         send_timeout_s=600,
     ),
@@ -177,6 +194,11 @@ def frame_type_for_resolution(width: int, height: int) -> FrameType:
     raise ValueError(
         f"No registered frame type has resolution {width}x{height}"
     )
+
+
+def frame_types_for_vendor(vendor: str) -> list[FrameType]:
+    """Registered frame types whose firmware reports this /api/info vendor."""
+    return [ft for ft in FRAME_TYPES.values() if ft.vendor == vendor]
 
 
 def byte_layout_for_resolution(width: int, height: int) -> str:

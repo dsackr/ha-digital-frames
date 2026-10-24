@@ -15,7 +15,8 @@ body:
         - Fraimic Canvas 13.3"
         - Fraimic Canvas 31.5"
         - 13.1" Community Clone
-        - 7.3" Community Panel (ESP32-C6)
+        - DAS2 Frames 7.3" (ESP32-C6)
+        - DAS2 Frames 13.3" (ESP32-S3)
         - Other / not sure
     validations:
       required: true

@@ -389,3 +389,19 @@ async def test_ble_wake_supported_frame_pushes_directly_without_pre_staging(
 
 
 
+
+
+async def test_das2_13_3_gets_ble_wake_but_official_13_3_does_not(
+    make_coordinator, make_frame_entry
+):
+    """BLE wake is for community frames only. The DAS2 13.3" (ESP32-S3) is one; an
+    official 13.3" Fraimic is not, even though the two share a resolution."""
+    status = {"state": "ready"}
+
+    das2 = make_coordinator(make_frame_entry(size="13.3_das2"))
+    with patch.object(das2, "get_ble_status", return_value=status):
+        assert das2.supports_ble_wake() is True
+
+    official = make_coordinator(make_frame_entry(size="13.3"))
+    with patch.object(official, "get_ble_status", return_value=status):
+        assert official.supports_ble_wake() is False

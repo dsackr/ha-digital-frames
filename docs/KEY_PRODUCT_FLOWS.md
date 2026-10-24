@@ -70,8 +70,16 @@ frame moved; pending flows dedup via `unique_id`.
   (e.g. `13.3` official vs `13.3_clone`, same resolution) similarly stopped
   guessing from MAC and now returns unknown, so `config_flow` asks the user
   to pick instead of silently mislabeling origin.
+  **DAS2 Frames** (the spectra-frames firmware: `7.3` on ESP32-C6, `13.3_das2`
+  on ESP32-S3) are their own vendor, not Fraimic: they report `vendor: "DAS2"`
+  in `/api/info`, which `detect_frame_type_from_info` uses to settle the 13.3"
+  collision, and they carry `origin=clone` so the coordinator sends BLE wakes.
 - **Test status**: Panel-tested (`flow-renderer.spec.js`,
   `frame-manage.spec.js`). **Backend-tested** —
+  `tests/python/unit/test_helpers_info.py` (vendor-based detection),
+  `tests/python/unit/test_frame_types.py` (DAS2 registry entries),
+  `tests/python/coordinator/test_coordinator_queue_on_sleep.py` (BLE wake for
+  `13.3_das2`, not for official `13.3`),
   `tests/python/config_flow/test_config_flow_user_scan.py` (menu,
   Fraimic user/manual/pick_device/DHCP steps, Meural local add, Meural
   integration_discovery + confirm, size auto-detect, dedup);
@@ -110,7 +118,7 @@ hardware, `rotate_landscape_180` now defaults **on** for those two sizes
 (`helpers.default_rotate_landscape_180`) instead of requiring every user to
 discover and tick the box — both in the options form's displayed default
 and in `render_spec_for_entry`'s actual rotation when the option has never
-been explicitly saved. Community clones (`13.3_clone`, `7.3`) and Meural/
+been explicitly saved. Community clones (`13.3_clone`, `7.3`, `13.3_das2`) and Meural/
 Samsung are unaffected and still default off. Saving the options form with
 the box unticked (an explicit `False`) always overrides the default.
 
