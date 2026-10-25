@@ -68,6 +68,8 @@ _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # How long to wait for a BLE-woken frame to come back on Wi-Fi before falling
 # back to the staged pull. Wall-clock, not iterations: each probe can itself block.
 _BLE_WAKE_WIFI_WAIT_S = 40.0
+# How long a send waits for the frame's BLE beacon to be seen before giving up.
+_BLE_BEACON_WAIT_S = 20.0
 # After this many consecutive poll failures, trigger a subnet rescan to find
 # the frame at its new IP.
 _FAILURES_BEFORE_RESCAN = 3
@@ -783,9 +785,25 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("No active Bluetooth scanners available for BLE wake")
             return False
 
+        # A standby frame advertises every 400-500 ms, and a distant adapter misses
+        # many of those, so the cache can be empty at the instant of the send. Wait
+        # for the next sighting before giving up.
         ble_device, _ = self._find_ble_device()
+        beacon_deadline = time.monotonic() + _BLE_BEACON_WAIT_S
+        while not ble_device and time.monotonic() < beacon_deadline:
+            await asyncio.sleep(0.5)
+            ble_device, _ = self._find_ble_device()
         if not ble_device:
-            _LOGGER.warning("No matching BLE beacon discovered for frame %s", self.host)
+            _LOGGER.warning(
+                "No matching BLE beacon discovered for frame %s within %.0f s",
+                self.host,
+                _BLE_BEACON_WAIT_S,
+            )
+            # Record the failed attempt so the BLE sensor does not keep showing an
+            # old success.
+            self.last_ble_wake_time = time.time()
+            self.last_ble_wake_success = False
+            self.async_update_listeners()
             return False
 
         wake_uuid = DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID

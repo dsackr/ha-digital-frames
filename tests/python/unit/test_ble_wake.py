@@ -455,3 +455,78 @@ async def test_ble_wake_gives_up_after_wait_window_and_queues():
     assert res["delivery"] == "pull"
     assert res["queued"] is True
     assert 39.0 <= clock["t"] <= 41.0
+
+
+def _beacon_coord():
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "test_frame"
+    entry.data = {"host": "192.168.1.192", "mac": "90:E5:B1:D6:E0:9C"}
+    entry.options = {}
+    coord = DigitalFramesCoordinator(hass, entry)
+    coord.async_update_listeners = MagicMock()
+    clock = {"t": 0.0}
+
+    async def fake_sleep(d):
+        clock["t"] += d
+
+    return coord, clock, fake_sleep
+
+
+@pytest.mark.asyncio
+async def test_ble_wake_waits_for_late_beacon():
+    from unittest.mock import patch
+
+    coord, clock, fake_sleep = _beacon_coord()
+    device = MagicMock()
+    device.address = "90:E5:B1:D6:E0:9C"
+    # Beacon is not in the cache at the instant of the send, then shows up after 6 s.
+    coord._find_ble_device = lambda: (device, {}) if clock["t"] >= 6.0 else (None, None)
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_bleak = MagicMock()
+    mock_bleak.BleakClient.return_value = mock_client
+
+    with patch.dict(
+        sys.modules,
+        {"homeassistant.components.bluetooth": mock_bluetooth, "bleak": mock_bleak},
+    ), patch(
+        "custom_components.digital_frames.coordinator.asyncio.sleep", fake_sleep
+    ), patch(
+        "custom_components.digital_frames.coordinator.time.monotonic", lambda: clock["t"]
+    ):
+        assert await coord.async_ble_wake() is True
+
+    assert 6.0 <= clock["t"] < 8.0
+    mock_client.write_gatt_char.assert_called_once_with(
+        DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID, b"\x01"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ble_wake_no_beacon_records_failed_attempt():
+    from unittest.mock import patch
+
+    coord, clock, fake_sleep = _beacon_coord()
+    coord._find_ble_device = lambda: (None, None)
+    coord.last_ble_wake_success = True  # stale success from an earlier wake
+
+    mock_bluetooth = MagicMock()
+    mock_bluetooth.async_scanner_count.return_value = 1
+
+    with patch.dict(
+        sys.modules, {"homeassistant.components.bluetooth": mock_bluetooth}
+    ), patch(
+        "custom_components.digital_frames.coordinator.asyncio.sleep", fake_sleep
+    ), patch(
+        "custom_components.digital_frames.coordinator.time.monotonic", lambda: clock["t"]
+    ):
+        assert await coord.async_ble_wake() is False
+
+    assert 19.0 <= clock["t"] <= 21.0
+    assert coord.last_ble_wake_success is False
+    assert coord.last_ble_wake_time is not None

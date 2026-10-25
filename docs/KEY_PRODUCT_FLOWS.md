@@ -221,7 +221,12 @@ asleep, the staged pull payload is enough — success is reported as
    BLE wake write, then polls the frame for up to 40 s (wall-clock,
    `_BLE_WAKE_WIFI_WAIT_S`) for it to rejoin Wi-Fi and pushes the image as
    soon as it answers. Only if it never answers does the send fall back to
-   the staged pull (queued).
+   the staged pull (queued). Before writing, `async_ble_wake` waits up to 20 s
+   (`_BLE_BEACON_WAIT_S`) for the frame's beacon to be seen, because a frame
+   in standby advertises every 400-500 ms and a distant adapter misses many
+   of those. If no beacon is seen, the attempt is recorded as failed
+   (`last_wake_success` false, `last_wake_sent` updated) instead of leaving
+   the previous success on the BLE sensor.
 
 **On deck (what is waiting):** while `pending_send` is set, the product
 surfaces the queued image as "on deck" — not only a boolean:
@@ -271,7 +276,8 @@ slow ESP32 sequential panels (7.3").
   poll, provision always_on flag, token URL shape, pull-only pending flush,
   pull view cleanup on get),
   `tests/python/unit/test_ble_wake.py` (BLE wake then push; waits past the
-  old 8 s window; gives up after 40 s and queues),
+  old 8 s window; gives up after 40 s and queues; waits for a late beacon;
+  records a failed wake when no beacon appears within 20 s),
   `tests/python/coordinator/test_coordinator_device_tracker.py` (IP/MAC
   match, home transition flushes, teardown),
   `tests/python/setup/test_entities.py` (queued sensor attrs image_id /
