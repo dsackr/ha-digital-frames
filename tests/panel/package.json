@@ -3,6 +3,7 @@
   "private": true,
   "description": "Browser regression tests for custom_components/digital_frames/digital-frames-panel.js. See README.md.",
   "scripts": {
+    "prototype": "node prototype-server.js",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "report": "playwright show-report"

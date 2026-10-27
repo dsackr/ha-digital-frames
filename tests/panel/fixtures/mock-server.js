@@ -12,6 +12,7 @@ const PANEL_JS_PATH = path.join(__dirname, '..', '..', '..', 'custom_components'
 const CARD_JS_PATH = path.join(__dirname, '..', '..', '..', 'custom_components', 'digital_frames', 'digital-frames-card.js');
 const HARNESS_HTML_PATH = path.join(__dirname, 'harness.html');
 const CARD_HARNESS_HTML_PATH = path.join(__dirname, 'card-harness.html');
+const PROTOTYPE_VARIANTS_JS_PATH = path.join(__dirname, 'prototype-variants.js');
 const TINY_PNG = fs.readFileSync(path.join(__dirname, 'tiny.png'));
 
 function json(res, status, body) {
@@ -277,6 +278,11 @@ function createMockServer({
     if (p === '/card-harness.html') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       fs.createReadStream(CARD_HARNESS_HTML_PATH).pipe(res);
+      return;
+    }
+    if (p === '/prototype-variants.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      fs.createReadStream(PROTOTYPE_VARIANTS_JS_PATH).pipe(res);
       return;
     }
 
@@ -851,8 +857,8 @@ function createMockServer({
   });
 
   return {
-    async start() {
-      await new Promise((resolve) => server.listen(0, resolve));
+    async start(listenPort = 0) {
+      await new Promise((resolve) => server.listen(listenPort, resolve));
       const port = server.address().port;
       return `http://localhost:${port}`;
     },
