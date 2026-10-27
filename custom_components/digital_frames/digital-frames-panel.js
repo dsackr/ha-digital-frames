@@ -51,6 +51,8 @@
       background: var(--primary-background-color);
       min-height: 100%;
       box-sizing: border-box;
+      container-type: inline-size;
+      container-name: df-panel;
     }
 
     /* ---- tab bar ---- */
@@ -2297,6 +2299,232 @@
     .btn-danger:hover {
       background: #dc2626 !important;
     }
+
+    /* ---- Variant A: Mobile App Shell & Frame Card Deck ---- */
+    .wall-mobile-layout-btn {
+      display: none;
+    }
+    .wall-frame-deck {
+      display: none;
+    }
+    .wall-deck-card {
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+    .wall-deck-card.selected {
+      border-color: var(--primary-color, #3b82f6);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+    }
+    .wall-deck-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .wall-deck-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--primary-text-color);
+    }
+    .wall-deck-meta {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .wall-deck-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+    .wall-deck-badge[data-kind="onframe"] {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+    .wall-deck-badge[data-kind="ondeck"] {
+      background: rgba(245, 158, 11, 0.18);
+      color: #d97706;
+    }
+    .wall-deck-badge[data-kind="staged"],
+    .wall-deck-badge[data-kind="scene"],
+    .wall-deck-badge[data-kind="skill"] {
+      background: rgba(59, 130, 246, 0.16);
+      color: #3b82f6;
+    }
+    .wall-deck-body {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .wall-deck-bezel {
+      flex: 0 0 auto;
+      background: #f8fafc;
+      padding: 6px;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.45);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+    .wall-deck-bezel img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 3px;
+      display: block;
+    }
+    .wall-deck-actions {
+      flex: 1 1 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .wall-deck-actions button {
+      min-height: 40px;
+      padding: 8px 12px;
+      font-size: 13px;
+      border-radius: 10px;
+    }
+
+    /* Enlarge crop-handle touch hit zone to 44x44px (WCAG target size) */
+    .crop-handle::before {
+      content: '';
+      position: absolute;
+      inset: -14px;
+    }
+
+    @media (max-width: 720px) {
+      :host {
+        padding: 12px 12px 84px 12px;
+      }
+      .tab-bar {
+        position: fixed;
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 950;
+        margin: 0;
+        padding: 4px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 2px;
+        border-bottom: none;
+        border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.14));
+        box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+      }
+      .tab-btn {
+        padding: 8px 4px;
+        font-size: 11.5px;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border-bottom: none;
+        border-top: 2px solid transparent;
+      }
+      .tab-btn.active {
+        border-bottom-color: transparent;
+        border-top-color: var(--primary-color, #3b82f6);
+      }
+
+      /* Wall mobile layout: separate Content Mode (default) from Edit Layout Mode */
+      .wall-mobile-layout-btn {
+        display: inline-flex;
+      }
+      .wall-layout-row {
+        flex-direction: column;
+      }
+      #wall-editor:not(.wall-layout-editing) .wall-palette {
+        display: none;
+      }
+      #wall-editor:not(.wall-layout-editing) .wall-canvas {
+        touch-action: pan-y;
+        min-height: 220px;
+      }
+      #wall-editor.wall-layout-editing .wall-palette {
+        flex: 0 0 auto;
+        min-height: auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .wall-frame-deck {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      /* Slide-up bottom sheet for the Wall Image Picker */
+      .wall-picker-box {
+        top: auto !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        transform: none !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        max-height: 85dvh;
+        border-radius: 18px 18px 0 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .wall-picker-body {
+        overflow-y: auto;
+        max-height: calc(85dvh - 54px);
+      }
+
+      /* Compact 2-column action grid in the Crop & Library Inspector modal */
+      .editor-stage {
+        min-height: 38dvh;
+      }
+      .editor-controls {
+        padding: 12px;
+        max-height: 50dvh;
+        overflow-y: auto;
+      }
+      .editor-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .editor-actions > button {
+        width: 100%;
+        min-height: 40px;
+      }
+
+      /* De-cluttered 2-column photo grid in My Gallery / Art Gallery */
+      #tab-my_gallery #lib-grid,
+      #tab-art_gallery #art-lib-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .lib-card .btns {
+        display: none;
+      }
+      .lib-card {
+        cursor: pointer;
+      }
+    }
   `;
 
   // -------------------------------------------------------------------------
@@ -3022,6 +3250,7 @@
             palette — click it either way to choose its image.
           </p>
           <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn-ghost wall-mobile-layout-btn" id="wall-mobile-layout-btn" title="Toggle between locked Content Mode and unlocked Layout Edit Mode on mobile">✎ Edit Layout</button>
             <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
             <button class="btn-ghost" id="wall-wallpaper-btn" title="Place one image across this wall's frames as a shared, independently zoomable/pannable background">🖼 Wallpaper</button>
             <button class="btn-ghost" id="wall-wallpaper-choose-btn" style="display:none" title="Choose (or change) the wallpaper image">🖼 Choose Image…</button>
@@ -3058,6 +3287,7 @@
             <div class="wall-palette" id="wall-palette"></div>
             <div class="wall-canvas" id="wall-canvas"></div>
           </div>
+          <div class="wall-frame-deck" id="wall-frame-deck"></div>
 
           <!-- The Photo Library entry point: a bookshelf sitting under the
                gallery wall, like the console table under real hung frames.
@@ -4170,8 +4400,10 @@
 
     _tickStatus(frame) {
       // Attribute-hook based (not id) so one code path serves every place a
-      // frame's status appears -- today that's the wall tile footers.
-      const els = this.shadowRoot.querySelectorAll(`[data-status-entity="${frame.entityId}"]`);
+      // frame's status appears -- wall tile footers and mobile frame deck cards.
+      const els = this.shadowRoot.querySelectorAll(
+        `[data-status-entity="${frame.entityId}"], [data-deck-status-entity="${frame.entityId}"]`
+      );
       if (!els.length) return;
 
       const state = this._hass.states[frame.entityId];
@@ -6644,6 +6876,10 @@
       el.querySelector(`#thumb-${sid}`).addEventListener('click', () => {
         this._openEditor(image);
       });
+      const previewNameEl = el.querySelector('.preview-name');
+      if (previewNameEl) {
+        previewNameEl.addEventListener('click', () => this._openEditor(image));
+      }
 
       el.querySelector(`#lib-voice-${sid}`).addEventListener('click', () => {
         this._openVoicePicker(image);
@@ -8289,6 +8525,16 @@
       this.shadowRoot.getElementById('wall-send-btn').addEventListener('click', () => this._sendWallToFrames());
       this.shadowRoot.getElementById('wall-schedule-btn').addEventListener('click', () => this._scheduleFromWall());
       this.shadowRoot.getElementById('wall-grid-align-btn').addEventListener('click', () => this._alignWallToGrid());
+      const mobileLayoutBtn = this.shadowRoot.getElementById('wall-mobile-layout-btn');
+      if (mobileLayoutBtn) {
+        mobileLayoutBtn.addEventListener('click', () => {
+          const editor = this.shadowRoot.getElementById('wall-editor');
+          if (!editor) return;
+          const editing = editor.classList.toggle('wall-layout-editing');
+          mobileLayoutBtn.classList.toggle('active', editing);
+          mobileLayoutBtn.textContent = editing ? '✓ Done Layout' : '✎ Edit Layout';
+        });
+      }
       this.shadowRoot.getElementById('wall-wallpaper-btn').addEventListener('click', () => this._toggleWallWallpaperMode());
       this.shadowRoot.getElementById('wall-wallpaper-choose-btn').addEventListener('click', () => this._openWallWallpaperPicker());
       this.shadowRoot.getElementById('wall-wallpaper-picker-cancel').addEventListener('click', () => this._closeWallWallpaperPicker());
@@ -9055,6 +9301,12 @@
           tile.focus({ preventScroll: true });
         }
       }
+      const deck = this.shadowRoot.getElementById('wall-frame-deck');
+      if (deck) {
+        for (const card of deck.querySelectorAll('.wall-deck-card')) {
+          card.classList.toggle('selected', this._wallSelection.has(card.dataset.entryId));
+        }
+      }
       this._updateWallAlignToolbar();
     }
 
@@ -9194,6 +9446,7 @@
       canvas.classList.toggle('wallpaper-mode', this._wallWallpaperMode);
       if (this._wallWallpaperMode) {
         this._renderWallWallpaperTiles(zoomLayer);
+        this._renderWallFrameDeck();
         this._updateWallSaveToSceneAvailability();
         this._updateWallAlignToolbar();
         if (this._hass) this._tickAllStatus();
@@ -9342,9 +9595,152 @@
         tile.addEventListener('pointerdown', (e) => this._wallBeginDrag(e, entryId, 'tile'));
       }
 
+      this._renderWallFrameDeck();
       this._updateWallSaveToSceneAvailability();
       this._updateWallAlignToolbar();
       if (this._hass) this._tickAllStatus();
+    }
+
+    // Variant A Touch-First Frame Card Deck: renders one card per placed
+    // frame on the active wall with its physical aspect-ratio bezel preview,
+    // 3-state status pill (on frame / on deck / staged), live battery/online
+    // telemetry, and explicit touch action buttons (replacing the hover-only
+    // .wall-tile-hover-overlay quadrants on narrow/mobile viewports).
+    _renderWallFrameDeck() {
+      const deck = this.shadowRoot.getElementById('wall-frame-deck');
+      if (!deck) return;
+      deck.innerHTML = '';
+
+      const modeling = !!this._wallActiveSceneId
+        || Object.keys(this._wallPendingMappings).length > 0;
+
+      for (const entryId of Object.keys(this._wallPlacements)) {
+        const frame = this._frames.find(f => f.entryId === entryId);
+        if (!frame) continue;
+
+        const card = document.createElement('div');
+        card.className = 'wall-deck-card';
+        card.dataset.entryId = entryId;
+        if (this._wallSelection.has(entryId)) card.classList.add('selected');
+
+        const mapping = this._wallEffectiveMapping(entryId);
+        const stagedThisSession =
+          Object.prototype.hasOwnProperty.call(this._wallPendingMappings, entryId)
+          && this._wallPendingMappings[entryId];
+        const isSkill = mapping && typeof mapping === 'object' && mapping.type === 'skill';
+        const mappedImageId = this._wallMappingImageId(mapping);
+        const deckImageId = frame.queuedImageId || (frame.queued ? frame.lastImageId : null);
+
+        let badgeKind = '';
+        let badgeLabel = '';
+        if (isSkill) {
+          badgeKind = stagedThisSession ? 'staged' : 'skill';
+          badgeLabel = stagedThisSession ? '🎨 Staged' : '✨ Live Content';
+        } else if (mappedImageId) {
+          badgeKind = stagedThisSession ? 'staged' : 'scene';
+          badgeLabel = stagedThisSession ? '🎨 Staged' : '🎬 Scene';
+        } else if (!modeling && frame.queued && (deckImageId || frame.hasThumbnail)) {
+          badgeKind = 'ondeck';
+          badgeLabel = '⏳ On Deck';
+        } else if (!modeling && (frame.lastImageId || frame.hasThumbnail)) {
+          badgeKind = 'onframe';
+          badgeLabel = '🟢 On Frame';
+        }
+
+        const isPortrait = frame.orientation === 'portrait';
+        const bezelW = isPortrait ? 68 : 96;
+        const bezelH = isPortrait ? 96 : 68;
+        const resLabel = frame.width && frame.height ? `${frame.width}×${frame.height}` : '';
+        const orientLabel = frame.orientation || 'auto';
+
+        card.innerHTML = `
+          <div class="wall-deck-header">
+            <div>
+              <div class="wall-deck-title">${this._esc(frame.title)}</div>
+              <div class="wall-deck-meta">
+                <span>${this._esc([resLabel, orientLabel].filter(Boolean).join(' · '))}</span>
+                <span class="wall-deck-status" data-deck-status-entity="${this._esc(frame.entityId || '')}"></span>
+              </div>
+            </div>
+            ${badgeKind ? `<span class="wall-deck-badge" data-kind="${badgeKind}">${badgeLabel}</span>` : ''}
+          </div>
+          <div class="wall-deck-body">
+            <div class="wall-deck-bezel" style="width:${bezelW}px;height:${bezelH}px">🖼</div>
+            <div class="wall-deck-actions">
+              <button class="btn-primary" data-deck-action="select-image">🖼 Change Art</button>
+              <button class="btn-ghost" data-deck-action="crop">✂ Crop</button>
+              ${this._isAdmin() ? `
+                <button class="btn-ghost" data-deck-action="info">ℹ Info</button>
+                <button class="btn-ghost" data-deck-action="configure">⚙ Configure</button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+
+        const bezel = card.querySelector('.wall-deck-bezel');
+        if (isSkill) {
+          const skill = (this._skills || []).find(s => s.skill_id === mapping.skill_id);
+          bezel.innerHTML = `<div style="font-size:24px">${this._skillIcon(skill ? skill.content_mode : null)}</div>`;
+        } else if (mappedImageId) {
+          bezel.innerHTML = '';
+          this._loadThumbnail(mappedImageId, bezel);
+        } else if (!modeling && frame.queued && deckImageId) {
+          bezel.innerHTML = '';
+          this._loadThumbnail(deckImageId, bezel);
+        } else if (!modeling && frame.queued && frame.hasThumbnail) {
+          bezel.innerHTML = '';
+          this._loadFrameThumbnail(frame.entryId, bezel);
+        } else if (!modeling && frame.lastImageId) {
+          bezel.innerHTML = '';
+          this._loadThumbnail(frame.lastImageId, bezel);
+        } else if (!modeling && frame.hasThumbnail) {
+          bezel.innerHTML = '';
+          this._loadFrameThumbnail(frame.entryId, bezel);
+        }
+
+        const cropTargetId = mappedImageId || frame.lastImageId || null;
+        const cropBtn = card.querySelector('[data-deck-action="crop"]');
+        if (cropBtn) {
+          cropBtn.disabled = !cropTargetId;
+          cropBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._openWallDeckCrop(entryId);
+          });
+        }
+
+        const selectImgBtn = card.querySelector('[data-deck-action="select-image"]');
+        if (selectImgBtn) {
+          selectImgBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._wallSelectTile(entryId);
+            this._openWallImagePicker(entryId);
+          });
+        }
+
+        const infoBtn = card.querySelector('[data-deck-action="info"]');
+        if (infoBtn) {
+          infoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._openFrameSettingsMenu(frame);
+          });
+        }
+
+        const configBtn = card.querySelector('[data-deck-action="configure"]');
+        if (configBtn) {
+          configBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._openFrameConfigureFlow(frame);
+          });
+        }
+
+        deck.appendChild(card);
+      }
+    }
+
+    async _openWallDeckCrop(entryId) {
+      this._wallImagePickerEntryId = entryId;
+      this._wallPickerSelectedFile = null;
+      await this._cropFromWallPicker();
     }
 
     // -------------------------------------------------------------------

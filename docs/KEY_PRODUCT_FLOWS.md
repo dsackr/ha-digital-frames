@@ -716,7 +716,7 @@ crop editor (KPF 29), whose "Save & Send" persists the crop then
 immediately re-sends so the physical frame updates.
 - **Entry points**: `library.py` (`async_set_crop`, `async_clear_crop`),
   `library_http.py` (`DigitalFramesLibraryCropView`), `digital-frames-panel.js`
-  (`_openEditor`, `_cropFromWallPicker`), `digital-frames-card.js` (`_openCrop`,
+  (`_openEditor`, `_cropFromWallPicker`, `_openWallDeckCrop`), `digital-frames-card.js` (`_openCrop`,
   `_cropSaveSend`).
 - **If it silently breaks**: a saved crop doesn't apply on next send, or
   clearing a crop leaves stale cached renders for the same orientation.
@@ -1820,6 +1820,16 @@ Battery-powered e-paper displays (e.g. 7.3" Spectra 6 and 13.3" Spectra 6 frames
 - **Entry points**: `const.py` (`DIGITAL_FRAMES_BLE_SERVICE_UUID`, `DIGITAL_FRAMES_BLE_WAKE_CHAR_UUID`, `DIGITAL_FRAMES_BLE_STATUS_CHAR_UUID`), `coordinator.py` (`DigitalFramesCoordinator.async_ble_wake`, `DigitalFramesCoordinator.async_send_image_or_queue`), `__init__.py` (`_handle_wake`), `manifest.json` (`after_dependencies: ["bluetooth"]`).
 - **If it silently breaks**: If Home Assistant has no active Bluetooth adapters/proxies configured, `async_scanner_count` returns 0 and the coordinator immediately falls back to staged pull delivery without delay. If the frame's BLE advertisement is out of radio range or the connection times out, `async_ble_wake` returns `False` and falls back to pull delivery.
 - **Test status**: **Backend-tested** — `tests/python/unit/test_ble_wake.py` (verifies BLE constants, scanner count guard, successful BLE wake GATT write, connection exception fallback, coordinator `async_send_image_or_queue` triggering `ble+push` on successful wake, and falling back to staged pull on failure).
+
+## 41. Mobile-first panel shell & touch Frame Card Deck (Variant A)
+On narrow/mobile viewports (`<= 720px`, such as the Home Assistant iOS/Android Companion App), the panel adapts its shell and primary flows for touch ergonomics without altering desktop behavior:
+1. **Bottom-docked navigation bar**: `.tab-bar` docks to `position: fixed; bottom: 0` as a 5-column grid so all top-level tabs remain reachable by thumb without horizontal overflow.
+2. **Locked Content Mode vs. Edit Layout Mode on the Walls tab**: By default on mobile, `#wall-editor` hides the 160px `.wall-palette` sidebar and sets `#wall-canvas` to `touch-action: pan-y` so the wall overview spans 100% width and never traps vertical page scrolling. Tapping `#wall-mobile-layout-btn` (`✎ Edit Layout` / `✓ Done Layout`) toggles `.wall-layout-editing`, stacking `.wall-palette` above `#wall-canvas` and re-enabling `touch-action: none` for drag/reposition.
+3. **Touch-First Frame Card Deck (`#wall-frame-deck`)**: Renders a vertical deck of `.wall-deck-card` cards beneath the wall overview on mobile. Each card shows the frame's physical aspect-ratio bezel preview, live battery/online telemetry (`data-deck-status-entity`), an explicit 3-state status pill (`🟢 On Frame`, `⏳ On Deck`, `🎨 Staged` / `🎬 Scene` / `✨ Live Content`), and 1-tap touch buttons (`🖼 Change Art`, `✂ Crop`, `ℹ Info`, `⚙ Configure`) that replace reliance on the hover-only `.wall-tile-hover-overlay` quadrants.
+4. **Slide-up Bottom Sheet & Compact Crop / Gallery Layouts**: On mobile viewports, `.wall-picker-box` docks to the bottom edge as a full-width slide-up sheet (`max-height: 85dvh`), `#editor-overlay` arranges `.editor-actions` in a compact 2-column grid with 44×44px `.crop-handle` touch hit areas, and `#lib-grid` / `#art-lib-grid` render a 2-column photo grid with per-card inline button stacks hidden in favor of tapping any card into `#editor-overlay`.
+- **Entry points**: `digital-frames-panel.js` (`_buildShell`, `_wireWallToolbar`, `_renderWallCanvas`, `_renderWallFrameDeck`, `_openWallDeckCrop`, `_tickStatus`, `_buildLibraryCard`).
+- **If it silently breaks**: Mobile users get trapped on `#wall-canvas` unable to scroll down the page, the 160px `.wall-palette` crushes the canvas to ~150px wide on a phone, frame actions (`select-image`, `info`, `configure`) remain unreachable on touchscreens without hover, `.editor-actions`'s 8 full-width buttons crush the crop stage on mobile, or `.tab-bar` overflows horizontally off screen.
+- **Test status**: **Panel-tested** — `tests/panel/mobile-ux.spec.js` (verifies bottom-docked `.tab-bar`, default locked Content Mode hiding `.wall-palette` with `touch-action: pan-y` and `#wall-mobile-layout-btn` toggling `.wall-layout-editing`, `.wall-deck-card` 3-state badges + live telemetry + 1-tap `Change Art` bottom-sheet staging + direct `Crop` handoff to `#editor-overlay` with 2-column grid actions, and de-cluttered 2-column `#lib-grid` in `My Gallery`).
 
 ---
 
