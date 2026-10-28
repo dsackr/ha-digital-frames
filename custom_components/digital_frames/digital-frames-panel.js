@@ -2301,6 +2301,9 @@
     }
 
     /* ---- Variant A: Mobile App Shell & Frame Card Deck ---- */
+    .mobile-app-header {
+      display: none;
+    }
     .wall-mobile-layout-btn {
       display: none;
     }
@@ -2393,15 +2396,18 @@
     }
     .wall-deck-actions {
       flex: 1 1 auto;
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
     }
     .wall-deck-actions button {
       min-height: 40px;
-      padding: 8px 12px;
+      padding: 8px 10px;
       font-size: 13px;
       border-radius: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* Enlarge crop-handle touch hit zone to 44x44px (WCAG target size) */
@@ -2413,7 +2419,34 @@
 
     @media (max-width: 720px) {
       :host {
-        padding: 12px 12px 84px 12px;
+        padding: 10px 12px 84px 12px;
+      }
+      .mobile-app-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+      }
+      .mobile-menu-btn {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.14));
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        font-size: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .mobile-app-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--primary-text-color);
       }
       .tab-bar {
         position: fixed;
@@ -2423,7 +2456,7 @@
         right: 0;
         z-index: 950;
         margin: 0;
-        padding: 4px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+        padding: 4px 4px calc(6px + env(safe-area-inset-bottom, 0px));
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 2px;
@@ -2432,33 +2465,93 @@
         box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
       }
       .tab-btn {
-        padding: 8px 4px;
-        font-size: 11.5px;
+        padding: 6px 2px;
+        font-size: 10.5px;
+        line-height: 1.15;
         text-align: center;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         border-bottom: none;
         border-top: 2px solid transparent;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
       }
+      .tab-btn[data-tab="expansion_packs"] {
+        font-size: 9.5px;
+        letter-spacing: -0.02em;
+      }
+      .tab-btn[data-tab="walls"]::before { content: '🖼'; font-size: 15px; line-height: 1; }
+      .tab-btn[data-tab="my_gallery"]::before { content: '👤'; font-size: 15px; line-height: 1; }
+      .tab-btn[data-tab="art_gallery"]::before { content: '🎨'; font-size: 15px; line-height: 1; }
+      .tab-btn[data-tab="widgets"]::before { content: '⚙'; font-size: 15px; line-height: 1; }
+      .tab-btn[data-tab="expansion_packs"]::before { content: '📦'; font-size: 15px; line-height: 1; }
       .tab-btn.active {
         border-bottom-color: transparent;
         border-top-color: var(--primary-color, #3b82f6);
       }
 
+      /* Wall switcher toolbar: stack on mobile so #wall-strip gets full width */
+      #tab-walls > .lib-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      #tab-walls > .lib-toolbar > .lib-backend {
+        width: 100%;
+      }
+      #tab-walls > .lib-toolbar > .lib-toolbar-actions {
+        margin-left: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      #tab-walls > .lib-toolbar > .lib-toolbar-actions > button {
+        flex: 1 1 auto;
+        font-size: 12.5px;
+        padding: 7px 10px;
+      }
+      #tab-walls > .lib-toolbar > .lib-toolbar-actions > #settings-open-btn {
+        flex: 0 0 auto;
+      }
+
       /* Wall mobile layout: separate Content Mode (default) from Edit Layout Mode */
+      #wall-editor {
+        display: flex;
+        flex-direction: column;
+      }
       .wall-mobile-layout-btn {
         display: inline-flex;
       }
       .wall-layout-row {
         flex-direction: column;
+        align-items: stretch;
+      }
+      .wall-canvas {
+        width: 100%;
+      }
+      #wall-editor:not(.wall-layout-editing) .wall-layout-heading,
+      #wall-editor:not(.wall-layout-editing) .wall-layout-desc,
+      #wall-editor:not(.wall-layout-editing) .wall-zoom-hint,
+      #wall-editor:not(.wall-layout-editing) #wall-grid-align-btn,
+      #wall-editor:not(.wall-layout-editing) #wall-wallpaper-btn,
+      #wall-editor:not(.wall-layout-editing) .wall-zoom-controls {
+        display: none;
+      }
+      #wall-editor:not(.wall-layout-editing) .wall-layout-toolbar {
+        margin-bottom: 4px !important;
+        justify-content: flex-end;
       }
       #wall-editor:not(.wall-layout-editing) .wall-palette {
         display: none;
       }
       #wall-editor:not(.wall-layout-editing) .wall-canvas {
         touch-action: pan-y;
-        min-height: 220px;
+        display: none;
       }
       #wall-editor.wall-layout-editing .wall-palette {
         flex: 0 0 auto;
@@ -2467,14 +2560,32 @@
         flex-wrap: wrap;
         gap: 8px;
       }
+      #wall-editor.wall-layout-editing .wall-canvas {
+        display: block;
+        width: 100%;
+        min-height: 280px;
+        touch-action: none;
+      }
       .wall-frame-deck {
         display: flex;
         flex-direction: column;
         gap: 12px;
-        margin-top: 14px;
+        margin-top: 6px;
+      }
+      .wall-scene-controls > .btns {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .wall-scene-controls > .btns > button {
+        width: 100%;
       }
 
       /* Slide-up bottom sheet for the Wall Image Picker */
+      .wall-picker-overlay {
+        background: rgba(15, 23, 42, 0.55);
+        z-index: 1200;
+      }
       .wall-picker-box {
         top: auto !important;
         bottom: 0 !important;
@@ -2491,16 +2602,38 @@
       .wall-picker-body {
         overflow-y: auto;
         max-height: calc(85dvh - 54px);
+        padding: 12px 14px calc(20px + env(safe-area-inset-bottom, 0px));
+      }
+      #wall-image-picker-grid {
+        max-height: none;
+        overflow: visible;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      #wall-image-picker-grid .image-picker-cell {
+        height: auto;
+        aspect-ratio: 1 / 1;
       }
 
       /* Compact 2-column action grid in the Crop & Library Inspector modal */
+      .editor-overlay {
+        background: #0f172a;
+        z-index: 1200;
+        overflow-y: auto;
+      }
+      .editor-header {
+        padding: 10px 14px;
+      }
       .editor-stage {
-        min-height: 38dvh;
+        flex: 1 1 180px;
+        min-height: 160px;
+        margin: 0 12px;
       }
       .editor-controls {
-        padding: 12px;
-        max-height: 50dvh;
-        overflow-y: auto;
+        padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+      }
+      .editor-row {
+        margin-bottom: 8px;
       }
       .editor-actions {
         display: grid;
@@ -2509,11 +2642,14 @@
       }
       .editor-actions > button {
         width: 100%;
-        min-height: 40px;
+        min-height: 38px;
+        padding: 8px 10px;
+        font-size: 13px;
       }
 
       /* De-cluttered 2-column photo grid in My Gallery / Art Gallery */
       #tab-my_gallery #lib-grid,
+      #tab-art_gallery #art-grid,
       #tab-art_gallery #art-lib-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
@@ -2521,8 +2657,47 @@
       .lib-card .btns {
         display: none;
       }
+      .lib-card .preview-tags {
+        flex-wrap: nowrap !important;
+        overflow: hidden;
+      }
+      .lib-card .preview-tags span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .lib-card {
         cursor: pointer;
+        padding: 10px;
+      }
+      .lib-thumb {
+        height: 130px;
+        margin-bottom: 6px;
+      }
+      .album-tile-actions {
+        flex-wrap: wrap;
+      }
+      .album-tile-actions button {
+        flex: 1 1 calc(50% - 4px);
+        white-space: nowrap;
+        padding: 6px 4px;
+        font-size: 11.5px;
+      }
+      .lib-breadcrumb {
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .lib-breadcrumb-title {
+        flex: 1 1 auto;
+        min-width: 80px;
+      }
+
+      /* Widgets & Schedules tab mobile layout */
+      .schedule-card-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
       }
     }
   `;
@@ -3090,6 +3265,12 @@
     }
 
     _wireNav() {
+      const haMenuBtn = this.shadowRoot.getElementById('ha-menu-btn');
+      if (haMenuBtn) {
+        haMenuBtn.addEventListener('click', () => {
+          this.dispatchEvent(new CustomEvent('hass-toggle-menu', { bubbles: true, composed: true }));
+        });
+      }
       this.shadowRoot.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => this._setTab(btn.dataset.tab));
       });
@@ -3211,6 +3392,11 @@
       this.shadowRoot.innerHTML = `
         <style>${CSS}</style>
 
+        <div class="mobile-app-header" id="mobile-app-header">
+          <button class="mobile-menu-btn" id="ha-menu-btn" title="Open Home Assistant menu" aria-label="Open Home Assistant menu">☰</button>
+          <span class="mobile-app-title">Digital Frames</span>
+        </div>
+
         <div class="tab-bar" id="tab-bar">
           <button class="tab-btn active" data-tab="walls">Walls</button>
           <button class="tab-btn" data-tab="my_gallery">My Gallery</button>
@@ -3241,15 +3427,15 @@
         </div>
 
         <div id="wall-editor">
-          <h3 style="margin:16px 0 6px;font-size:14px">Layout</h3>
-          <p style="font-size:12px;color:var(--secondary-text-color);margin:0 0 10px">
+          <h3 class="wall-layout-heading" style="margin:16px 0 6px;font-size:14px">Layout</h3>
+          <p class="wall-layout-desc" style="font-size:12px;color:var(--secondary-text-color);margin:0 0 10px">
             Drag a frame from the palette onto the wall, then drag a placed frame to
             reposition it — positions snap to a grid, save automatically, and tiles
             can't overlap. Click a tile to select it, then nudge it with the arrow
             keys. A frame works the same whether it's on the wall or still in the
             palette — click it either way to choose its image.
           </p>
-          <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="wall-layout-toolbar" style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn-ghost wall-mobile-layout-btn" id="wall-mobile-layout-btn" title="Toggle between locked Content Mode and unlocked Layout Edit Mode on mobile">✎ Edit Layout</button>
             <button class="btn-ghost" id="wall-grid-align-btn" title="Align all placed frames on this wall to a clean grid layout">⧉ Align Wall to Grid</button>
             <button class="btn-ghost" id="wall-wallpaper-btn" title="Place one image across this wall's frames as a shared, independently zoomable/pannable background">🖼 Wallpaper</button>
@@ -3261,7 +3447,7 @@
               <button class="btn-ghost" id="wall-zoom-reset-btn" title="Reset zoom to 100%">⟲ Reset Zoom</button>
             </span>
           </div>
-          <p style="font-size:11px;color:var(--secondary-text-color);margin:-6px 0 10px">
+          <p class="wall-zoom-hint" style="font-size:11px;color:var(--secondary-text-color);margin:-6px 0 10px">
             💡 Zoom: Ctrl/Cmd + scroll wheel, or the buttons above. Pan: hold Space and drag,
             middle-click drag, or a two-finger drag on touch.
           </p>
@@ -3321,21 +3507,23 @@
             </button>
           </div>
 
-          <h3 style="margin:22px 0 6px;font-size:14px">Select a Scene</h3>
-          <div class="modal-row" style="max-width:320px">
-            <label for="wall-scene-select">Scene</label>
-            <select id="wall-scene-select"><option value="">Create New…</option></select>
-          </div>
-          <div class="wall-lock-hint" id="wall-lock-hint" style="display:none"></div>
+          <div class="wall-scene-controls">
+            <h3 style="margin:22px 0 6px;font-size:14px">Select a Scene</h3>
+            <div class="modal-row" style="max-width:320px">
+              <label for="wall-scene-select">Scene</label>
+              <select id="wall-scene-select"><option value="">Create New…</option></select>
+            </div>
+            <div class="wall-lock-hint" id="wall-lock-hint" style="display:none"></div>
 
-          <div class="btns" style="margin-top:10px">
-            <button class="btn-primary" id="wall-send-btn">▶ Send to Frames</button>
-            <button class="btn-ghost" id="wall-schedule-btn" title="Send this scene at a future time">🗓 Schedule…</button>
-            <button class="btn-primary" id="wall-save-scene-btn">Save Scene</button>
-            <button class="btn-ghost" id="wall-clear-all-btn" title="Clear every frame's image assignment (the physical frames are untouched until you send)">✕ Clear All</button>
-            <button class="btn-ghost" id="wall-delete-scene-btn" style="display:none">🗑 Delete Scene</button>
+            <div class="btns" style="margin-top:10px">
+              <button class="btn-primary" id="wall-send-btn">▶ Send to Frames</button>
+              <button class="btn-ghost" id="wall-schedule-btn" title="Send this scene at a future time">🗓 Schedule…</button>
+              <button class="btn-primary" id="wall-save-scene-btn">Save Scene</button>
+              <button class="btn-ghost" id="wall-clear-all-btn" title="Clear every frame's image assignment (the physical frames are untouched until you send)">✕ Clear All</button>
+              <button class="btn-ghost" id="wall-delete-scene-btn" style="display:none">🗑 Delete Scene</button>
+            </div>
+            <div class="feedback" id="wall-scene-fb"></div>
           </div>
-          <div class="feedback" id="wall-scene-fb"></div>
         </div>
         </div><!-- /tab-walls -->
 
@@ -3968,7 +4156,7 @@
                    button: clicking a thumbnail (or choosing a file) only
                    selects/stages. Sending is always its own deliberate
                    click. -->
-              <div class="modal-row" style="flex-direction:row;gap:8px;flex-wrap:wrap">
+              <div class="modal-row" style="display:flex;flex-direction:row;gap:8px;flex-wrap:wrap">
                 <button class="btn-primary" id="wall-picker-send-btn" style="flex:1 1 100%" disabled>▶ Send</button>
                 <!-- Schedule needs a library image_id, so a staged upload
                      file (never uploaded until Send) can't be scheduled. -->
@@ -6932,6 +7120,15 @@
       }
     }
 
+    _loadDeckThumbnail(imageId, container) {
+      const cached = this._thumbUrls[imageId];
+      if (cached) {
+        container.innerHTML = `<img src="${cached}" alt="">`;
+        return;
+      }
+      this._enqueueThumbFetch(imageId, container);
+    }
+
     _enqueueThumbFetch(imageId, container) {
       this._thumbQueue.push({ imageId, container });
       this._pumpThumbQueue();
@@ -7664,6 +7861,8 @@
 
       const img = this.shadowRoot.getElementById('editor-img');
       img.removeAttribute('src');
+      const cropEl = this.shadowRoot.getElementById('editor-cropbox');
+      if (cropEl) cropEl.style.display = 'none';
 
       // Identity of this specific open, not just this.image_id: if the
       // editor is closed and reopened for a different image while this
@@ -9682,19 +9881,14 @@
           const skill = (this._skills || []).find(s => s.skill_id === mapping.skill_id);
           bezel.innerHTML = `<div style="font-size:24px">${this._skillIcon(skill ? skill.content_mode : null)}</div>`;
         } else if (mappedImageId) {
-          bezel.innerHTML = '';
-          this._loadThumbnail(mappedImageId, bezel);
+          this._loadDeckThumbnail(mappedImageId, bezel);
         } else if (!modeling && frame.queued && deckImageId) {
-          bezel.innerHTML = '';
-          this._loadThumbnail(deckImageId, bezel);
+          this._loadDeckThumbnail(deckImageId, bezel);
         } else if (!modeling && frame.queued && frame.hasThumbnail) {
-          bezel.innerHTML = '';
           this._loadFrameThumbnail(frame.entryId, bezel);
         } else if (!modeling && frame.lastImageId) {
-          bezel.innerHTML = '';
-          this._loadThumbnail(frame.lastImageId, bezel);
+          this._loadDeckThumbnail(frame.lastImageId, bezel);
         } else if (!modeling && frame.hasThumbnail) {
-          bezel.innerHTML = '';
           this._loadFrameThumbnail(frame.entryId, bezel);
         }
 

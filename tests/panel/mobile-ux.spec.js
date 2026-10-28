@@ -57,46 +57,66 @@ test.describe('Mobile UX (Variant A: Mobile App Shell & Frame Deck)', () => {
     await gotoPanel(page, baseUrl, { frames: FRAMES });
 
     const mobileShell = await page.evaluate(() => {
-      const root = document.getElementById('panel').shadowRoot;
+      const panel = document.getElementById('panel');
+      const root = panel.shadowRoot;
+      let menuToggled = false;
+      panel.addEventListener('hass-toggle-menu', () => { menuToggled = true; }, { once: true });
+      root.getElementById('ha-menu-btn').click();
+
       const tabBar = root.getElementById('tab-bar');
       const tabStyle = getComputedStyle(tabBar);
       const palette = root.getElementById('wall-palette');
       const canvas = root.getElementById('wall-canvas');
       const deck = root.getElementById('wall-frame-deck');
+      const wallStrip = root.getElementById('wall-strip');
+      const firstCard = deck.querySelector('.wall-deck-card');
       return {
+        menuToggled,
         tabPosition: tabStyle.position,
         tabBottom: tabStyle.bottom,
+        wallStripWidth: Math.round(wallStrip.getBoundingClientRect().width),
         paletteDisplay: getComputedStyle(palette).display,
+        canvasDisplay: getComputedStyle(canvas).display,
         canvasTouchAction: getComputedStyle(canvas).touchAction,
         deckDisplay: getComputedStyle(deck).display,
         deckCardCount: deck.querySelectorAll('.wall-deck-card').length,
+        firstCardTop: Math.round(firstCard.getBoundingClientRect().top),
       };
     });
 
+    expect(mobileShell.menuToggled).toBe(true);
     expect(mobileShell.tabPosition).toBe('fixed');
     expect(mobileShell.tabBottom).toBe('0px');
-    // Default Content Mode hides the 160px palette so the canvas spans full width
-    // and allows vertical page scrolling (pan-y).
+    expect(mobileShell.wallStripWidth).toBeGreaterThan(250);
+    // Default Content Mode hides the desktop canvas/palette clutter so the
+    // Frame Card Deck sits immediately above the fold.
     expect(mobileShell.paletteDisplay).toBe('none');
+    expect(mobileShell.canvasDisplay).toBe('none');
     expect(mobileShell.canvasTouchAction).toBe('pan-y');
     expect(mobileShell.deckDisplay).toBe('flex');
     expect(mobileShell.deckCardCount).toBe(2);
+    expect(mobileShell.firstCardTop).toBeLessThan(350);
 
-    // Toggling "✎ Edit Layout" reveals the palette and switches the canvas to touch-action: none.
+    // Toggling "✎ Edit Layout" reveals the palette and full-width canvas with touch-action: none.
     await page.evaluate(() => {
       document.getElementById('panel').shadowRoot.getElementById('wall-mobile-layout-btn').click();
     });
 
     const editMode = await page.evaluate(() => {
       const root = document.getElementById('panel').shadowRoot;
+      const canvas = root.getElementById('wall-canvas');
       return {
         btnText: root.getElementById('wall-mobile-layout-btn').textContent,
         paletteDisplay: getComputedStyle(root.getElementById('wall-palette')).display,
-        canvasTouchAction: getComputedStyle(root.getElementById('wall-canvas')).touchAction,
+        canvasDisplay: getComputedStyle(canvas).display,
+        canvasWidth: Math.round(canvas.getBoundingClientRect().width),
+        canvasTouchAction: getComputedStyle(canvas).touchAction,
       };
     });
     expect(editMode.btnText).toContain('Done Layout');
     expect(editMode.paletteDisplay).toBe('flex');
+    expect(editMode.canvasDisplay).toBe('block');
+    expect(editMode.canvasWidth).toBeGreaterThan(300);
     expect(editMode.canvasTouchAction).toBe('none');
   });
 
