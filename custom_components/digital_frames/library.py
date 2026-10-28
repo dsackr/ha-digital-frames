@@ -1806,6 +1806,13 @@ class LibraryManager:
         # on the same manifest read-modify-write.
         self._backfill_pending: set[str] = set()
         self._backfill_task: asyncio.Task | None = None
+        # Coalesce concurrent in-flight original fetches (e.g. a 5-frame wall
+        # scene where every frame crops the same master image_id) and cache the
+        # most recently fetched original briefly so back-to-back bin + preview
+        # steps don't re-download the same multi-MB photo from Google Drive /
+        # Dropbox 10-15 times per scene send.
+        self._inflight_originals: dict[str, asyncio.Future[tuple[bytes, str]]] = {}
+        self._recent_original: tuple[str, float, bytes, str] | None = None
 
     async def async_load(self) -> None:
         """Load persisted backend settings (if any) and stand up that backend.
@@ -1892,6 +1899,7 @@ class LibraryManager:
         candidate = self._build_backend(settings)
         await candidate.async_setup()  # raises LibraryBackendError on failure
         self._backend = candidate
+        self._recent_original = None
         # async_setup() may have filled in extra bookkeeping fields (Drive's
         # folder/manifest ids); persist whatever the backend ended up with,
         # not just the caller's original input.
@@ -1929,7 +1937,28 @@ class LibraryManager:
         return [img.to_dict() for img in images]
 
     async def async_get_original(self, image_id: str) -> tuple[bytes, str]:
-        return await self._backend.async_get_original(image_id)
+        recent = self._recent_original
+        if recent is not None and recent[0] == image_id and (time.monotonic() - recent[1]) < 30.0:
+            return recent[2], recent[3]
+        inflight = self._inflight_originals.get(image_id)
+        if inflight is not None:
+            return await asyncio.shield(inflight)
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[tuple[bytes, str]] = loop.create_future()
+        self._inflight_originals[image_id] = fut
+        try:
+            res = await self._backend.async_get_original(image_id)
+            self._recent_original = (image_id, time.monotonic(), res[0], res[1])
+            if not fut.done():
+                fut.set_result(res)
+            return res
+        except BaseException as err:
+            if not fut.done():
+                fut.set_exception(err)
+                fut.exception()
+            raise
+        finally:
+            self._inflight_originals.pop(image_id, None)
 
     async def async_get_local_path(self, image_id: str) -> str:
         return await self._backend.async_get_local_path(image_id)
@@ -2229,10 +2258,11 @@ class LibraryManager:
             raise LibraryBackendError(f"Image '{image_id}' not found")
 
         width, height = spec.width, spec.height
+        raw_bytes: bytes | None = None
 
         # Natural orientation selection for unlocked and non-reporting frames
         if not spec.locked:
-            raw_bytes, _content_type = await self._backend.async_get_original(image_id)
+            raw_bytes, _content_type = await self.async_get_original(image_id)
             from PIL import Image  # noqa: PLC0415
             import io  # noqa: PLC0415
             def _get_image_size(b: bytes) -> tuple[int, int]:
@@ -2294,7 +2324,8 @@ class LibraryManager:
             if cached is not None:
                 return cached
 
-        raw_bytes, _content_type = await self._backend.async_get_original(image_id)
+        if raw_bytes is None:
+            raw_bytes, _content_type = await self.async_get_original(image_id)
         if crop_box_override is not None:
             crop_box = tuple(crop_box_override)
         else:
@@ -2434,6 +2465,8 @@ class LibraryManager:
         return record.to_dict()
 
     async def async_delete(self, image_id: str) -> None:
+        if self._recent_original is not None and self._recent_original[0] == image_id:
+            self._recent_original = None
         await self._backend.async_delete_image(image_id)
         await self.hass.async_add_executor_job(self._purge_thumbnails_sync, image_id)
 

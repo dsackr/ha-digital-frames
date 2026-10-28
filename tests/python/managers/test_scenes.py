@@ -110,6 +110,7 @@ class _FakeLibrary:
 
     def __init__(self, original_bytes=None):
         self.crop_box_override_calls = []
+        self.get_original_calls = []
         self._original_bytes = original_bytes
 
     async def async_get_bin_for_send(
@@ -132,6 +133,7 @@ class _FakeLibrary:
         return f"bin-for-{image_id}".encode()
 
     async def async_get_original(self, image_id):
+        self.get_original_calls.append(image_id)
         if self._original_bytes is None:
             raise FileNotFoundError(f"no original bytes configured for {image_id}")
         return self._original_bytes, "image/png"
@@ -735,3 +737,44 @@ async def test_send_mappings_image_crop_preview_failure_still_omits_image_id(
     assert len(sent) == 1
     assert sent[0]["image_id"] is None
     assert sent[0]["thumbnail"] is None
+
+
+async def test_send_mappings_image_crop_coalesces_original_fetch_across_frames(
+    hass, scene_manager, library_and_coordinators, monkeypatch
+):
+    """When multiple frames in a scene crop the same shared master image_id
+    (e.g. a 5-frame wall wallpaper scene), preview generation must coalesce
+    library_manager.async_get_original(image_id) so cloud backends download
+    the master image once rather than N times."""
+    entries = library_and_coordinators(count=3)
+    fake_library = _FakeLibrary(original_bytes=_half_and_half_image_bytes(60, 40))
+    hass.data[DOMAIN]["_library"] = fake_library
+
+    async def _fake_send(self, image_bytes, *, image_id=None, thumbnail=None):
+        return {"success": True, "queued": False}
+
+    from custom_components.digital_frames.coordinator import DigitalFramesCoordinator
+
+    monkeypatch.setattr(DigitalFramesCoordinator, "async_send_image_or_queue", _fake_send)
+
+    mappings = {
+        entries[0].entry_id: {
+            "type": "image_crop",
+            "image_id": "shared-wall",
+            "crop_box": [0.0, 0.0, 0.33, 1.0],
+        },
+        entries[1].entry_id: {
+            "type": "image_crop",
+            "image_id": "shared-wall",
+            "crop_box": [0.33, 0.0, 0.66, 1.0],
+        },
+        entries[2].entry_id: {
+            "type": "image_crop",
+            "image_id": "shared-wall",
+            "crop_box": [0.66, 0.0, 1.0, 1.0],
+        },
+    }
+    result = await scene_manager.async_send_mappings(hass, mappings)
+
+    assert all(r["success"] for r in result["results"])
+    assert fake_library.get_original_calls == ["shared-wall"]

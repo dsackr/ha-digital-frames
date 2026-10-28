@@ -11,6 +11,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -215,7 +216,7 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
         )
 
         scene_mappings: dict[str, Any] = {}
-        results: list[dict[str, Any]] = []
+        active_targets: list[tuple[str, Any, Any, Any]] = []
 
         for entry_id, boxes in crop_boxes.items():
             if boxes is None:
@@ -231,6 +232,17 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
             if entry is None:
                 continue
 
+            active_targets.append((entry_id, entry, crop_box, dest_box))
+            scene_mappings[entry_id] = {
+                "type": "image_crop",
+                "image_id": image_id,
+                "crop_box": list(crop_box),
+                "dest_box": list(dest_box),
+            }
+
+        async def _encode_and_send_one(
+            entry_id: str, entry: Any, crop_box: Any, dest_box: Any
+        ) -> dict[str, Any]:
             sent = False
             send_error: str | None = None
             if push_now:
@@ -241,15 +253,17 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
                         codec_id = None
 
                     spec = render_spec_for_hass_entry(hass, entry)
-                    wire_bytes, preview_png = encode_for_panel_with_preview(
-                        source_bytes=master_bytes,
-                        width=spec.width,
-                        height=spec.height,
-                        rotation=spec.rotation,
-                        locked=spec.locked,
-                        codec_id=codec_id,
-                        crop_box=crop_box,
-                        dest_box=dest_box,
+                    wire_bytes, preview_png = await hass.async_add_executor_job(
+                        lambda: encode_for_panel_with_preview(
+                            source_bytes=master_bytes,
+                            width=spec.width,
+                            height=spec.height,
+                            rotation=spec.rotation,
+                            locked=spec.locked,
+                            codec_id=codec_id,
+                            crop_box=crop_box,
+                            dest_box=dest_box,
+                        )
                     )
 
                     coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -297,14 +311,16 @@ class DigitalFramesWallWallpaperView(HomeAssistantView):
             }
             if send_error:
                 result_entry["message"] = send_error
-            results.append(result_entry)
+            return result_entry
 
-            scene_mappings[entry_id] = {
-                "type": "image_crop",
-                "image_id": image_id,
-                "crop_box": list(crop_box),
-                "dest_box": list(dest_box),
-            }
+        results = list(
+            await asyncio.gather(
+                *(
+                    _encode_and_send_one(entry_id, entry, crop_box, dest_box)
+                    for entry_id, entry, crop_box, dest_box in active_targets
+                )
+            )
+        )
 
         # Save Scene if requested
         scene_id: str | None = None

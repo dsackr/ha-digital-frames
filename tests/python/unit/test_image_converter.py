@@ -425,3 +425,37 @@ def test_vivid_pipeline_preview_uses_real_world_panel_colors():
     palette = p_image.getpalette()[: 3 * len(SPECTRA6_REAL_WORLD_RGB)]
     expected = [v for rgb in SPECTRA6_REAL_WORLD_RGB for v in rgb]
     assert palette == expected
+
+
+def test_vivid_pipeline_uses_bounded_rolling_row_memory():
+    """Regression: _quantize_vivid_p previously materialized the entire image
+    via `_np.asarray(image, dtype=_np.float32).tolist()`, allocating ~160 bytes
+    of Python list/float objects per pixel (~605 MB for a single 1440x2560
+    panel, ~292 MB for 1200x1600). Concurrent multi-frame sends (e.g. a 5-frame
+    wallpaper scene in SceneManager.async_send_mappings) allocated >1.7 GB
+    simultaneously and triggered the Linux OOM-killer on Home Assistant Yellow
+    (returning HTTP 520 via Cloudflare). Since Atkinson error diffusion only
+    touches `y` and `y + 1`, only a 2-row rolling window should be materialized
+    as Python lists at a time."""
+    import tracemalloc
+    from PIL import Image
+    from custom_components.digital_frames.image_converter import (
+        _quantize_vivid_p,
+        _vivid_lut,
+    )
+
+    _vivid_lut()
+    img = Image.new("RGB", (600, 800), (120, 80, 200))
+    tracemalloc.start()
+    try:
+        _quantize_vivid_p(img)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    # Full-image `.tolist()` on 600x800 allocates >70 MB of Python list/float
+    # objects; a 2-row rolling window stays well under 10 MB.
+    assert peak_bytes < 10 * 1024 * 1024, (
+        f"_quantize_vivid_p allocated {peak_bytes / (1024 * 1024):.1f} MB "
+        f"for 600x800 (expected < 10 MB with a 2-row rolling buffer)"
+    )

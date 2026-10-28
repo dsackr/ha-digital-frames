@@ -405,3 +405,44 @@ async def test_das2_13_3_gets_ble_wake_but_official_13_3_does_not(
     official = make_coordinator(make_frame_entry(size="13.3"))
     with patch.object(official, "get_ble_status", return_value=status):
         assert official.supports_ble_wake() is False
+
+
+async def test_slow_panel_redraw_returns_before_reverse_proxy_timeout_and_completes_in_background(
+    coordinator, aioclient_mock, monkeypatch
+):
+    """Large Spectra 6 panels (13.3" ~45s, 31.5" ~120s) block HTTP POST /api/image
+    until the e-ink redraw completes, exceeding Cloudflare's 60s proxy timeout
+    (HTTP 520). Once connected and exceeding _PUSH_FOREGROUND_WAIT_S,
+    async_send_image_or_queue must return success and update last_image_id
+    while letting the LAN push finish in the background."""
+    import asyncio
+    from custom_components.digital_frames import coordinator as coord_mod
+
+    monkeypatch.setattr(coord_mod, "_PUSH_FOREGROUND_WAIT_S", 0.02)
+    aioclient_mock.post(f"http://{coordinator.host}/pullurl", status=200, text="ok")
+    aioclient_mock.post(f"http://{coordinator.host}/sleepconfig", status=200, text="ok")
+
+    redraw_finished = asyncio.Event()
+    release_redraw = asyncio.Event()
+
+    async def _slow_send_image(image_bytes):
+        await release_redraw.wait()
+        redraw_finished.set()
+        return 200
+
+    monkeypatch.setattr(coordinator, "async_send_image", _slow_send_image)
+
+    result = await coordinator.async_send_image_or_queue(
+        b"binary-image-data", image_id="img_slow_panel"
+    )
+
+    assert result["success"] is True
+    assert result["queued"] is False
+    assert result.get("delivery") == "push+pull"
+    assert coordinator.last_image_id == "img_slow_panel"
+    assert not redraw_finished.is_set()
+
+    release_redraw.set()
+    await coordinator.hass.async_block_till_done()
+    assert redraw_finished.is_set()
+    assert coordinator._flushing is False

@@ -320,6 +320,7 @@ class SceneManager:
 
         prepared: dict[str, tuple[Any, bytes, str | None, bytes | None]] = {}
         results: list[dict[str, Any]] = []
+        original_tasks: dict[str, asyncio.Task[tuple[bytes, str]]] = {}
 
         async def _prepare_one(
             entry_id: str, value: str | dict[str, Any]
@@ -474,22 +475,30 @@ class SceneManager:
                 # (see DigitalFramesWallWallpaperView's identical comment).
                 reported_image_id = None
                 try:
-                    original_bytes, _content_type = await library_manager.async_get_original(image_id)
+                    if image_id not in original_tasks:
+                        original_tasks[image_id] = asyncio.create_task(
+                            library_manager.async_get_original(image_id)
+                        )
+                    original_bytes, _content_type = await original_tasks[image_id]
                     spec = render_spec_for_hass_entry(hass, entry)
                     from .panel_codec import _compose_rgb  # noqa: PLC0415
                     from .image_converter import _encode_preview_png  # noqa: PLC0415
 
-                    composed = await hass.async_add_executor_job(
-                        _compose_rgb,
-                        original_bytes,
-                        spec.width,
-                        spec.height,
-                        spec.rotation,
-                        spec.locked,
-                        crop_box_override,
-                        dest_box_override,
+                    def _compose_and_encode_preview() -> bytes:
+                        composed = _compose_rgb(
+                            original_bytes,
+                            spec.width,
+                            spec.height,
+                            spec.rotation,
+                            spec.locked,
+                            crop_box_override,
+                            dest_box_override,
+                        )
+                        return _encode_preview_png(composed)
+
+                    preview_bytes = await hass.async_add_executor_job(
+                        _compose_and_encode_preview
                     )
-                    preview_bytes = await hass.async_add_executor_job(_encode_preview_png, composed)
                 except Exception:  # noqa: BLE001
                     preview_bytes = None
 

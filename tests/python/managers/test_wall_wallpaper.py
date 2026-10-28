@@ -401,3 +401,60 @@ async def test_wallpaper_partial_send_failure_does_not_block_other_frames(
     assert results_by_entry["frame-1"]["sent"] is False
     assert "frame unreachable" in results_by_entry["frame-1"]["message"]
     assert results_by_entry["frame-2"]["sent"] is True
+
+
+async def test_wallpaper_push_now_sends_frames_concurrently(
+    hass, wallpaper_client, make_frame_entry, sample_image_bytes
+):
+    """Regression: DigitalFramesWallWallpaperView previously encoded and sent
+    each frame sequentially inside a `for` loop (and ran
+    `encode_for_panel_with_preview` synchronously on the event loop), so a
+    5-frame wall where each frame takes ~40s to accept `/api/image` took >200s
+    and tripped Cloudflare's 100s timeout (HTTP 520/524). Both frames must have
+    their sends in-flight concurrently."""
+    import asyncio
+
+    wall_id, image_id = await _make_wall_and_image(
+        hass, make_frame_entry, sample_image_bytes
+    )
+
+    in_flight = 0
+    max_in_flight = 0
+    both_entered = asyncio.Event()
+
+    class _SlowCoordinator:
+        def __init__(self):
+            self.sent = []
+
+        async def async_send_image_or_queue(
+            self, image_bytes: bytes, *, image_id=None, thumbnail=None
+        ):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            if in_flight >= 2:
+                both_entered.set()
+            try:
+                await asyncio.wait_for(both_entered.wait(), timeout=0.2)
+            except TimeoutError:
+                pass
+            finally:
+                in_flight -= 1
+            self.sent.append(len(image_bytes))
+            return {"success": True, "queued": False}
+
+    hass.data[DOMAIN]["frame-1"] = _SlowCoordinator()
+    hass.data[DOMAIN]["frame-2"] = _SlowCoordinator()
+
+    resp = await wallpaper_client.post(
+        f"/api/digital_frames/walls/{wall_id}/wallpaper",
+        json={
+            "image_id": image_id,
+            "image_rect": {"x": 0.0, "y": 0.0, "width": 2000.0, "height": 1600.0},
+            "push_now": True,
+        },
+    )
+    assert resp.status == 200
+    assert max_in_flight == 2, (
+        f"Expected both frame sends to overlap concurrently, got max_in_flight={max_in_flight}"
+    )

@@ -99,6 +99,17 @@ _PENDING_SCHEMA = 2
 # not accelerated frame probing.
 _FAST_POLL_INTERVAL = timedelta(seconds=30)
 
+# Maximum foreground wait for a live HTTP `/api/image` push before letting
+# the LAN transfer + multi-stage e-ink redraw finish in the background.
+# Physical Spectra 6 panels block the `/api/image` response for ~45s (13.3")
+# to ~120s (31.5" 2.3MB), which exceeds Cloudflare / reverse-proxy 60s HTTP
+# read timeouts (causing HTTP 520 and cancelling the in-flight request task).
+# Because `async_send_image` uses a 10s TCP connect timeout, any genuinely
+# unreachable/offline frame fails well within 15s and queues synchronously;
+# a frame still in flight after 15s has accepted the connection and is
+# actively receiving/redrawing the image on LAN.
+_PUSH_FOREGROUND_WAIT_S = 15.0
+
 
 def _normalize_mac(mac: str | None) -> str:
     """Return lowercase MAC with separators stripped, or empty if unusable."""
@@ -182,6 +193,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass, _PENDING_STORE_VERSION, f"{DOMAIN}_pending_send_{config_entry.entry_id}"
         )
         self._flushing: bool = False
+        self._active_push_task: asyncio.Task[dict[str, Any]] | None = None
 
         # Bluetooth Low Energy (BLE) on-demand wake state
         self.last_ble_wake_time: float | None = None
@@ -296,6 +308,9 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._unsub_tracker()
             self._unsub_tracker = None
         self._tracker_entity_id = None
+        if self._active_push_task is not None and not self._active_push_task.done():
+            self._active_push_task.cancel()
+            self._active_push_task = None
 
     @callback
     def _async_on_network_home(self) -> None:
@@ -1005,8 +1020,45 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Either provisioned or frame is known-online (e.g. official Fraimic
         # which rejects /sleepconfig but still accepts /api/image push).
         # Fall through to the push attempt.
+        if self._active_push_task is not None and not self._active_push_task.done():
+            self._active_push_task.cancel()
+            try:
+                await self._active_push_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
         self._flushing = True
+        push_task = self.hass.async_create_task(
+            self._async_push_or_stage_fallback(
+                image_bytes,
+                image_id=image_id,
+                thumbnail=thumbnail,
+                token=token,
+            )
+        )
+        self._active_push_task = push_task
+        done, _pending = await asyncio.wait(
+            {push_task}, timeout=_PUSH_FOREGROUND_WAIT_S
+        )
+        if done:
+            return await push_task
+
+        # The frame connected within connect=10s and is actively receiving the
+        # payload / performing its multi-stage e-ink redraw (~45s on 13.3" and
+        # ~120s on 31.5" panels). Update last_image now and return success so
+        # reverse proxies (Cloudflare's 60s timeout -> HTTP 520) don't close
+        # the client connection and cancel `push_task` mid-redraw.
+        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+        return {"success": True, "queued": False, "delivery": "push+pull"}
+
+    async def _async_push_or_stage_fallback(
+        self,
+        image_bytes: bytes,
+        *,
+        image_id: str | None,
+        thumbnail: bytes | None,
+        token: str,
+    ) -> dict[str, Any]:
         try:
             await self.async_send_image(image_bytes)
             await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
@@ -1507,7 +1559,8 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the frame already displayed the image and used to requeue a
         # duplicate. See docs/FRAME_PORT.md transport policy.
         send_timeout = aiohttp.ClientTimeout(
-            total=send_timeout_for_entry(self.config_entry)
+            total=send_timeout_for_entry(self.config_entry),
+            connect=10.0,
         )
         try:
             async with session.post(
