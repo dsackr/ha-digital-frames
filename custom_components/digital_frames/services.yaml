@@ -63,6 +63,21 @@ wake:
         device:
           integration: digital_frames
 
+resend_image:
+  name: Resend Image
+  description: >-
+    Send the frame's last image to it again, at full quality. Library photos
+    are re-encoded for the frame's current orientation. Direct uploads use
+    the saved original the same way. Fails if nothing has been sent yet.
+  fields:
+    device_id:
+      name: Frame
+      description: The frame to resend the last image to.
+      required: true
+      selector:
+        device:
+          integration: digital_frames
+
 refresh:
   name: Refresh Display
   description: Trigger a display refresh on a frame.

@@ -8,6 +8,7 @@ could leak files.
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -172,7 +173,7 @@ async def test_send_image_success_converts_and_sends(
 
     sent = []
 
-    async def _fake_send(image_bytes, *, image_id=None, thumbnail=None):
+    async def _fake_send(image_bytes, *, image_id=None, thumbnail=None, source_bytes=None):
         sent.append(image_bytes)
         return {"success": True, "queued": False}
 
@@ -386,3 +387,53 @@ async def test_send_skill_unknown_device_raises(hass, make_frame_entry):
             {"device_id": "does-not-exist", "skill_id": "word_of_the_day"},
             blocking=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# resend_image (KPF 41)
+# ---------------------------------------------------------------------------
+
+
+async def test_resend_image_service_no_previous_image_raises(hass, make_frame_entry):
+    entry = await _setup_frame(hass, make_frame_entry)
+    device_id = _device_id_for_entry(hass, entry)
+    assert hass.services.has_service(DOMAIN, "resend_image")
+
+    with pytest.raises(HomeAssistantError, match="No image has been sent to this frame yet"):
+        await hass.services.async_call(
+            DOMAIN,
+            "resend_image",
+            {"device_id": device_id},
+            blocking=True,
+        )
+
+
+async def test_resend_image_service_replays_saved_wire(
+    hass, make_frame_entry, monkeypatch
+):
+    entry = await _setup_frame(hass, make_frame_entry)
+    device_id = _device_id_for_entry(hass, entry)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    await coordinator.async_set_last_image(
+        thumbnail=b"low-res-thumb", wire_bytes=b"FULL-QUALITY-WIRE"
+    )
+
+    sent: list[bytes] = []
+
+    async def _send(image_bytes):
+        sent.append(image_bytes)
+        return 200
+
+    monkeypatch.setattr(coordinator, "async_send_image", _send)
+    monkeypatch.setattr(
+        coordinator, "async_provision_frame_pull", AsyncMock(return_value=True)
+    )
+    coordinator.data = {"online": True}
+
+    await hass.services.async_call(
+        DOMAIN,
+        "resend_image",
+        {"device_id": device_id},
+        blocking=True,
+    )
+    assert sent == [b"FULL-QUALITY-WIRE"]

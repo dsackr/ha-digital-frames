@@ -121,6 +121,10 @@ function createMockServer({
   const cropDeletes = []; // { image_id, width, height } per /library/crop DELETE
   const reloadCalls = []; // { entry_id } per /frame/reload POST
   const pollOrientationCalls = []; // { entry_id } per /frame/poll_orientation POST
+  const resendCalls = []; // { entry_id, entity_id } per /frame/resend POST
+  let resendDelayMs = 0;
+  let resendStatus = 200;
+  let resendBody = null;
   let updateState = {
     installed: '0.12.100',
     running: '0.12.100',
@@ -292,6 +296,19 @@ function createMockServer({
     }
     if (p === '/api/digital_frames/discovery/scan' && req.method === 'POST') {
       return json(res, 200, { success: true });
+    }
+    if (p === '/api/digital_frames/frame/resend' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      resendCalls.push(body || {});
+      if (resendDelayMs) await new Promise((r) => setTimeout(r, resendDelayMs));
+      if (resendStatus !== 200) {
+        return json(res, resendStatus, resendBody || {
+          message: 'No image has been sent to this frame yet',
+        });
+      }
+      return json(res, 200, resendBody || {
+        success: true, queued: false, bytes_sent: 960000,
+      });
     }
     if (p === '/api/digital_frames/frame/reload' && req.method === 'POST') {
       const body = await readJsonBody(req);
@@ -873,6 +890,12 @@ function createMockServer({
     entryDeletes,
     reloadCalls,
     pollOrientationCalls,
+    resendCalls,
+    setResend(opts = {}) {
+      if (opts.delayMs !== undefined) resendDelayMs = opts.delayMs;
+      if (opts.status !== undefined) resendStatus = opts.status;
+      if (opts.body !== undefined) resendBody = opts.body;
+    },
     get scenes() { return sceneList; },
     get schedules() { return scheduleList; },
     get skills() { return skillList; },

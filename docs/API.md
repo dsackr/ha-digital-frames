@@ -89,6 +89,14 @@ Triggers a local subnet scan to discover supported e-ink or smart frame hardware
 
 ### 2. Direct Image Sending
 
+#### `POST /api/digital_frames/frame/resend`
+Re-pushes the frame's last image at full quality. Library images are re-encoded for the frame's current orientation and codec. Direct uploads are re-encoded from the saved original photo (not the preview thumbnail). Other sends (skills, messages) replay the saved wire payload. Asleep frames are queued the same way as a normal send.
+
+- **Content-Type**: `application/json`
+- **JSON body**: `entry_id` and/or `entity_id` (one is required).
+- **Response `200 OK`**: same shape as send (`success`, `queued`, `bytes_sent`, and `message` when queued).
+- **Response `409 Conflict`**: the frame has no previously sent image, or only a low-resolution preview was kept.
+
 #### `POST /api/digital_frames/send_image`
 Converts and sends/queues an image directly to a targeted frame without storing it in the persistent photo library.
 

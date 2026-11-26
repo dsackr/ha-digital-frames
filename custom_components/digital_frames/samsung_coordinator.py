@@ -103,11 +103,24 @@ class SamsungCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         image_id: str | None = None,
         thumbnail: bytes | None = None,
+        wire_bytes: bytes | None = None,
+        source_bytes: bytes | None = None,
+        clear_source: bool = True,
     ) -> None:
         import base64  # noqa: PLC0415
 
         self.last_image_id = image_id
         self.last_thumbnail = thumbnail
+        if wire_bytes:
+            from .last_sent import async_store_last_sent  # noqa: PLC0415
+
+            await async_store_last_sent(
+                self.hass,
+                self.config_entry.entry_id,
+                wire_bytes=wire_bytes,
+                source_bytes=source_bytes,
+                clear_source=clear_source,
+            )
         await self._preview_store.async_save(
             {
                 "image_id": image_id,
@@ -210,12 +223,18 @@ class SamsungCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         image_id: str | None = None,
         thumbnail: bytes | None = None,
+        source_bytes: bytes | None = None,
     ) -> dict[str, Any]:
         try:
             await self.async_send_image(image_bytes)
         except (HomeAssistantError, OSError, TimeoutError, ValueError) as err:
             return {"success": False, "queued": False, "message": str(err)}
-        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+        await self.async_set_last_image(
+            image_id=image_id,
+            thumbnail=thumbnail,
+            wire_bytes=image_bytes,
+            source_bytes=source_bytes,
+        )
         return {"success": True, "queued": False}
 
     async def async_send_command(self, endpoint: str) -> int:

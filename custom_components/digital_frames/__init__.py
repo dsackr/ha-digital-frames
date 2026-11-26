@@ -136,9 +136,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DigitalFramesOpenApiView,
         DigitalFramesRokuContentView,
         DigitalFramesSamsungContentView,
+        DigitalFramesResendImageView,
         DigitalFramesSendImageView,
     )
     hass.http.register_view(DigitalFramesSendImageView())
+    hass.http.register_view(DigitalFramesResendImageView())
     hass.http.register_view(DigitalFramesOnboardingView())
     hass.http.register_view(DigitalFramesFrameStatusView())
     hass.http.register_view(DigitalFramesSamsungContentView())
@@ -616,8 +618,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: "ConfigEntry") -> bool:
         if not remaining_frame_entries:
             # Remove services when the last frame entry is gone.
             for service in (
-                "send_image", "send_scene", "send_skill", "refresh",
-                "sleep", "wake", "restart",
+                "send_image", "resend_image", "send_scene", "send_skill",
+                "refresh", "sleep", "wake", "restart",
             ):
                 hass.services.async_remove(DOMAIN, service)
             
@@ -1031,6 +1033,23 @@ def _register_services(hass: HomeAssistant) -> None:
         await coordinator.async_send_command(API_REFRESH)
         _LOGGER.info("Refresh command sent to frame %s", coordinator.host)
 
+    async def _handle_resend_image(call: ServiceCall) -> None:
+        coordinator, _ = _get_coordinator_by_device_id(hass, call.data["device_id"])
+        from .last_sent import async_resend_last_image  # noqa: PLC0415
+
+        result = await async_resend_last_image(hass, coordinator)
+        if result.get("queued"):
+            _LOGGER.info(
+                "Frame %s unreachable — last image queued again for delivery on wake",
+                coordinator.host,
+            )
+            return
+        if result.get("success") is False:
+            raise HomeAssistantError(
+                result.get("message") or "Failed to resend image"
+            )
+        _LOGGER.info("Resent last image to frame %s", coordinator.host)
+
     async def _handle_send_image(call: ServiceCall) -> None:
         device_id: str = call.data["device_id"]
         media_content_id: str = call.data["media_content_id"]
@@ -1060,7 +1079,12 @@ def _register_services(hass: HomeAssistant) -> None:
             codec_id = None
 
         try:
+            def _read_source(path: str) -> bytes:
+                with open(path, "rb") as handle:
+                    return handle.read()
+
             try:
+                source_bytes = await hass.async_add_executor_job(_read_source, abs_path)
                 image_bytes, preview_bytes = await hass.async_add_executor_job(
                     encode_path_for_panel_with_preview,
                     abs_path,
@@ -1083,8 +1107,10 @@ def _register_services(hass: HomeAssistant) -> None:
         # media_content_id rather than a Library image_id) on success; on a
         # sleeping/unreachable frame it queues the image instead of raising,
         # so this call doesn't fail just because the frame is asleep.
+        # source_bytes is the original photo so Resend can re-encode it
+        # at full quality for the frame's current orientation.
         result = await coordinator.async_send_image_or_queue(
-            image_bytes, thumbnail=preview_bytes
+            image_bytes, thumbnail=preview_bytes, source_bytes=source_bytes
         )
 
         if result["queued"]:
@@ -1227,6 +1253,9 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, "send_image", _handle_send_image, schema=_SEND_IMAGE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, "resend_image", _handle_resend_image, schema=_DEVICE_ID_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, "send_scene", _handle_send_scene, schema=_SEND_SCENE_SCHEMA
