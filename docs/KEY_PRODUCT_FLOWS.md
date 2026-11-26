@@ -347,11 +347,13 @@ verifying panel wiring, orientation, and packing on clones (e.g. 7.3" ESP32).
 - **Test status**: **Backend-tested** —
   `tests/python/unit/test_test_patterns.py`.
 
-## 5. HA services (send_image, send_scene, restart, sleep, refresh, generate_ai_image)
-Lets automations/scripts drive a frame: send an arbitrary media item, send
-a named scene, or issue restart/sleep/refresh commands.
+## 5. HA services (send_image, resend_image, send_scene, restart, sleep, refresh, generate_ai_image)
+Lets automations/scripts drive a frame: send an arbitrary media item, resend
+the frame's last image, send a named scene, or issue restart/sleep/refresh
+commands. `resend_image` is the service form of KPF 41.
 - **Entry points**: `__init__.py` (`_register_services`, `_handle_send_image`,
-  `_handle_send_scene`, `_handle_generate_ai_image`, `_resolve_media_path`).
+  `_handle_resend_image`, `_handle_send_scene`, `_handle_generate_ai_image`,
+  `_resolve_media_path`).
 - **If it silently breaks**: automations calling `fraimic.send_image` /
   `send_scene` fail or send the wrong image; a path-traversal bug in media
   resolution could leak files. `_resolve_media_path` only recognizes
@@ -362,7 +364,8 @@ a named scene, or issue restart/sleep/refresh commands.
 - **Test status**: **Backend-tested** — `tests/python/setup/test_services.py`
   (command services, send_image media resolution + path-escape rejection,
   send_scene aggregation semantics, rejection of an unprefixed arbitrary
-  filesystem path).
+  filesystem path, `resend_image` with no previous image and a saved
+  full-quality payload).
 
 ## 6. Voice/AI: "generate an image of X...", "show [image name] on [frame]", and "put a picture of [tag name] on [frame]"
 Custom Assist/LLM intents to generate an AI image, display a specific library image on a named frame, or randomly select and display an image matching a custom tag by voice.
@@ -779,18 +782,25 @@ Card/API path: upload an image directly to a specific frame via multipart,
 bypassing the library entirely (the Lovelace card's and wall picker's
 upload buttons). Note: because these bytes never enter the library, the
 sent photo can't be re-cropped afterwards (KPF 12's crop editors are
-deliberately disabled for it).
+deliberately disabled for it). The original upload bytes and the encoded
+wire payload are saved per frame (`last_sent.py`) so Resend (KPF 41) can
+repaint at full quality — the panel preview thumbnail is not what gets
+sent again.
 - **Entry points**: `http_api.py` (`DigitalFramesSendImageView`,
   `resolve_frame_by_entity`), `digital-frames-card.js` (`_stageFile`/`_send`),
-  `digital-frames-panel.js` (`_sendFromWallPicker`).
+  `digital-frames-panel.js` (`_sendFromWallPicker`), `last_sent.py`
+  (`async_store_last_sent`).
 - **If it silently breaks**: card sends silently fail, or the wrong frame
   receives the image.
 - **Test status**: Panel-tested (`fraimic-card.spec.js` — upload staging
   and the multipart `send_image` POST with the right `entity_id`;
-  `walls-send-and-offwall.spec.js` for the wall picker side). The Python
+  `walls-send-and-offwall.spec.js` for the wall picker side).   The Python
   view itself (`DigitalFramesSendImageView`'s request/response marshaling) is
   still a **Gap** along with the rest of the `*_http.py` view layer (see
-  the coverage summary below).
+  the coverage summary below), except the part that keeps the original
+  upload bytes for Resend — **Backend-tested** in
+  `tests/python/unit/test_resend_last_image.py`
+  (`test_send_image_view_passes_original_bytes_for_resend`).
 
 ## 16. Scenes: named multi-frame image assignments (CRUD + send)
 User builds a named "scene" (frame→image mapping) and sends every frame's
@@ -1376,7 +1386,7 @@ frame actually shows.
   mid-send surviving rather than being clobbered by the stale crop-send,
   `setConfig` clearing a staged pick instead of
   leaving stale state after rebuild, removing the card revoking a staged
-  pick's blob URL). Coordinator preview persistence is
+  pick's blob URL, Resend of the on-frame image — see KPF 41). Coordinator preview persistence is
   backend-tested via `test_scenes.py`/`test_skills.py` (KPF 28); the
   frames/thumbnail HTTP views' own marshaling is still a **Gap** with the
   rest of the `*_http.py` layer.
@@ -1821,6 +1831,47 @@ Battery-powered e-paper displays (e.g. 7.3" Spectra 6 and 13.3" Spectra 6 frames
 - **If it silently breaks**: If Home Assistant has no active Bluetooth adapters/proxies configured, `async_scanner_count` returns 0 and the coordinator immediately falls back to staged pull delivery without delay. If the frame's BLE advertisement is out of radio range or the connection times out, `async_ble_wake` returns `False` and falls back to pull delivery.
 - **Test status**: **Backend-tested** — `tests/python/unit/test_ble_wake.py` (verifies BLE constants, scanner count guard, successful BLE wake GATT write, connection exception fallback, coordinator `async_send_image_or_queue` triggering `ble+push` on successful wake, and falling back to staged pull on failure).
 
+## 41. Resend the last image to a frame
+When a physical frame misses a push (asleep, stuck in dev mode, or the
+postcard didn't stick), the panel already shows that image as current.
+**Resend to frame** pushes it again without finding the source file.
+
+Library sends (`last_image_id`) are re-encoded through
+`LibraryManager.async_get_bin_for_send` with the frame's current render
+spec, so orientation, crop, codec, and color pipeline match a fresh send.
+Direct uploads keep the original photo bytes plus the encoded wire payload
+under `config/digital_frames_cache/last_sent/<entry_id>.{source,wire}` and
+are re-encoded the same way the upload path encodes (current orientation
+and the frame's driver codec). Skills, messages, and other non-library
+sends have no original photo; Resend replays the saved full-resolution
+wire bytes, never the low-res preview PNG. Every path goes through
+`async_send_image_or_queue`, so an asleep Fraimic frame queues / pulls
+exactly as a normal send would, and Meural / Samsung / Roku use their own
+drivers. If the frame has never had an image sent, the API returns 409
+and the service raises; the panel and card buttons stay disabled until
+there is something to resend.
+- **Entry points**: `last_sent.py` (`async_resend_last_image`,
+  `async_store_last_sent`, `frame_can_resend`), `http_api.py`
+  (`DigitalFramesResendImageView`), `__init__.py` (`_handle_resend_image`),
+  `coordinator.py` / `meural_coordinator.py` / `samsung_coordinator.py` /
+  `roku_coordinator.py` (`async_set_last_image` wire + source persistence),
+  `digital-frames-panel.js` (`_resendFrameImage`, Frame Information modal),
+  `digital-frames-card.js` (`_resend`).
+- **If it silently breaks**: Resend does nothing, sends the blurry preview
+  thumbnail, targets the wrong frame, or ignores a frame that is asleep
+  (the image should queue, not fail closed). A frame with no previous
+  image should show a clear error rather than a blank push.
+- **Test status**: **Backend-tested** —
+  `tests/python/unit/test_resend_last_image.py` (library re-encode, direct
+  upload re-encode from the saved original rather than the thumbnail,
+  wire-only replay, no-previous-image and preview-only errors, asleep
+  frame queues the full payload, HTTP 409/400, direct-upload view keeps
+  the original bytes), `tests/python/setup/test_services.py`
+  (`resend_image` service). **Panel-tested** — `tests/panel/resend.spec.js`
+  (Frame Information button disabled with nothing sent, posts `entry_id`,
+  loading label, success and queued and error feedback),
+  `tests/panel/fraimic-card.spec.js` (card Resend posts and reports errors).
+
 ---
 
 ## Coverage summary
@@ -1841,6 +1892,7 @@ Battery-powered e-paper displays (e.g. 7.3" Spectra 6 and 13.3" Spectra 6 frames
 | — | Art Factory AI image generation (KPF 38) | Retired — see KPF 38 |
 | — | Roku TV cast driver (KPF 39) | Done (backend; live hardware untested) |
 | — | Bluetooth Low Energy (BLE) on-demand wake for battery e-paper frames (KPF 40) | Done (backend; live firmware validated) |
+| — | Resend the last image to a frame (KPF 41) | Done |
 
 Phase 5b (plus KPF 18's widget scheduling) is scoped here but not yet
 implemented — see [TESTING_STRATEGY.md](../TESTING_STRATEGY.md) for the

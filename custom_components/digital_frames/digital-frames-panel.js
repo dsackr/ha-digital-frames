@@ -3665,6 +3665,7 @@
             </div>
             <div class="feedback" id="frame-settings-fb"></div>
             <div class="modal-actions" style="flex-wrap:wrap">
+              <button class="btn-ghost" id="frame-settings-resend" type="button" title="Send this frame's current image to it again">↻ Resend to frame</button>
               <button class="btn-primary" id="frame-settings-save">Save Changes</button>
               <button class="btn-ghost" id="frame-settings-close">Close</button>
             </div>
@@ -4026,6 +4027,7 @@
             frame.deviceOrientation = match.device_orientation;
             frame.lastImageId  = match.last_image_id;
             frame.hasThumbnail = match.has_thumbnail;
+            frame.canResend = match.can_resend;
             frame.queued = !!match.queued;
             frame.queuedImageId = match.queued_image_id || null;
             frame.queuedAt = match.queued_at || null;
@@ -4056,6 +4058,7 @@
             deviceOrientation: f.device_orientation,
             lastImageId: f.last_image_id,
             hasThumbnail: f.has_thumbnail,
+            canResend: f.can_resend,
             queued: !!f.queued,
             queuedImageId: f.queued_image_id || null,
             queuedAt: f.queued_at || null,
@@ -4892,6 +4895,14 @@
         .addEventListener('click', close);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
+      this.shadowRoot.getElementById('frame-settings-resend')
+        .addEventListener('click', (e) => {
+          const resendBtn = e.currentTarget;
+          const frame = this._frameSettingsTarget;
+          if (!frame || resendBtn.disabled) return;
+          this._resendFrameImage(frame, resendBtn);
+        });
+
       this.shadowRoot.getElementById('frame-settings-save')
         .addEventListener('click', async (e) => {
           // Capture the button synchronously: this is a composed (bubbles
@@ -5413,7 +5424,59 @@
 
       const fb = this.shadowRoot.getElementById('frame-settings-fb');
       fb.style.display = 'none';
+      this._syncFrameResendButton(frame);
       this.shadowRoot.getElementById('frame-settings-overlay').style.display = 'flex';
+    }
+
+    // Library id, a saved full-quality payload (can_resend), or a preview
+    // left by a send in this session. A preview alone from before Resend
+    // existed still enables the button; the API returns a clear error if
+    // only the low-res thumbnail was kept.
+    _frameCanResend(frame) {
+      if (!frame) return false;
+      if (frame.canResend) return true;
+      return !!(frame.lastImageId || frame.hasThumbnail);
+    }
+
+    _syncFrameResendButton(frame) {
+      const btn = this.shadowRoot.getElementById('frame-settings-resend');
+      if (!btn) return;
+      const can = this._frameCanResend(frame);
+      btn.disabled = !can;
+      btn.textContent = '↻ Resend to frame';
+      btn.title = can
+        ? "Send this frame's current image to it again"
+        : 'No image has been sent to this frame yet';
+    }
+
+    async _resendFrameImage(frame, btn) {
+      const fb = this.shadowRoot.getElementById('frame-settings-fb');
+      btn.disabled = true;
+      btn.textContent = 'Resending…';
+      fb.style.display = 'none';
+      try {
+        const resp = await fetch('/api/digital_frames/frame/resend', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry_id: frame.entryId }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.message || `HTTP ${resp.status}`);
+        }
+        frame.canResend = true;
+        fb.className = 'feedback ok';
+        fb.textContent = data.queued
+          ? (data.message || 'Frame is asleep — the image is queued and will be sent when it wakes up.')
+          : 'Resent to the frame.';
+        fb.style.display = 'block';
+      } catch (err) {
+        fb.className = 'feedback err';
+        fb.textContent = err.message || 'Resend failed';
+        fb.style.display = 'block';
+      } finally {
+        this._syncFrameResendButton(this._frameSettingsTarget || frame);
+      }
     }
 
     _openFrameConfigureFlow(frame) {

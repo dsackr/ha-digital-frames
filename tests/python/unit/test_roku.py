@@ -121,7 +121,10 @@ async def test_async_send_image_or_queue_never_queues(monkeypatch):
     )
     assert result == {"success": True, "queued": False}
     coord.async_set_last_image.assert_awaited_once_with(
-        image_id="img1", thumbnail=b"thumb"
+        image_id="img1",
+        thumbnail=b"thumb",
+        wire_bytes=b"\x89PNG\r\n\x1a\nfake",
+        source_bytes=None,
     )
 
 

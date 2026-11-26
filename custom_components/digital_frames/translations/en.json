@@ -199,6 +199,16 @@
         }
       }
     },
+    "resend_image": {
+      "name": "Resend Image",
+      "description": "Send the frame's last image to it again at full quality.",
+      "fields": {
+        "device_id": {
+          "name": "Frame",
+          "description": "The frame to resend the last image to."
+        }
+      }
+    },
     "send_image": {
       "name": "Send Image",
       "description": "Convert and upload an image to a frame.",

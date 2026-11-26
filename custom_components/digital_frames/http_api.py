@@ -299,6 +299,7 @@ class DigitalFramesFrameStatusView(HomeAssistantView):
                 "entry_id": entry.entry_id,
                 "last_image_id": coordinator.last_image_id,
                 "has_thumbnail": coordinator.last_thumbnail is not None,
+                "can_resend": _frame_can_resend(hass, coordinator),
                 "queued": pending is not None,
                 "queued_image_id": (pending or {}).get("image_id"),
                 "queued_at": (pending or {}).get("queued_at"),
@@ -395,7 +396,7 @@ class DigitalFramesSendImageView(HomeAssistantView):
         # image_id) on success.
         try:
             result = await coordinator.async_send_image_or_queue(
-                bin_bytes, thumbnail=preview_bytes
+                bin_bytes, thumbnail=preview_bytes, source_bytes=raw_bytes
             )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error(
@@ -428,6 +429,93 @@ class DigitalFramesSendImageView(HomeAssistantView):
             len(bin_bytes),
         )
         return self.json({"success": True, "queued": False, "bytes_sent": len(bin_bytes)})
+
+
+def _frame_can_resend(hass, coordinator) -> bool:
+    from .last_sent import frame_can_resend  # noqa: PLC0415
+
+    return frame_can_resend(hass, coordinator)
+
+
+class DigitalFramesResendImageView(HomeAssistantView):
+    """POST /api/digital_frames/frame/resend — push the frame's last image again.
+
+    Body JSON: ``entry_id`` and/or ``entity_id`` (same resolution as send).
+    Library images are re-encoded for the current orientation; direct uploads
+    are re-encoded from the saved original. Asleep frames queue like any
+    other send. 409 when the frame has nothing full-quality to resend.
+    """
+
+    url = "/api/digital_frames/frame/resend"
+    name = "api:digital_frames:frame:resend"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+
+        entity_id = body.get("entity_id") or None
+        entry_id = body.get("entry_id") or None
+        if not entity_id and not entry_id:
+            return self.json_message(
+                "entity_id or entry_id is required", status_code=400
+            )
+
+        try:
+            coordinator, _entry = resolve_frame_by_entity(
+                hass, entity_id, entry_id=entry_id
+            )
+        except ValueError as err:
+            return self.json_message(str(err), status_code=404)
+
+        from homeassistant.exceptions import HomeAssistantError  # noqa: PLC0415
+
+        from .last_sent import async_resend_last_image  # noqa: PLC0415
+
+        try:
+            result = await async_resend_last_image(hass, coordinator)
+        except HomeAssistantError as err:
+            return self.json_message(str(err), status_code=409)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error(
+                "Failed to resend image to frame %s: %s",
+                getattr(coordinator, "host", entry_id),
+                err,
+            )
+            return self.json_message(
+                f"Failed to resend to frame: {err}", status_code=502
+            )
+
+        if result.get("queued"):
+            return self.json(
+                {
+                    "success": False,
+                    "queued": True,
+                    "message": result.get("message")
+                    or (
+                        "Frame is asleep — the image is queued and will be "
+                        "sent when it wakes up."
+                    ),
+                    "bytes_sent": result.get("bytes_sent"),
+                }
+            )
+        if result.get("success") is False:
+            return self.json_message(
+                result.get("message") or "Failed to resend to frame",
+                status_code=502,
+            )
+        return self.json(
+            {
+                "success": True,
+                "queued": False,
+                "bytes_sent": result.get("bytes_sent"),
+            }
+        )
 
 
 class DigitalFramesOpenApiView(HomeAssistantView):
@@ -476,6 +564,7 @@ class DigitalFramesOpenApiView(HomeAssistantView):
                 "paths": {
                     "/api/digital_frames/frames": {"get": {"summary": "List all configured frames"}},
                     "/api/digital_frames/send_image": {"post": {"summary": "Send raw image directly to a frame"}},
+                    "/api/digital_frames/frame/resend": {"post": {"summary": "Resend a frame's last image"}},
                     "/api/digital_frames/library/list": {"get": {"summary": "List library images"}},
                     "/api/digital_frames/library/upload": {"post": {"summary": "Upload image to library"}},
                     "/api/digital_frames/library/send": {"post": {"summary": "Send library image to frame"}},

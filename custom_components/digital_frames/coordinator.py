@@ -152,7 +152,9 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # http_api.py). Mutually exclusive with last_image_id: whichever send
         # path ran most recently clears the other, so the Frames panel never
         # shows a stale thumbnail from a different source. Also persisted via
-        # _preview_store.
+        # _preview_store. This preview is NOT what Resend pushes — the
+        # full-resolution wire (and, for direct uploads, the original photo)
+        # live in last_sent.py.
         self.last_thumbnail: bytes | None = None
 
         self._preview_store: Store = Store(
@@ -362,16 +364,39 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Failed to persist cached frame telemetry for %s: %s", self.host, err)
 
     async def async_set_last_image(
-        self, *, image_id: str | None = None, thumbnail: bytes | None = None
+        self,
+        *,
+        image_id: str | None = None,
+        thumbnail: bytes | None = None,
+        wire_bytes: bytes | None = None,
+        source_bytes: bytes | None = None,
+        clear_source: bool = True,
     ) -> None:
         """Record which image was last sent to this frame, for the Frames
         panel thumbnail, and persist it to disk so it survives a restart.
         Callers should pass exactly one of *image_id* / *thumbnail* -- the
         other is cleared, keeping last_image_id/last_thumbnail mutually
-        exclusive (see their docstrings above)."""
+        exclusive (see their docstrings above).
+
+        *wire_bytes* is the full-resolution payload just accepted for
+        delivery (not the preview PNG). *source_bytes*, when the send started
+        from an original photo, is kept so Resend can re-encode for the
+        current orientation. ``clear_source=False`` is for the wake flush,
+        which must not drop an original saved when the send was queued.
+        """
         self.last_image_id = image_id
         self.last_thumbnail = thumbnail
         await self._async_persist_cached_telemetry()
+        if wire_bytes:
+            from .last_sent import async_store_last_sent  # noqa: PLC0415
+
+            await async_store_last_sent(
+                self.hass,
+                self.config_entry.entry_id,
+                wire_bytes=wire_bytes,
+                source_bytes=source_bytes,
+                clear_source=clear_source,
+            )
 
     # ------------------------------------------------------------------
     # Pull delivery (frame wakes and GETs packed .bin from HA)
@@ -909,6 +934,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         image_id: str | None = None,
         thumbnail: bytes | None = None,
+        source_bytes: bytes | None = None,
     ) -> dict[str, Any]:
         """Stage *image_bytes* for frame pull, optionally push if online.
 
@@ -929,6 +955,15 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         token = uuid.uuid4().hex
         from .frame_types import ORIGIN_OFFICIAL  # noqa: PLC0415
         from .helpers import origin_for_fraimic_entry  # noqa: PLC0415
+
+        async def _remember() -> None:
+            """Preview hint plus the full-quality bytes Resend replays."""
+            await self.async_set_last_image(
+                image_id=image_id,
+                thumbnail=thumbnail,
+                wire_bytes=image_bytes,
+                source_bytes=source_bytes,
+            )
 
         is_official = (
             origin_for_fraimic_entry(self.config_entry) == ORIGIN_OFFICIAL
@@ -968,7 +1003,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if wifi_ready:
                     try:
                         await self.async_send_image(image_bytes)
-                        await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+                        await _remember()
                         await self.async_clear_pull_bin()
                         self.hass.async_create_task(self.async_request_refresh())
                         return {
@@ -982,7 +1017,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Frame definitely asleep/unreachable: staged bin is the delivery mechanism.
             await self.async_stage_pull_bin(image_bytes)
-            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+            await _remember()
             payload: dict[str, Any] = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
@@ -1009,7 +1044,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._flushing = True
         try:
             await self.async_send_image(image_bytes)
-            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+            await _remember()
             await self.async_clear_pull_bin()
             return {"success": True, "queued": False, "delivery": "push+pull"}
         except (aiohttp.ClientConnectionError, TimeoutError):
@@ -1020,7 +1055,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "for pull; treating push as unconfirmed",
                     self.host,
                 )
-                await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+                await _remember()
                 return {
                     "success": True,
                     "queued": False,
@@ -1029,7 +1064,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             # Asleep mid-call: staged pull is authoritative.
             await self.async_stage_pull_bin(image_bytes)
-            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+            await _remember()
             payload = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
@@ -1056,7 +1091,7 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
             await self.async_stage_pull_bin(image_bytes)
-            await self.async_set_last_image(image_id=image_id, thumbnail=thumbnail)
+            await _remember()
             payload = {
                 "schema": _PENDING_SCHEMA,
                 "token": token,
@@ -1117,6 +1152,10 @@ class DigitalFramesCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self.async_set_last_image(
                         image_id=pending.get("image_id"),
                         thumbnail=base64.b64decode(thumb_b64) if thumb_b64 else None,
+                        wire_bytes=bin_bytes,
+                        # The original (if any) was stored when the send was
+                        # queued. Don't drop it just because the frame woke.
+                        clear_source=False,
                     )
                     _LOGGER.info("Pushed staged image to frame %s on wake", self.host)
                 except Exception as err:  # noqa: BLE001

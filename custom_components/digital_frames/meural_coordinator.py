@@ -134,6 +134,8 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         image_id: str | None = None,
         thumbnail: bytes | None = None,
         wire_bytes: bytes | None = None,
+        source_bytes: bytes | None = None,
+        clear_source: bool = True,
     ) -> None:
         import base64  # noqa: PLC0415
 
@@ -142,6 +144,17 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if wire_bytes is not None:
             self._last_wire_bytes = (
                 wire_bytes if len(wire_bytes) <= _MAX_WIRE_STORE_BYTES else None
+            )
+            # Disk copy is uncapped so Resend stays full quality even when
+            # the in-memory postcard used by orientation redisplay is dropped.
+            from .last_sent import async_store_last_sent  # noqa: PLC0415
+
+            await async_store_last_sent(
+                self.hass,
+                self.config_entry.entry_id,
+                wire_bytes=wire_bytes,
+                source_bytes=source_bytes,
+                clear_source=clear_source,
             )
         await self._preview_store.async_save(
             {
@@ -575,6 +588,7 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         image_id: str | None = None,
         thumbnail: bytes | None = None,
+        source_bytes: bytes | None = None,
     ) -> dict[str, Any]:
         """Send immediately (postcard + optional cloud pin). No sleep queue.
 
@@ -597,7 +611,10 @@ class MeuralCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Meural send to %s failed: %s", self.host, err)
             return {"success": False, "queued": False, "message": str(err)}
         await self.async_set_last_image(
-            image_id=image_id, thumbnail=thumbnail, wire_bytes=image_bytes
+            image_id=image_id,
+            thumbnail=thumbnail,
+            wire_bytes=image_bytes,
+            source_bytes=source_bytes,
         )
         return {"success": True, "queued": False}
 

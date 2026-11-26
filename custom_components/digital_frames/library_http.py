@@ -716,6 +716,7 @@ class DigitalFramesFramesView(HomeAssistantView):
             CONF_ORIENTATION_FOLLOW_DEVICE,
             ORIENTATION_AUTO,
         )
+        from .last_sent import frame_can_resend  # noqa: PLC0415
 
         for entry in hass.config_entries.async_entries(DOMAIN):
             if entry.data.get("kind") == "scenes_hub":
@@ -853,6 +854,9 @@ class DigitalFramesFramesView(HomeAssistantView):
                         # DigitalFramesCoordinator.last_thumbnail and
                         # DigitalFramesFrameThumbnailView below.
                         "has_thumbnail": getattr(coordinator, "last_thumbnail", None) is not None,
+                        # Full-quality resend is possible (library id or a
+                        # saved wire/source payload — not the preview alone).
+                        "can_resend": frame_can_resend(hass, coordinator),
                         # On-deck send (frame asleep/unreachable) -- see
                         # DigitalFramesCoordinator.pending_send. queued_image_id
                         # / queued_at let the panel show *what* is waiting,

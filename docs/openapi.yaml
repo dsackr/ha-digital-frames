@@ -46,6 +46,36 @@ paths:
                 type: string
                 format: binary
 
+  /api/digital_frames/frame/resend:
+    post:
+      summary: Resend a frame's last image
+      description: >
+        Re-pushes the last image sent to a frame at full quality. Library
+        images are re-encoded for the current orientation. Direct uploads
+        are re-encoded from the saved original. Asleep frames are queued.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entry_id:
+                  type: string
+                entity_id:
+                  type: string
+      responses:
+        '200':
+          description: Image was pushed or queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendImageResult'
+        '409':
+          description: The frame has no previously sent image to resend.
+
   /api/digital_frames/send_image:
     post:
       summary: Send raw image directly to a frame

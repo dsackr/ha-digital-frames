@@ -487,4 +487,47 @@ test.describe('Fraimic card', () => {
     const revoked = await page.evaluate(() => window.__revokedUrls);
     expect(revoked).toContain(stagedUrl);
   });
+
+  test('Resend is disabled until the frame has an image, then posts and confirms', async ({ page }) => {
+    await start({ frames: FRAMES });
+    await mountCard(page, baseUrl, { entry_id: 'entry_1' }, FRAMES);
+    await page.waitForFunction(
+      () => document.getElementById('card').shadowRoot.getElementById('btnResend')
+    );
+    expect((await cardQ(page, 'btnResend')).disabled).toBe(true);
+
+    const frames = [{ ...FRAMES[0], last_image_id: 'image_beach', can_resend: true }, FRAMES[1]];
+    await mockServer.stop();
+    await start({ frames, images: IMAGES });
+    await mountCard(page, baseUrl, { entry_id: 'entry_1' }, frames);
+    await page.waitForFunction(
+      () => !document.getElementById('card').shadowRoot.getElementById('btnResend').disabled
+    );
+    await page.evaluate(() => document.getElementById('card').shadowRoot.getElementById('btnResend').click());
+    await page.waitForFunction(() => {
+      const fb = document.getElementById('card').shadowRoot.getElementById('feedback');
+      return fb && fb.style.display === 'block' && fb.textContent.includes('Resent');
+    });
+    expect(mockServer.resendCalls).toEqual([
+      { entry_id: 'entry_1', entity_id: 'sensor.entry_1_battery' },
+    ]);
+  });
+
+  test('Resend shows the API error when the frame has nothing to send', async ({ page }) => {
+    const frames = [{ ...FRAMES[0], last_image_id: 'image_beach', can_resend: true }, FRAMES[1]];
+    await start({ frames, images: IMAGES });
+    mockServer.setResend({
+      status: 409,
+      body: { message: 'No image has been sent to this frame yet' },
+    });
+    await mountCard(page, baseUrl, { entry_id: 'entry_1' }, frames);
+    await page.waitForFunction(
+      () => !document.getElementById('card').shadowRoot.getElementById('btnResend').disabled
+    );
+    await page.evaluate(() => document.getElementById('card').shadowRoot.getElementById('btnResend').click());
+    await page.waitForFunction(() => {
+      const fb = document.getElementById('card').shadowRoot.getElementById('feedback');
+      return fb && fb.className.includes('error') && fb.textContent.includes('No image');
+    });
+  });
 });

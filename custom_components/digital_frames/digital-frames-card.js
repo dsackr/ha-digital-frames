@@ -746,6 +746,7 @@
             <button id="btnPhotos">🖼 Photos</button>
             <button id="btnDaily">✨ Daily</button>
             <button id="btnCrop" disabled title="Adjust how the current photo is cropped on the frame">✂ Crop</button>
+            <button id="btnResend" disabled title="Send the current image to the frame again">↻ Resend</button>
           </div>
 
           <div class="picker" id="picker">
@@ -801,6 +802,7 @@
       this._q('btnPhotos').addEventListener('click', () => this._togglePicker('photos'));
       this._q('btnDaily').addEventListener('click', () => this._togglePicker('daily'));
       this._q('btnCrop').addEventListener('click', () => this._openCrop());
+      this._q('btnResend').addEventListener('click', () => this._resend());
       this._q('albumSelect').addEventListener('change', () => this._loadPickerGrid());
       this._q('btnSend').addEventListener('click', () => this._send());
       this._q('btnCancel').addEventListener('click', () => this._unstage());
@@ -940,6 +942,13 @@
       }
     }
 
+    _canResend() {
+      const frame = this._frame;
+      if (!frame || this._staged) return false;
+      if (frame.can_resend) return true;
+      return !!(frame.last_image_id || frame.has_thumbnail);
+    }
+
     _refreshToolbar() {
       // Crop works on the library image currently on (or staged for) the
       // frame -- uploads and text skills have no library original to crop.
@@ -949,6 +958,45 @@
       btn.title = imageId
         ? 'Adjust how this photo is cropped on the frame'
         : 'Crop needs a library photo on the frame (uploads and daily feeds can\'t be re-cropped)';
+      const resend = this._q('btnResend');
+      if (resend && resend.textContent !== 'Resending…') {
+        const can = this._canResend();
+        resend.disabled = !can;
+        resend.title = can
+          ? 'Send the current image to the frame again'
+          : 'No image has been sent to this frame yet';
+      }
+    }
+
+    async _resend() {
+      const frame = this._frame;
+      if (!frame || !this._canResend()) return;
+      const btn = this._q('btnResend');
+      btn.disabled = true;
+      btn.textContent = 'Resending…';
+      this._hideFeedback();
+      try {
+        const resp = await fetch('/api/digital_frames/frame/resend', {
+          method: 'POST',
+          headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entry_id: frame.entry_id,
+            entity_id: frame.battery_entity_id || undefined,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.message || `HTTP ${resp.status}`);
+        if (data.queued) {
+          this._showFeedback('success', data.message || 'Frame is asleep — the image is queued and will be sent when it wakes up.');
+        } else {
+          this._showFeedback('success', 'Resent to the frame.');
+        }
+      } catch (err) {
+        this._showFeedback('error', err.message || 'Resend failed');
+      } finally {
+        btn.textContent = '↻ Resend';
+        this._refreshToolbar();
+      }
     }
 
     _cropTargetImageId() {
