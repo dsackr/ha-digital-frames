@@ -222,3 +222,4 @@ Notes on reading it:
 | 2026-10-24 | 9d18bab | backend-pytest | success | 656 passed, 2 warnings in 399.17s (0:06:39) | 65% | CI |
 | 2026-10-25 | ab46ade | backend-pytest | success | 658 passed, 2 warnings in 689.84s (0:11:29) | 65% | CI |
 | 2026-11-26 | 9102d15 | panel-playwright | success | 199 passed | — | CI |
+| 2026-11-26 | 9102d15 | backend-pytest | success | 671 passed, 2 warnings in 389.97s (0:06:29) | 66% | CI |
